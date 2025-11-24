@@ -1,0 +1,21 @@
+# Node
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Build artifacts
+dist/
+build/
+
+# Prisma engine files
+prisma/.cache/
+
+# Local environment files (just in case someone adds them)
+.env
+.env.*
+*.env*
+
+# Docker volumes
+mnt/
+volumes/
+tmp/

@@ -1,0 +1,119 @@
+// -----------------------------------------------------
+// BribeBank Prisma Schema (Parent + Child Accounts)
+// -----------------------------------------------------
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// -----------------------------------------------------
+// FAMILY
+// One family, many users, rewards, bounties
+// -----------------------------------------------------
+
+model Family {
+  id        String    @id @default(cuid())
+  name      String
+  createdAt DateTime  @default(now())
+
+  joinCode       String?   @unique
+  joinCodeExpiry DateTime?
+
+  users     User[]
+  bounties  Bounty[]
+  rewards   Reward[]
+}
+
+// -----------------------------------------------------
+// USER (Parent or Child)
+// -----------------------------------------------------
+
+model User {
+  id          String     @id @default(cuid())
+  familyId    String
+  family      Family     @relation(fields: [familyId], references: [id])
+
+  username    String     @unique
+  password    String
+  displayName String
+  role        Role       @default(CHILD) // PARENT or CHILD
+
+  createdAt   DateTime   @default(now())
+
+  notifications Notification[]
+  claims        Claim[]
+}
+
+enum Role {
+  PARENT
+  CHILD
+}
+
+// -----------------------------------------------------
+// BOUNTY (chores / tasks children can do)
+// -----------------------------------------------------
+
+model Bounty {
+  id         String    @id @default(cuid())
+  familyId   String
+  family     Family    @relation(fields: [familyId], references: [id])
+
+  title      String
+  emoji      String
+  rewardValue String   // e.g. "$5" or "Ice Cream"
+  isFCFS     Boolean   @default(false)
+
+  createdAt  DateTime  @default(now())
+}
+
+// -----------------------------------------------------
+// REWARD (redeemable rewards banks)
+// -----------------------------------------------------
+
+model Reward {
+  id         String    @id @default(cuid())
+  familyId   String
+  family     Family    @relation(fields: [familyId], references: [id])
+
+  title      String
+  emoji      String
+  description String?
+
+  createdAt  DateTime @default(now())
+  claims     Claim[]
+}
+
+// -----------------------------------------------------
+// CLAIM (a child redeems a reward)
+// -----------------------------------------------------
+
+model Claim {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id])
+
+  rewardId   String
+  reward     Reward    @relation(fields: [rewardId], references: [id])
+
+  createdAt  DateTime  @default(now())
+}
+
+// -----------------------------------------------------
+// NOTIFICATIONS
+// -----------------------------------------------------
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+
+  message   String
+  isRead    Boolean  @default(false)
+
+  createdAt DateTime @default(now())
+}
