@@ -1,7 +1,10 @@
 // bribebank-frontend/config.ts
 
-// Read the API URL from Vite's env variables.
-// In Docker / production this will be https://api.bribebank.homeflixlab.com
-// In dev you can override it via VITE_API_URL=http://localhost:3040
+// API base URL is provided by Vite at build time.
+// In production: injected via docker-compose → VITE_API_URL
+// In development: can be overridden manually via .env or defaults to localhost.
 export const API_BASE =
-  import.meta.env.VITE_API_URL || "https://api.bribebank.homeflixlab.com";
+  import.meta?.env?.VITE_API_URL || "http://localhost:3040";
+
+// Helper used everywhere to construct endpoint URLs.
+export const apiUrl = (path: string) => `${API_BASE}${path}`;

@@ -1,5 +1,5 @@
 import { AssignedPrize, PrizeStatus, PrizeTemplate, User, UserRole, PrizeType, HistoryEvent, AppNotification, Family, BountyTemplate, AssignedBounty, BountyStatus } from '../types';
-
+import { apiUrl } from "../config";
 const DB_KEY = 'famrewards_production_db_v3'; // Bumped version
 const SESSION_KEY = 'famrewards_session_v1';
 
@@ -65,7 +65,7 @@ export const storageService = {
   ): Promise<User> => {
     // 1. Hit backend API
     const response = await fetch(
-      "https://api.bribebank.homeflixlab.com/auth/register-parent",
+      apiUrl("/auth/register-parent"),
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -89,7 +89,7 @@ export const storageService = {
 
     // 3. Fetch canonical user profile
     const meRes = await fetch(
-      "https://api.bribebank.homeflixlab.com/auth/me",
+      apiUrl("/auth/me"),
       {
         headers: { Authorization: `Bearer ${data.token}` },
       }
@@ -165,7 +165,7 @@ export const storageService = {
 
 
   login: async (username: string, password: string): Promise<User> => {
-    const res = await fetch("https://api.bribebank.homeflixlab.com/auth/login", {
+    const res = await fetch(apiUrl("/auth/login"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username, password }),
@@ -176,7 +176,7 @@ export const storageService = {
     const { token } = await res.json();
     localStorage.setItem("bribebank_token", token);
 
-    const meRes = await fetch("https://api.bribebank.homeflixlab.com/auth/me", {
+    const meRes = await fetch(apiUrl("/auth/me"), {
       headers: { Authorization: `Bearer ${token}` },
     });
 

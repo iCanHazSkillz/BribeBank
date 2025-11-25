@@ -1,0 +1,64 @@
+version: "3.9"
+
+services:
+
+  bribebank-db:
+    image: postgres:15
+    container_name: bribebank-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: bribebank
+    volumes:
+      - ${PG_VOLUME_PATH}:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - bribebank_net
+
+  bribebank-api:
+    build:
+      context: ./bribebank-api
+    container_name: bribebank-api
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      PORT: 3001
+      NODE_ENV: "production"
+    depends_on:
+      bribebank-db:
+        condition: service_healthy
+    ports:
+      - "3040:3001"
+    networks:
+      - bribebank_net
+      - npm_net
+
+  bribebank-frontend:
+    build:
+      context: ./bribebank-frontend
+      args:
+        VITE_API_URL: ${VITE_API_URL}
+    container_name: bribebank-frontend
+    restart: unless-stopped
+    environment:
+      VITE_API_URL: ${VITE_API_URL}
+    networks:
+      - bribebank_net
+      - npm_net
+
+networks:
+  bribebank_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.98.0.0/24
+
+  npm_net:
+    external: true
+    name: nginx-proxy-manager_default
