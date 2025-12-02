@@ -12,7 +12,6 @@ prisma/.cache/
 
 # Local environment files (just in case someone adds them)
 .env
-*.env*
 
 # Docker volumes
 mnt/

@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { AssignedPrize, PrizeStatus, PrizeTemplate, User, PrizeType, HistoryEvent, AppNotification, AssignedBounty, BountyTemplate, BountyStatus } from '../types';
+import React, { useState, useEffect, useRef } from 'react';
+import { AssignedPrize, PrizeStatus, PrizeTemplate, User, PrizeType, HistoryEvent, AppNotification, BountyAssignment, BountyTemplate, BountyStatus } from '../types';
 import { storageService } from '../services/storageService';
+import { API_BASE } from "../config";
 import { PrizeCard } from './PrizeCard';
-import { History, Ticket, Bell, X, CheckCircle, XCircle, ListTodo, Play, Trash2, ThumbsUp, ThumbsDown } from 'lucide-react';
+import { History, Ticket, Bell, X, CheckCircle, XCircle, ListTodo, Play, Trash2, ThumbsUp, ThumbsDown, gift } from 'lucide-react';
+import { SseEvent } from "../types/sseEvents";
 
 interface WalletViewProps {
   currentUser: User;
@@ -22,32 +24,85 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser }) => {
   
   // Data State
   const [myPrizes, setMyPrizes] = useState<AssignedPrize[]>([]);
-  const [myBounties, setMyBounties] = useState<AssignedBounty[]>([]);
+  const [myBounties, setMyBounties] = useState<BountyAssignment[]>([]);
   const [templates, setTemplates] = useState<PrizeTemplate[]>([]);
   const [bountyTemplates, setBountyTemplates] = useState<BountyTemplate[]>([]);
   const [historyEvents, setHistoryEvents] = useState<HistoryEvent[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [familyUsers, setFamilyUsers] = useState<User[]>([]);
-  const [toast, setToast] = useState<{message: string, type: 'info' | 'success'} | null>(null);
+  const [toast, setToast] = useState<{message: string, type: 'info' | 'success' | 'error' } | null>(null);
 
   // UI State
   const [showNotifications, setShowNotifications] = useState(false);
 
-  const refreshData = () => {
-    const familyId = currentUser.familyId;
-    setMyPrizes(storageService.getAssignments(familyId).filter(a => a.userId === currentUser.id));
-    setMyBounties(storageService.getBountyAssignments(familyId).filter(b => b.userId === currentUser.id));
-    setTemplates(storageService.getTemplates(familyId));
-    setBountyTemplates(storageService.getBountyTemplates(familyId));
-    setHistoryEvents(storageService.getHistoryEvents(currentUser.id));
-    setNotifications(storageService.getNotifications(currentUser.id).filter(n => !n.isRead));
-    setFamilyUsers(storageService.getFamilyUsers(familyId));
+  type ConfirmOptions = {
+    title: string;
+    message: string;
+    confirmLabel?: string;
+    cancelLabel?: string;
+    destructive?: boolean;
   };
+
+  const [confirmState, setConfirmState] = useState<ConfirmOptions | null>(null);
+  const confirmResolveRef = useRef<(result: boolean) => void>();
+
+  const confirm = (options: ConfirmOptions): Promise<boolean> => {
+    return new Promise<boolean>((resolve) => {
+      confirmResolveRef.current = resolve;
+      setConfirmState(options);
+    });
+  };
+
+  const refreshData = async () => {
+    const familyId = currentUser.familyId;
+    if (!familyId) return;
+
+    try {
+      const [
+        rewardAssignmentsFromApi,
+        rewardTemplatesFromApi,
+        bountyAssignmentsFromApi,
+        bountyTemplatesFromApi,
+        usersFromApi,
+        historyFromApi,
+        notificationsFromApi,
+      ] = await Promise.all([
+        storageService.getAssignments(familyId),          // prizes
+        storageService.getTemplates(familyId),           // prize templates
+        storageService.getBountyAssignments(familyId),   // bounty assignments
+        storageService.getBountyTemplates(familyId),     // bounty templates
+        storageService.getFamilyUsers(familyId),
+        storageService.getHistoryEvents(familyId, currentUser.id),
+        storageService.getNotifications(currentUser.id),
+      ]);
+
+      setMyPrizes(
+        rewardAssignmentsFromApi.filter(
+          (a) => a.userId === currentUser.id
+        )
+      );
+      setTemplates(rewardTemplatesFromApi);
+
+      setMyBounties(
+        bountyAssignmentsFromApi.filter(
+          (b) => b.userId === currentUser.id
+        )
+      );
+      setBountyTemplates(bountyTemplatesFromApi);
+
+      setFamilyUsers(usersFromApi);
+      setHistoryEvents(historyFromApi);
+      setNotifications(
+        notificationsFromApi.filter((n) => !n.isRead)
+      );
+    } catch (err) {
+      console.error("Failed to refresh wallet data", err);
+    }
+  };
+
 
   useEffect(() => {
     refreshData();
-    const interval = setInterval(refreshData, 2000);
-    return () => clearInterval(interval);
   }, [currentUser.id]);
 
   useEffect(() => {
@@ -57,57 +112,170 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser }) => {
       }
   }, [toast]);
 
+  useEffect(() => {
+    const token = storageService.getAuthToken();
+    if (!token || !currentUser?.familyId) return;
+
+    const source = new EventSource(`${API_BASE}/events?token=${token}`);
+
+    source.onmessage = (msg) => {
+      try {
+        const event: SseEvent = JSON.parse(msg.data);
+
+        switch (event.type) {
+          case "CONNECTED":
+            console.log("[SSE] connected");
+            break;
+
+          case "CHILD_ACTION":
+            refreshData();
+            break;
+
+          case "TEMPLATE_UPDATE":
+            refreshData();
+            break;
+
+          case "WALLET_UPDATE":
+            refreshData();
+            break;
+
+          default:
+            console.warn("Unknown SSE event:", event);
+        }
+      } catch (err) {
+        console.error("Invalid SSE event", err);
+      }
+    };
+
+    return () => source.close();
+  }, [currentUser?.familyId]);
+
   const resolveUserName = (id: string) => familyUsers.find(u => u.id === id)?.name || 'Admin';
 
   // Actions
-  const handleClaim = (assignmentId: string) => {
-    storageService.claimPrize(assignmentId);
-    setToast({ message: "Requested! Waiting for parents...", type: 'info' });
-    refreshData();
+  const handleClaim = async (assignmentId: string) => {
+    try {
+      await storageService.claimPrize(assignmentId);
+      setToast({
+        message: "Requested! Waiting for parents...",
+        type: "info",
+      });
+      await refreshData();
+    } catch (err) {
+      console.error("Failed to claim prize", err);
+      setToast({
+        message: "Failed to claim prize. Please try again.",
+        type: "error",
+      });
+    }
   };
 
-  const handleBountyAction = (bountyId: string, action: 'start' | 'finish' | 'reject') => {
+
+  const handleBountyAction = async (
+    assignmentId: string,
+    action: 'start' | 'finish' | 'reject'
+  ) => {
+    try {
       if (action === 'start') {
-          storageService.updateBountyStatus(bountyId, BountyStatus.IN_PROGRESS);
-          setToast({ message: "Task started!", type: 'info' });
+        await storageService.updateBountyStatus(
+          assignmentId,
+          BountyStatus.IN_PROGRESS
+        );
+        setToast({ message: "Task started!", type: 'info' });
       } else if (action === 'finish') {
-          storageService.updateBountyStatus(bountyId, BountyStatus.COMPLETED);
-          setToast({ message: "Marked as done! Waiting for verification.", type: 'success' });
+        await storageService.updateBountyStatus(
+          assignmentId,
+          BountyStatus.COMPLETED
+        );
+        setToast({
+          message: "Marked as done! Waiting for verification.",
+          type: 'success',
+        });
       } else if (action === 'reject') {
-          if(window.confirm("Reject this task?")) {
-              storageService.deleteBountyAssignment(bountyId);
-          }
+
+        const ok = await confirm({
+          title: "Reject This Task?",
+          message: "Reject this task? This cannot be undone.",
+          confirmLabel: "Reject Task",
+          cancelLabel: "Cancel",
+          destructive: true,
+        });
+
+        if (ok) {
+          await storageService.deleteBountyAssignment(assignmentId);
+          setToast({ message: "Task rejected.", type: 'info' });
+        }
       }
-      refreshData();
-  };
-  
-  const handleDismissNotification = (id: string) => {
-      storageService.markNotificationRead(id);
-      refreshData();
+
+      await refreshData();
+    } catch (err) {
+      console.error("handleBountyAction error:", err);
+      setToast({ message: "Something went wrong with this task.", type: 'error' });
+    }
   };
 
-  const handleClearAllNotifications = () => {
-      storageService.markAllNotificationsRead(currentUser.id);
-      refreshData();
+  const handleDismissNotification = async (id: string) => {
+    try {
+      await storageService.markNotificationRead(id);
+      await refreshData();
+    } catch (err) {
+      console.error("Failed to dismiss notification", err);
+      setToast({
+        message: "Failed to update notification.",
+        type: "error",
+      });
+    }
+  };
+
+  const handleClearAllNotifications = async () => {
+    try {
+      await storageService.markAllNotificationsRead(currentUser.id);
+      await refreshData();
       setShowNotifications(false);
+    } catch (err) {
+      console.error("Failed to clear notifications", err);
+      setToast({
+        message: "Failed to clear notifications.",
+        type: "error",
+      });
+    }
   };
 
-  // Group Identical Rewards
-  const groupedPrizes: GroupedPrize[] = Object.values(myPrizes.reduce((acc, prize) => {
-      if(prize.status === PrizeStatus.REDEEMED) return acc;
-      const key = `${prize.templateId}-${prize.status}`;
+const groupedPrizes: GroupedPrize[] = Object.values(
+    myPrizes.reduce((acc, prize) => {
+      if (prize.status === PrizeStatus.REDEEMED) return acc;
+
+      const key = `${prize.templateId ?? 'snapshot'}-${prize.status}`;
+
       if (!acc[key]) {
-          const template = templates.find(t => t.id === prize.templateId) || {
-              id: 'unknown', familyId: currentUser.familyId, title: 'Unknown', description: '?', emoji: '❓', type: PrizeType.CUSTOM
-          };
-          acc[key] = {
-              templateId: prize.templateId, template, ids: [], count: 0, status: prize.status, assignedBy: resolveUserName(prize.assignedBy)
-          };
+        const template = templates.find((t) => t.id === prize.templateId);
+
+        const resolvedTemplate: PrizeTemplate = {
+          id: template?.id || 'snapshot',
+          familyId: prize.familyId,
+          title: prize.title || template?.title || 'Unknown',
+          description:
+            prize.description ?? template?.description ?? '?',
+          emoji: prize.emoji || template?.emoji || '❓',
+          type: prize.type ?? template?.type ?? PrizeType.CUSTOM,
+          themeColor: prize.themeColor ?? template?.themeColor
+        };
+
+        acc[key] = {
+          templateId: prize.templateId ?? 'snapshot',
+          template: resolvedTemplate,
+          ids: [],
+          count: 0,
+          status: prize.status,
+          assignedBy: resolveUserName(prize.assignedBy)
+        };
       }
+
       acc[key].ids.push(prize.id);
       acc[key].count++;
       return acc;
-  }, {} as Record<string, GroupedPrize>));
+    }, {} as Record<string, GroupedPrize>)
+  );
 
   // Active Bounties
   const activeBounties = myBounties.filter(b => b.status !== BountyStatus.VERIFIED);
@@ -219,6 +387,58 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser }) => {
           </>
         )}
 
+        {confirmState && (
+          <div
+            className="fixed inset-0 bg-black/60 z-[80] flex items-center justify-center"
+            onClick={() => {
+              // clicking backdrop = cancel
+              confirmResolveRef.current?.(false);
+              setConfirmState(null);
+            }}
+          >
+            <div
+              className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 mx-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className="text-lg font-bold text-gray-900 mb-2">
+                {confirmState.title}
+              </h3>
+              <p className="text-sm text-gray-600 mb-6">
+                {confirmState.message}
+              </p>
+
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  className="px-4 py-2 text-sm rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-50"
+                  onClick={() => {
+                    confirmResolveRef.current?.(false);
+                    setConfirmState(null);
+                  }}
+                >
+                  {confirmState.cancelLabel ?? "Cancel"}
+                </button>
+
+                <button
+                  type="button"
+                  className={
+                    "px-4 py-2 text-sm rounded-xl text-white " +
+                    (confirmState.destructive
+                      ? "bg-red-500 hover:bg-red-600"
+                      : "bg-blue-600 hover:bg-blue-700")
+                  }
+                  onClick={() => {
+                    confirmResolveRef.current?.(true);
+                    setConfirmState(null);
+                  }}
+                >
+                  {confirmState.confirmLabel ?? "Confirm"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {tab === 'tasks' && (
             <div className="space-y-4">
                 {activeBounties.length === 0 && <div className="text-center py-10 text-gray-400 italic">No active tasks. Good job!</div>}
@@ -238,7 +458,7 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser }) => {
                                 actionLabel={null} // We render custom buttons below
                                 onClick={undefined} // Remove click handler from card body
                                 disabled={b.status === BountyStatus.COMPLETED}
-                                themeColor="bg-white border-indigo-200 text-gray-900"
+                                themeColor= {t.themeColor || "bg-white border-indigo-200 text-gray-900"}
                                 customActions={
                                     <div className="flex gap-2 mt-4">
                                         {b.status === BountyStatus.OFFERED ? (
@@ -293,8 +513,8 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser }) => {
                              <span className="block text-[10px] text-indigo-500">By {event.assignerName}</span>
                           </p>
                       </div>
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${event.action.includes('APPROVED') || event.action.includes('VERIFIED') ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-500'}`}>
-                          {event.action.includes('APPROVED') || event.action.includes('VERIFIED') ? <CheckCircle size={18}/> : <XCircle size={18}/>}
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${event.action.includes('APPROVED') || event.action.includes('VERIFIED') || event.action.includes('ASSIGNED') || event.action.includes('ACCEPTED') || event.action.includes('COMPLETED') || event.action.includes('CLAIMED') ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-500'}`}>
+                          {event.action.includes('APPROVED') || event.action.includes('VERIFIED') || event.action.includes('ASSIGNED') || event.action.includes('ACCEPTED') || event.action.includes('COMPLETED') || event.action.includes('CLAIMED') ? <CheckCircle size={18}/> : <XCircle size={18}/>}
                       </div>
                   </div>
                 ))}

@@ -56,13 +56,19 @@ export interface PrizeTemplate {
 export interface AssignedPrize {
   id: string;
   familyId: string;
-  templateId: string;
+  templateId?: string | null;
   userId: string;
-  assignedBy: string; // Admin ID
+  assignedBy: string;
   assignedAt: number;
   status: PrizeStatus;
   claimedAt?: number;
   redeemedAt?: number;
+
+  title: string;
+  emoji: string;
+  description?: string;
+  type: PrizeType;
+  themeColor?: string;
 }
 
 // BOUNTY INTERFACES
@@ -74,6 +80,7 @@ export interface BountyTemplate {
   rewardValue: string; // "$5" or "Screen Time" description
   rewardTemplateId?: string; // Optional: if linked to an existing prize template
   isFCFS?: boolean; // First Come First Served
+  themeColor?: string | null;
 }
 
 export interface AssignedBounty {

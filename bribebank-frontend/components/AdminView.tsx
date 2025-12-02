@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { AssignedPrize, PrizeStatus, PrizeTemplate, User, PrizeType, UserRole, HistoryEvent, BountyTemplate, AssignedBounty, BountyStatus, AppNotification } from '../types';
 import { storageService } from '../services/storageService';
+import { API_BASE } from "../config";
 import { PrizeCard } from './PrizeCard';
 import { Trash2, Check, X, Gift, Edit2, CheckCircle, AlertCircle, UserPlus, Shield, User as UserIcon, KeyRound, History, Plus, ListTodo, CircleDollarSign, Search, Zap, Bell, Settings } from 'lucide-react';
+import { SseEvent } from "../types/sseEvents";
 
 interface AdminViewProps {
   currentUser: User;
@@ -57,6 +59,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser }) => {
   const [bountyRewardValue, setBountyRewardValue] = useState('');
   const [bountyEmoji, setBountyEmoji] = useState('🧹');
   const [bountyFCFS, setBountyFCFS] = useState(false);
+  const [bountyColor, setBountyColor] = useState(PASTEL_COLORS[6]);
 
   // User Management State
   const [userFormView, setUserFormView] = useState(false);
@@ -74,22 +77,79 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser }) => {
   // UI State
   const [toast, setToast] = useState<{message: string, type: 'success' | 'error'} | null>(null);
 
-  const refreshData = () => {
+  type ConfirmOptions = {
+    title: string;
+    message: string;
+    confirmLabel?: string;
+    cancelLabel?: string;
+    destructive?: boolean;
+  };
+
+  const [confirmState, setConfirmState] = useState<ConfirmOptions | null>(null);
+  const confirmResolveRef = useRef<(result: boolean) => void>();
+
+  const confirm = (options: ConfirmOptions): Promise<boolean> => {
+    return new Promise<boolean>((resolve) => {
+      confirmResolveRef.current = resolve;
+      setConfirmState(options);
+    });
+  };
+
+
+  const refreshData = async () => {
     if (!currentUser.familyId) return;
-    setUsers(storageService.getFamilyUsers(currentUser.familyId));
-    setAssignments(storageService.getAssignments(currentUser.familyId));
-    setBountyAssignments(storageService.getBountyAssignments(currentUser.familyId));
-    setTemplates(storageService.getTemplates(currentUser.familyId));
-    setBountyTemplates(storageService.getBountyTemplates(currentUser.familyId));
-    // Sort history by newest first
-    setHistory(storageService.getFamilyHistory(currentUser.familyId).sort((a, b) => b.timestamp - a.timestamp));
-    setNotifications(storageService.getNotifications(currentUser.id).filter(n => !n.isRead));
+    const familyId = currentUser.familyId;
+
+    try {
+      const [
+        templatesFromApi,
+        assignmentsFromApi,
+        bountyTemplatesFromApi,
+        bountyAssignmentsFromApi,
+        usersFromApi,
+        historyFromApi,
+        notificationsFromApi,
+      ] = await Promise.all([
+        storageService.getTemplates(familyId),         // Reward templates
+        storageService.getAssignments(familyId),       // Assigned rewards
+        storageService.getBountyTemplates(familyId),   // Bounty templates
+        storageService.getBountyAssignments(familyId), // Assigned bounties
+        storageService.getFamilyUsers(familyId),
+        storageService.getFamilyHistory(familyId),
+        storageService.getNotifications(currentUser.id),
+      ]);
+
+      //----------------------------------------------------
+      // Rewards
+      //----------------------------------------------------
+      setTemplates(templatesFromApi);
+      setAssignments(assignmentsFromApi);
+
+      //----------------------------------------------------
+      // Bounties
+      //----------------------------------------------------
+      setBountyTemplates(bountyTemplatesFromApi);
+      setBountyAssignments(bountyAssignmentsFromApi);
+      //----------------------------------------------------
+      // Users
+      //----------------------------------------------------
+      setUsers(usersFromApi);
+
+      //----------------------------------------------------
+      // History + notifications (from backend)
+      //----------------------------------------------------
+      setHistory(historyFromApi);
+      setNotifications(
+        notificationsFromApi.filter((n) => !n.isRead)
+      );
+
+    } catch (err) {
+      console.error("Failed to refresh from backend", err);
+    }
   };
 
   useEffect(() => {
     refreshData();
-    const interval = setInterval(refreshData, 3000);
-    return () => clearInterval(interval);
   }, [currentUser]);
 
   useEffect(() => {
@@ -99,79 +159,250 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser }) => {
     }
   }, [toast]);
 
+  useEffect(() => {
+    const token = storageService.getAuthToken();
+    if (!token || !currentUser?.familyId) return;
+
+    const source = new EventSource(`${API_BASE}/events?token=${token}`);
+
+    source.onmessage = (msg) => {
+      try {
+        const event: SseEvent = JSON.parse(msg.data);
+
+        switch (event.type) {
+          case "CONNECTED":
+            console.log("[SSE] connected");
+            break;
+
+          case "CHILD_ACTION":
+            refreshData();
+            break;
+
+          case "TEMPLATE_UPDATE":
+            refreshData();
+            break;
+
+          case "WALLET_UPDATE":
+            refreshData();
+            break;
+
+          default:
+            console.warn("Unknown SSE event:", event);
+        }
+      } catch (err) {
+        console.error("Invalid SSE event", err);
+      }
+    };
+
+    return () => source.close();
+  }, [currentUser?.familyId]);
+
+
   const showToast = (message: string, type: 'success' | 'error') => {
       setToast({ message, type });
   };
 
   const resetForms = () => {
-      setPrizeTitle(''); setPrizeDesc(''); setPrizeEmoji('🎁'); setPrizeColor(PASTEL_COLORS[6]);
-      setBountyTitle(''); setBountyRewardValue(''); setBountyEmoji('🧹'); setBountyFCFS(false);
-      setEditingId(null);
+    setPrizeTitle(''); setPrizeDesc(''); setPrizeEmoji('🎁'); setPrizeColor(PASTEL_COLORS[6]);
+    setBountyTitle(''); setBountyRewardValue(''); setBountyEmoji('🧹'); setBountyFCFS(false); setBountyColor(PASTEL_COLORS[6]);
+    setEditingId(null);
   };
 
   // --- ACTIONS ---
 
-  const handleBulkAssign = () => {
-    if (selectedUsers.length === 0) return showToast("Select at least one child.", 'error');
-    
-    if (assignSubTab === 'rewards') {
-        if (selectedTemplateIds.length === 0) return;
-        let count = 0;
-        selectedUsers.forEach(userId => {
-            selectedTemplateIds.forEach(tid => {
-                const t = templates.find(temp => temp.id === tid);
-                if(t) { storageService.assignPrize(t, userId, currentUser.id); count++; }
-            });
-        });
-        showToast(`Sent ${count} reward(s)!`, 'success');
-        setSelectedTemplateIds([]);
-    } else {
-        if (selectedBountyTemplateIds.length === 0) return;
-        let count = 0;
-        selectedUsers.forEach(userId => {
-            selectedBountyTemplateIds.forEach(tid => {
-                const t = bountyTemplates.find(temp => temp.id === tid);
-                if(t) { storageService.assignBounty(t, userId, currentUser.id); count++; }
-            });
-        });
-        showToast(`Assigned ${count} task(s)!`, 'success');
-        setSelectedBountyTemplateIds([]);
+const handleBulkAssign = async () => {
+  if (selectedUsers.length === 0) {
+    showToast("Select at least one child.", "error");
+    return;
+  }
+
+  try {
+    // --------------------------------------------------------
+    // REWARDS
+    // --------------------------------------------------------
+    if (assignSubTab === "rewards") {
+      if (selectedTemplateIds.length === 0) return;
+
+      let count = 0;
+
+      for (const userId of selectedUsers) {
+        for (const templateId of selectedTemplateIds) {
+          const template = templates.find(t => t.id === templateId);
+          if (!template) continue;
+
+          await storageService.assignPrize(
+            template,          // full PrizeTemplate object
+            userId,            // child id
+            currentUser.id     // admin id (not actually used right now)
+          );
+
+          count++;
+        }
+      }
+      showToast(`Assigned ${count} reward(s)!`, "success");
+      setSelectedTemplateIds([]);
     }
-    
+
+    // --------------------------------------------------------
+    // BOUNTIES (leave as-is)
+    // --------------------------------------------------------
+    else if (assignSubTab === "bounties") {
+      if (selectedBountyTemplateIds.length === 0) return;
+
+      let count = 0;
+
+      for (const userId of selectedUsers) {
+        for (const templateId of selectedBountyTemplateIds) {
+          const bounty = bountyTemplates.find(t => t.id === templateId);
+          if (!bounty) continue;
+
+          await storageService.assignBounty(
+            currentUser.familyId,
+            bounty.id,
+            userId
+          );
+
+          count++;
+        }
+      }
+
+      showToast(`Assigned ${count} task(s)!`, "success");
+      setSelectedBountyTemplateIds([]);
+    }
+
+    // --------------------------------------------------------
+    // FINAL CLEANUP
+    // --------------------------------------------------------
     setSelectedUsers([]);
-    refreshData();
+    await refreshData();
+
+  } catch (err) {
+    console.error("Bulk assignment error:", err);
+    showToast("Failed to assign some items. Check console.", "error");
+  }
+};
+
+
+  const handleSaveTemplate = async () => {
+    try {
+      // ------------------------------------
+      // REWARD TEMPLATE
+      // ------------------------------------
+      if (createMode === "reward") {
+        if (!prizeTitle || !prizeDesc) return;
+
+        const reward: PrizeTemplate = {
+          id: editingId || Date.now().toString(),  // numeric = new
+          familyId: currentUser.familyId,
+          title: prizeTitle,
+          description: prizeDesc,
+          emoji: prizeEmoji,
+          type: PrizeType.PRIVILEGE,
+          themeColor: prizeColor,
+        };
+
+        try {
+          await storageService.saveTemplate(reward);
+          showToast("Reward template saved!", "success");
+          await refreshData();
+        } catch (err) {
+          console.error("Failed to save reward template", err);
+          showToast("Failed to save reward", "error");
+          return;
+        }
+      }
+
+      // ------------------------------------
+      // BOUNTY TEMPLATE
+      // ------------------------------------
+      else if (createMode === "bounty") {
+        if (!bountyTitle || !bountyRewardValue) return;
+
+        const bounty: BountyTemplate = {
+          id: editingId || Date.now().toString(), // numeric IDs = create
+          familyId: currentUser.familyId,
+          title: bountyTitle,
+          emoji: bountyEmoji,
+          rewardValue: bountyRewardValue,
+          rewardTemplateId: undefined, // not used yet
+          isFCFS: bountyFCFS,
+          themeColor: bountyColor,
+        };
+
+        try {
+          await storageService.saveBountyTemplate(bounty);
+          showToast("Bounty template saved!", "success");
+          await refreshData();
+        } catch (err) {
+          console.error("Failed to save bounty template", err);
+          showToast("Failed to save bounty", "error");
+          return;
+        }
+      }
+
+      // ------------------------------------
+      // CLEANUP
+      // ------------------------------------
+      resetForms();
+      setEditingId(null);
+      setTab("assign");
+    } catch (err) {
+      console.error("Unexpected error in handleSaveTemplate:", err);
+      showToast("Something went wrong", "error");
+    }
   };
 
-  const handleSaveTemplate = () => {
-      if (createMode === 'reward') {
-          if(!prizeTitle || !prizeDesc) return;
-          const t: PrizeTemplate = {
-              id: editingId || Date.now().toString(),
-              familyId: currentUser.familyId,
-              title: prizeTitle,
-              description: prizeDesc,
-              emoji: prizeEmoji,
-              type: PrizeType.CUSTOM,
-              themeColor: prizeColor
-          };
-          storageService.saveTemplate(t);
-          showToast("Reward template saved!", 'success');
-      } else {
-          if(!bountyTitle || !bountyRewardValue) return;
-          const b: BountyTemplate = {
-              id: editingId || 'bt_' + Date.now(),
-              familyId: currentUser.familyId,
-              title: bountyTitle,
-              emoji: bountyEmoji,
-              rewardValue: bountyRewardValue,
-              isFCFS: bountyFCFS
-          };
-          storageService.saveBountyTemplate(b);
-          showToast("Task template saved!", 'success');
-      }
-      resetForms();
-      refreshData();
-      setTab('assign');
+  const handleApprovePrize = async (assignmentId: string) => {
+    try {
+      await storageService.approvePrize(assignmentId);
+      await refreshData();
+      showToast("Approved!", "success");
+    } catch (err) {
+      console.error("Failed to approve prize", err);
+      showToast("Failed to approve prize", "error");
+    }
+  };
+
+  const handleRejectPrize = async (assignmentId: string) => {
+    const ok = await confirm({
+      title: "Deny Claim?",
+      message: "Are you sure you want to deny this claim. The reward will remain in the child's wallet.",
+      confirmLabel: "Deny",
+      cancelLabel: "Cancel",
+      destructive: false,
+    });
+
+    if (!ok) return;
+
+    try {
+      await storageService.rejectClaim(assignmentId);
+      await refreshData();
+      showToast("Denied.", "success");
+    } catch (err) {
+      console.error("Failed to deny prize", err);
+      showToast("Failed to deny prize", "error");
+    }
+  };
+
+  const handleDeleteAssignment = async (assignmentId: string) => {
+    const ok = await confirm({
+      title: "Delete Reward Assignment?",
+      message: "Permanently delete this reward from your child's wallet? This cannot be undone.",
+      confirmLabel: "Delete Reward",
+      cancelLabel: "Cancel",
+      destructive: true,
+    });
+
+    if (!ok) return;
+
+    try {
+      await storageService.deleteAssignment(assignmentId);
+      await refreshData();
+      showToast("Deleted.", "success");
+    } catch (err) {
+      console.error("Failed to delete assignment", err);
+      showToast("Failed to delete assignment", "error");
+    }
   };
 
   const handleEditReward = (t: PrizeTemplate) => {
@@ -193,14 +424,23 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser }) => {
       setBountyRewardValue(b.rewardValue);
       setBountyEmoji(b.emoji);
       setBountyFCFS(!!b.isFCFS);
+      setBountyColor(b.themeColor || PASTEL_COLORS[9]);
       setTab('create');
   };
 
-  const handleDeleteTemplate = (id: string, isBounty: boolean) => {
-      if(window.confirm('Delete this template?')) {
-          if(isBounty) storageService.deleteBountyTemplate(id);
-          else storageService.deleteTemplate(id);
-          refreshData();
+  const handleDeleteTemplate = async (id: string, isBounty: boolean) => {
+      const ok = await confirm({
+        title: "Delete Template?",
+        message: "Permanently delete this template? This cannot be undone.",
+        confirmLabel: "Delete Template",
+        cancelLabel: "Cancel",
+        destructive: true,
+      });
+
+      if (ok) {
+          if(isBounty) await storageService.deleteBountyTemplate(id);
+          else await storageService.deleteTemplate(id);
+          await refreshData();
           showToast("Deleted.", 'success');
 
           setAssignSubTab(isBounty ? 'bounties' : 'rewards');
@@ -209,9 +449,9 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser }) => {
       }
   };
 
-  const handleVerifyBounty = (id: string) => {
-      storageService.verifyBounty(id);
-      refreshData();
+  const handleVerifyBounty = async (id: string) => {
+      await storageService.verifyBounty(id);
+      await refreshData();
       showToast("Task verified! Reward sent.", 'success');
   };
 
@@ -245,68 +485,97 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser }) => {
       setNewUserColor(AVATAR_COLORS[0]);
   };
 
-  const handleSaveUser = () => {
-      try {
-          if (!newUserName || !newUserUsername) {
-              showToast("Name and username are required", 'error');
-              return;
-          }
-
-          if (editingUser) {
-              // Update existing
-              storageService.updateUser(currentUser.id, editingUser.id, {
-                  name: newUserName,
-                  username: newUserUsername,
-                  role: newUserRole,
-                  avatarColor: newUserColor,
-                  ...(newUserPassword ? { password: newUserPassword } : {})
-              });
-              showToast("User updated successfully", 'success');
-          } else {
-              // Create new
-              if (!newUserPassword) {
-                  showToast("Password is required for new users", 'error');
-                  return;
-              }
-              storageService.createUser(currentUser, newUserName, newUserUsername, newUserPassword, newUserRole, newUserColor);
-              showToast("User created successfully", 'success');
-          }
-          handleCloseUserView();
-          refreshData();
-      } catch(e: any) {
-          showToast(e.message, 'error');
-      }
-  };
-
-  const handleDeleteUser = (id: string) => {
-    if (id === currentUser.id) {
-        showToast("You cannot delete yourself.", 'error');
+  const handleSaveUser = async () => {
+    try {
+      if (!newUserName || !newUserUsername) {
+        showToast("Name and username are required", "error");
         return;
-    }
-    if (window.confirm("Permanently delete this user? This cannot be undone.")) {
-        storageService.deleteUser(currentUser.id, id);
-        refreshData();
-        handleCloseUserView();
-        showToast("User deleted.", 'success');
+      }
+
+      if (editingUser) {
+        await storageService.updateUser(currentUser.id, editingUser.id, {
+          name: newUserName,
+          username: newUserUsername,
+          role: newUserRole,
+          avatarColor: newUserColor,
+          ...(newUserPassword ? { password: newUserPassword } : {}),
+        } as any);
+        showToast("User updated successfully", "success");
+      } else {
+        if (!newUserPassword) {
+          showToast("Password is required for new users", "error");
+          return;
+        }
+        await storageService.createUser(
+          currentUser,
+          newUserName,
+          newUserUsername,
+          newUserPassword,
+          newUserRole,
+          newUserColor
+        );
+        showToast("User created successfully", "success");
+      }
+
+      handleCloseUserView();
+      await refreshData();
+    } catch (e: any) {
+      showToast(e.message || "Error saving user", "error");
     }
   };
 
-  const handleDismissNotification = (id: string) => {
-      storageService.markNotificationRead(id);
-      refreshData();
+  const handleDeleteUser = async (id: string) => {
+    if (id === currentUser.id) {
+      showToast("You cannot delete yourself.", "error");
+      return;
+    }
+
+    const ok = await confirm({
+      title: "Delete user?",
+      message: "Permanently delete this user? This cannot be undone.",
+      confirmLabel: "Delete user",
+      cancelLabel: "Cancel",
+      destructive: true,
+    });
+
+    if (!ok) return;
+
+    try {
+      await storageService.deleteUser(currentUser.id, id);
+      await refreshData();
+      handleCloseUserView();
+      showToast("User deleted.", "success");
+    } catch (e: any) {
+      showToast(e.message || "Error deleting user", "error");
+    }
   };
 
-  const handleClearAllNotifications = () => {
-      storageService.markAllNotificationsRead(currentUser.id);
-      refreshData();
+  const handleDismissNotification = async (id: string) => {
+    try {
+      await storageService.markNotificationRead(id);
+      await refreshData();
+    } catch (err) {
+      console.error("Failed to mark notification read", err);
+      showToast("Failed to update notification", "error");
+    }
+  };
+
+  const handleClearAllNotifications = async () => {
+    try {
+      await storageService.markAllNotificationsRead(currentUser.id);
+      await refreshData();
       setShowNotifications(false);
+    } catch (err) {
+      console.error("Failed to clear notifications", err);
+      showToast("Failed to clear notifications", "error");
+    }
   };
 
   // Derived State
   const pendingApprovals = assignments.filter(a => a.status === PrizeStatus.PENDING_APPROVAL);
   const pendingBounties = bountyAssignments.filter(b => b.status === BountyStatus.COMPLETED);
   const totalPending = pendingApprovals.length + pendingBounties.length;
-  const kids = users.filter(u => u.role !== UserRole.ADMIN);
+  const kids = users.filter(u => u.role === UserRole.USER);
 
   const filteredTemplates = templates.filter(t => t.title.toLowerCase().includes(searchTerm.toLowerCase()));
   const filteredBounties = bountyTemplates.filter(b => b.title.toLowerCase().includes(searchTerm.toLowerCase()));
@@ -328,6 +597,58 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser }) => {
           </div>
       )}
 
+      {confirmState && (
+        <div
+          className="fixed inset-0 bg-black/60 z-[80] flex items-center justify-center"
+          onClick={() => {
+            // clicking backdrop = cancel
+            confirmResolveRef.current?.(false);
+            setConfirmState(null);
+          }}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-bold text-gray-900 mb-2">
+              {confirmState.title}
+            </h3>
+            <p className="text-sm text-gray-600 mb-6">
+              {confirmState.message}
+            </p>
+
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                className="px-4 py-2 text-sm rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-50"
+                onClick={() => {
+                  confirmResolveRef.current?.(false);
+                  setConfirmState(null);
+                }}
+              >
+                {confirmState.cancelLabel ?? "Cancel"}
+              </button>
+
+              <button
+                type="button"
+                className={
+                  "px-4 py-2 text-sm rounded-xl text-white " +
+                  (confirmState.destructive
+                    ? "bg-red-500 hover:bg-red-600"
+                    : "bg-blue-600 hover:bg-blue-700")
+                }
+                onClick={() => {
+                  confirmResolveRef.current?.(true);
+                  setConfirmState(null);
+                }}
+              >
+                {confirmState.confirmLabel ?? "Confirm"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Viewing Rewards Modal */}
       {viewingRewardsForUser && (
         <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-6 animate-fade-in" onClick={() => setViewingRewardsForUser(null)}>
@@ -343,23 +664,65 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser }) => {
                             <p className="text-sm italic">No active rewards assigned.</p>
                         </div>
                     ) : (
-                        rewardsForViewingUser.map(assignment => {
-                            const template = templates.find(t => t.id === assignment.templateId);
-                            if (!template) return null;
+                        rewardsForViewingUser.map((assignment) => {
+                            // Optional: if a template still exists, we can reuse its theme,
+                            // but the *content* should always come from the snapshot.
+                            const template = assignment.templateId
+                                ? templates.find((t) => t.id === assignment.templateId)
+                                : null;
+
+                            const title = assignment.title;
+                            const emoji = assignment.emoji;
+                            const description = assignment.description || "";
+
+                            const themeColor =
+                                assignment.themeColor ||
+                                template?.themeColor ||
+                                (assignment.type === PrizeType.FOOD
+                                    ? "bg-pink-50 text-pink-800 border-pink-200"
+                                    : assignment.type === PrizeType.ACTIVITY
+                                    ? "bg-sky-50 text-sky-800 border-sky-200"
+                                    : "bg-emerald-50 text-emerald-800 border-emerald-200");
+
                             return (
-                                <div key={assignment.id} className="bg-white p-3 rounded-2xl border border-gray-200 flex justify-between items-center shadow-sm">
+                                <div
+                                    key={assignment.id}
+                                    className={`bg-white p-3 rounded-2xl border border-gray-200 flex justify-between items-center shadow-sm`}
+                                >
                                     <div className="flex items-center gap-3">
-                                        <span className="text-2xl">{template.emoji}</span>
+                                        <span className="text-2xl">{emoji}</span>
                                         <div>
-                                            <p className="font-bold text-gray-800 text-sm">{template.title}</p>
-                                            <p className="text-xs text-gray-500">Assigned {new Date(assignment.assignedAt).toLocaleDateString()}</p>
+                                            <p className="font-bold text-gray-800 text-sm">
+                                                {title}
+                                            </p>
+                                            {description && (
+                                                <p className="text-xs text-gray-500">
+                                                    {description}
+                                                </p>
+                                            )}
+                                            <p className="text-[11px] text-gray-400 mt-1">
+                                                Assigned{" "}
+                                                {new Date(
+                                                    assignment.assignedAt
+                                                ).toLocaleDateString()}
+                                            </p>
                                         </div>
                                     </div>
-                                    <button onClick={(e) => { e.stopPropagation(); storageService.deleteAssignment(assignment.id); refreshData(); }} className="text-red-400 p-2 hover:bg-red-50 rounded-full"><Trash2 size={18}/></button>
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleDeleteAssignment(assignment.id);
+                                            refreshData();
+                                        }}
+                                        className="text-red-400 p-2 hover:bg-red-50 rounded-full"
+                                    >
+                                        <Trash2 size={18} />
+                                    </button>
                                 </div>
                             );
                         })
                     )}
+
                 </div>
             </div>
         </div>
@@ -485,21 +848,61 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser }) => {
             ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pb-24">
                     {filteredBounties.length === 0 && <div className="col-span-2 text-center text-gray-400 py-8 italic">No task templates found.</div>}
-                    {filteredBounties.map(b => (
-                        <div key={b.id} onClick={() => setSelectedBountyTemplateIds(prev => prev.includes(b.id) ? prev.filter(id => id !== b.id) : [...prev, b.id])} 
-                             className={`p-4 rounded-2xl border-2 cursor-pointer transition-all flex flex-col shadow-sm relative overflow-hidden ${selectedBountyTemplateIds.includes(b.id) ? 'border-indigo-500 bg-indigo-50 ring-2 ring-indigo-200' : 'border-gray-200 bg-white'}`}>
-                             <div className="flex justify-between items-start mb-2">
-                                 <span className="text-4xl">{b.emoji}</span>
-                                 <button onClick={(e) => { e.stopPropagation(); handleEditBounty(b); }} className="p-2 bg-gray-100 rounded-full hover:bg-white"><Edit2 size={14}/></button>
-                             </div>
-                             <div className="mb-1">
-                                <h3 className="font-bold text-gray-800">{b.title}</h3>
-                                {b.isFCFS && <span className="text-[10px] font-bold bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded">First Come First Served</span>}
-                             </div>
-                             <p className="text-sm text-gray-500 font-medium flex items-center gap-1 mt-1"><Gift size={14}/> Reward: {b.rewardValue}</p>
-                             {selectedBountyTemplateIds.includes(b.id) && <div className="absolute top-2 right-10 bg-indigo-600 text-white p-1 rounded-full"><Check size={12}/></div>}
+                    {filteredBounties.map(b => {
+                      const selected = selectedBountyTemplateIds.includes(b.id);
+                      const baseColor =
+                        b.themeColor || "bg-white border-gray-200 text-gray-900";
+
+                      return (
+                        <div
+                          key={b.id}
+                          onClick={() =>
+                            setSelectedBountyTemplateIds(prev =>
+                              prev.includes(b.id)
+                                ? prev.filter(id => id !== b.id)
+                                : [...prev, b.id]
+                            )
+                          }
+                          className={`
+                            p-4 rounded-2xl cursor-pointer transition-all flex flex-col shadow-sm relative overflow-hidden
+                            ${baseColor}
+                            ${selected ? "ring-2 ring-indigo-500 scale-[1.01]" : ""}
+                          `}
+                        >
+                          <div className="flex justify-between items-start mb-2">
+                            <span className="text-4xl">{b.emoji}</span>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleEditBounty(b);
+                              }}
+                              className="p-2 bg-gray-100 rounded-full hover:bg-white"
+                            >
+                              <Edit2 size={14} />
+                            </button>
+                          </div>
+
+                          <div className="mb-1">
+                            <h3 className="font-bold text-gray-800">{b.title}</h3>
+                            {b.isFCFS && (
+                              <span className="text-[10px] font-bold bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded">
+                                First Come First Served
+                              </span>
+                            )}
+                          </div>
+
+                          <p className="text-sm text-gray-500 font-medium flex items-center gap-1 mt-1">
+                            <Gift size={14} /> Reward: {b.rewardValue}
+                          </p>
+
+                          {selected && (
+                            <div className="absolute top-2 right-10 bg-indigo-600 text-white p-1 rounded-full">
+                              <Check size={12} />
+                            </div>
+                          )}
                         </div>
-                    ))}
+                      );
+                    })}
                 </div>
             )}
 
@@ -549,33 +952,65 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser }) => {
                 </div>
             )}
 
-            {/* Pending Rewards */}
-            <div>
-                <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2"><Gift size={20}/> Reward Requests</h3>
-                {pendingApprovals.length === 0 ? (
-                    <div className="text-center py-6 bg-gray-50 rounded-xl border border-dashed border-gray-200"><p className="text-gray-400 text-sm">No reward requests.</p></div>
-                ) : (
-                    <div className="space-y-4">
-                        {pendingApprovals.map(assignment => {
-                            const template = templates.find(t => t.id === assignment.templateId) || { title: 'Unknown', description: '', emoji: '❓', type: PrizeType.CUSTOM, id: '?', familyId: '?' };
-                            const user = users.find(u => u.id === assignment.userId);
-                            return (
-                                <div key={assignment.id} className="bg-white p-4 rounded-2xl shadow-sm border border-amber-200">
-                                    <div className="flex items-center gap-2 mb-3 text-sm text-gray-500">
-                                        <div className={`w-6 h-6 rounded-full ${user?.avatarColor}`}></div>
-                                        <span className="font-semibold text-gray-800">{user?.name}</span> wants to claim:
-                                    </div>
-                                    <PrizeCard {...template} status={assignment.status} disabled />
-                                    <div className="flex gap-3 mt-4">
-                                        <button onClick={() => { if(window.confirm("Deny?")) { storageService.rejectClaim(assignment.id); refreshData(); showToast("Denied", 'success'); }}} className="flex-1 py-3 rounded-xl font-bold bg-red-50 text-red-600">Deny</button>
-                                        <button onClick={() => { storageService.approvePrize(assignment.id); refreshData(); showToast("Approved!", 'success'); }} className="flex-1 py-3 rounded-xl font-bold bg-green-600 text-white shadow-lg shadow-green-200">Approve</button>
-                                    </div>
-                                </div>
-                            );
-                        })}
+            {pendingApprovals.map((assignment) => {
+                const user = users.find((u) => u.id === assignment.userId);
+
+                // derive a theme if the snapshot doesn't carry one
+                const themeColor =
+                    assignment.themeColor ||
+                    (assignment.type === PrizeType.FOOD
+                        ? "bg-pink-100 text-pink-800 border-pink-200"
+                        : assignment.type === PrizeType.ACTIVITY
+                        ? "bg-sky-100 text-sky-800 border-sky-200"
+                        : "bg-emerald-50 text-emerald-800 border-emerald-200");
+
+                return (
+                    <div
+                        key={assignment.id}
+                        className="bg-white p-4 rounded-2xl shadow-sm border border-amber-200"
+                    >
+                        <div className="flex items-center gap-2 mb-3 text-sm text-gray-500">
+                            <div
+                                className={`w-6 h-6 rounded-full ${user?.avatarColor}`}
+                            ></div>
+                            <span className="font-semibold text-gray-800">
+                                {user?.name}
+                            </span>{" "}
+                            wants to claim:
+                        </div>
+
+                        <PrizeCard
+                            title={assignment.title}
+                            description={assignment.description || ""}
+                            emoji={assignment.emoji}
+                            type={assignment.type}
+                            themeColor={themeColor}
+                            status={assignment.status}
+                            disabled
+                        />
+
+                        <div className="flex gap-3 mt-4">
+                            <button
+                                onClick={() => {
+                                    void handleRejectPrize(assignment.id);
+                                }}
+                                className="flex-1 py-3 rounded-xl font-bold bg-red-50 text-red-600"
+                            >
+                                Deny
+                            </button>
+                            <button
+                                onClick={() => {
+                                    void handleApprovePrize(assignment.id);
+                                }}
+                                className="flex-1 py-3 rounded-xl font-bold bg-green-600 text-white shadow-lg shadow-green-200"
+                            >
+                                Approve
+                            </button>
+                        </div>
                     </div>
-                )}
-            </div>
+                );
+            })}
+
             
             <div className="pt-6 border-t border-gray-200">
                 <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2"><History size={18} /> Recent History</h3>
@@ -657,6 +1092,20 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser }) => {
                               <input type="text" value={bountyRewardValue} onChange={(e) => setBountyRewardValue(e.target.value)} placeholder="e.g. $5 or 30 mins TV" className="w-full p-3 pl-10 rounded-xl border border-gray-300 focus:border-indigo-500 outline-none" />
                               <CircleDollarSign className="absolute left-3 top-3.5 text-gray-400" size={18}/>
                           </div>
+                      </div>
+                       <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Card Color</label>
+                        <div className="flex flex-wrap gap-2">
+                          {PASTEL_COLORS.map(c => (
+                            <button
+                              key={c}
+                              onClick={() => setBountyColor(c)}
+                              className={`w-8 h-8 rounded-full border-2 ${c.split(' ')[0]} ${
+                                bountyColor === c ? 'border-gray-600 scale-110' : 'border-transparent'
+                              }`}
+                            />
+                          ))}
+                        </div>
                       </div>
                       <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl border border-gray-200 cursor-pointer" onClick={() => setBountyFCFS(!bountyFCFS)}>
                           <div className={`w-6 h-6 rounded-md flex items-center justify-center border transition-all ${bountyFCFS ? 'bg-indigo-600 border-indigo-600' : 'bg-white border-gray-300'}`}>

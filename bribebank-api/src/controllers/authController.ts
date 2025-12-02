@@ -1,11 +1,23 @@
 import { Request, Response } from "express";
-import { PrismaClient } from "@prisma/client";
-import { Prisma } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { config } from "../config.js";
+import { prisma } from "../lib/prisma.js";
+import { Prisma } from "@prisma/client";
 
-const prisma = new PrismaClient();
+const AVATAR_COLORS = [
+  "bg-indigo-500",
+  "bg-emerald-500",
+  "bg-amber-500",
+  "bg-rose-500",
+  "bg-sky-500",
+  "bg-purple-500",
+];
+
+function pickAvatarColor(): string {
+  const idx = Math.floor(Math.random() * AVATAR_COLORS.length);
+  return AVATAR_COLORS[idx];
+}
 
 // Generate join code
 function generateJoinCode(): string {
@@ -47,6 +59,7 @@ export const registerParent = async (req: Request, res: Response) => {
         password: hashed,
         displayName: req.body.displayName,
         role: "PARENT",
+        avatarColor: pickAvatarColor(),
       },
     });
 
@@ -120,6 +133,7 @@ export const joinFamily = async (req: Request, res: Response) => {
                 password: hashed,
                 displayName,
                 role: "CHILD",
+                avatarColor: pickAvatarColor(),
             },
         });
 
@@ -181,8 +195,9 @@ export const getMe = async (req: Request, res: Response) => {
                 username: true,
                 displayName: true,
                 role: true,
+                avatarColor: true,
                 family: {
-                    select: { name: true, joinCode: true, joinCodeExpiry: true },
+                    select: { id: true, name: true, joinCode: true, joinCodeExpiry: true },
                 },
             },
         });

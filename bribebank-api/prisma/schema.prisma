@@ -27,6 +27,9 @@ model Family {
   users     User[]
   bounties  Bounty[]
   rewards   Reward[]
+  assignedPrizes    AssignedPrize[]
+  bountyAssignments BountyAssignment[]
+  historyEvents     HistoryEvent[]
 }
 
 // -----------------------------------------------------
@@ -42,16 +45,41 @@ model User {
   password    String
   displayName String
   role        Role       @default(CHILD) // PARENT or CHILD
+  avatarColor String?    @default("bg-blue-500")
 
   createdAt   DateTime   @default(now())
 
   notifications Notification[]
   claims        Claim[]
+  assignedPrizes    AssignedPrize[]
+  bountyAssignments BountyAssignment[]
+  historyEvents     HistoryEvent[]
+
+  @@index([familyId, createdAt])
 }
 
 enum Role {
   PARENT
   CHILD
+}
+
+enum PrizeStatus {
+  AVAILABLE
+  PENDING_APPROVAL
+  REDEEMED
+}
+
+enum PrizeType {
+  FOOD
+  ACTIVITY
+  PRIVILEGE
+}
+
+enum BountyStatus {
+  OFFERED
+  IN_PROGRESS
+  COMPLETED
+  VERIFIED
 }
 
 // -----------------------------------------------------
@@ -63,12 +91,21 @@ model Bounty {
   familyId   String
   family     Family    @relation(fields: [familyId], references: [id])
 
-  title      String
-  emoji      String
+  title       String
+  emoji       String
   rewardValue String   // e.g. "$5" or "Ice Cream"
+  themeColor      String?  // e.g. "bg-amber-500 text-white"
+
+  rewardTemplateId String?
+  rewardTemplate   Reward? @relation("BountyRewardTemplate", fields: [rewardTemplateId], references: [id])
+
   isFCFS     Boolean   @default(false)
 
   createdAt  DateTime  @default(now())
+
+  assignments BountyAssignment[]
+
+  @@index([familyId, createdAt])  
 }
 
 // -----------------------------------------------------
@@ -80,12 +117,21 @@ model Reward {
   familyId   String
   family     Family    @relation(fields: [familyId], references: [id])
 
-  title      String
-  emoji      String
+  title       String
+  emoji       String
   description String?
 
-  createdAt  DateTime @default(now())
-  claims     Claim[]
+  type       PrizeType @default(FOOD)
+  themeColor String?
+
+  createdAt      DateTime        @default(now())
+  claims         Claim[]
+  assignedPrizes AssignedPrize[]
+
+  // Back relation to Bounty.rewardTemplate
+  bountyTemplates Bounty[] @relation("BountyRewardTemplate")
+
+  @@index([familyId, createdAt])
 }
 
 // -----------------------------------------------------
@@ -101,6 +147,90 @@ model Claim {
   reward     Reward    @relation(fields: [rewardId], references: [id])
 
   createdAt  DateTime  @default(now())
+
+  @@index([userId, createdAt])
+}
+
+// -----------------------------------------------------
+// ASSIGNED PRIZES
+// -----------------------------------------------------
+
+model AssignedPrize {
+  id          String      @id @default(cuid())
+  familyId    String
+  family      Family      @relation(fields: [familyId], references: [id])
+
+  templateId  String?
+  reward      Reward?     @relation(fields: [templateId], references: [id], onDelete: SetNull)
+
+  userId      String
+  user        User        @relation(fields: [userId], references: [id])
+
+  assignedBy  String
+  status      PrizeStatus @default(AVAILABLE)
+
+  assignedAt  DateTime    @default(now())
+  claimedAt   DateTime?
+  redeemedAt  DateTime?
+
+  // SNAPSHOT FIELDS – what the child actually sees
+  title       String
+  emoji       String
+  description String?
+  type        PrizeType
+  themeColor  String?
+
+  @@index([familyId, userId, status])
+  @@index([userId, status])
+  @@index([familyId, assignedAt])
+}
+
+// -----------------------------------------------------
+// BOUNTY ASSIGNMENTS
+// -----------------------------------------------------
+
+model BountyAssignment {
+  id          String       @id @default(cuid())
+  familyId    String
+  family      Family       @relation(fields: [familyId], references: [id])
+
+  bountyId    String
+  bounty      Bounty       @relation(fields: [bountyId], references: [id])
+
+  userId      String
+  user        User         @relation(fields: [userId], references: [id])
+
+  assignedBy  String
+  status      BountyStatus @default(OFFERED)
+
+  assignedAt  DateTime     @default(now())
+  completedAt DateTime?
+
+  @@index([familyId, userId])
+  @@index([familyId, status])
+}
+
+// -----------------------------------------------------
+// HISTORY EVENTS
+// -----------------------------------------------------
+
+model HistoryEvent {
+  id           String   @id @default(cuid())
+  familyId     String
+  family       Family   @relation(fields: [familyId], references: [id])
+
+  userId       String
+  user         User     @relation(fields: [userId], references: [id])
+
+  userName     String
+  title        String
+  emoji        String
+  action       String
+  assignerName String
+
+  createdAt    DateTime @default(now())
+
+  @@index([familyId, userId, createdAt])
 }
 
 // -----------------------------------------------------
@@ -114,6 +244,7 @@ model Notification {
 
   message   String
   isRead    Boolean  @default(false)
-
   createdAt DateTime @default(now())
+
+  @@index([userId, isRead])
 }

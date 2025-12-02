@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
 
   bribebank-db:
@@ -17,6 +15,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    ports:
+      - "5432:5432"
     networks:
       - bribebank_net
 

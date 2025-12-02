@@ -1,4 +1,17 @@
-import { AssignedPrize, PrizeStatus, PrizeTemplate, User, UserRole, PrizeType, HistoryEvent, AppNotification, Family, BountyTemplate, AssignedBounty, BountyStatus } from '../types';
+import { 
+  AssignedPrize, 
+  PrizeStatus, 
+  PrizeTemplate, 
+  User, 
+  UserRole, 
+  PrizeType, 
+  HistoryEvent, 
+  AppNotification, 
+  Family, 
+  BountyTemplate, 
+  AssignedBounty, 
+  BountyStatus 
+} from '../types';
 import { apiUrl } from "../config";
 const DB_KEY = 'famrewards_production_db_v3'; // Bumped version
 const SESSION_KEY = 'famrewards_session_v1';
@@ -37,6 +50,11 @@ const writeDB = (data: DatabaseSchema) => {
   localStorage.setItem(DB_KEY, JSON.stringify(data));
 };
 
+// Helper to get auth token
+const getAuthToken = (): string | null => {
+  return localStorage.getItem("bribebank_token");
+};
+
 // DEFAULT TEMPLATES for new families
 const DEFAULT_TEMPLATES = [
   { title: 'Skip Chores', description: 'Skip one household chore of your choice today.', emoji: '🧹', type: PrizeType.PRIVILEGE, themeColor: 'bg-purple-100 text-purple-800 border-purple-200' },
@@ -55,6 +73,8 @@ const DEFAULT_BOUNTIES = [
 
 export const storageService = {
 
+  getAuthToken: (): string | null => getAuthToken(),
+
   // --- AUTHENTICATION (BACKEND) ---
 
   registerFamily: async (
@@ -63,106 +83,61 @@ export const storageService = {
     username: string,
     password: string
   ): Promise<User> => {
-    // 1. Hit backend API
-    const response = await fetch(
-      apiUrl("/auth/register-parent"),
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          familyName,
-          username,
-          password,
-          displayName: adminName
-        }),
-      }
-    );
+    // 1. Register parent + family
+    const response = await fetch(apiUrl("/auth/register-parent"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        familyName,
+        username,
+        password,
+        displayName: adminName,
+      }),
+    });
 
     if (!response.ok) {
       throw new Error("Registration failed");
     }
 
-    const data = await response.json();
+    const data = await response.json(); // should contain { token, ... }
+    const token: string = data.token;
+    if (!token) {
+      throw new Error("No token returned from register-parent");
+    }
 
     // 2. Store token
-    localStorage.setItem("bribebank_token", data.token);
+    localStorage.setItem("bribebank_token", token);
 
     // 3. Fetch canonical user profile
-    const meRes = await fetch(
-      apiUrl("/auth/me"),
-      {
-        headers: { Authorization: `Bearer ${data.token}` },
-      }
-    );
+    const meRes = await fetch(apiUrl("/auth/me"), {
+      headers: { Authorization: `Bearer ${token}` },
+    });
 
     if (!meRes.ok) {
       throw new Error("Failed to fetch user profile");
     }
 
-    const user = await meRes.json();
+    const backendUser = await meRes.json();
 
-    // 4. Save session locally (no password)
-    localStorage.setItem(
-      SESSION_KEY,
-      JSON.stringify({
-        id: user.id,
-        familyId: user.family?.id,
-        username: user.username,
-        name: user.displayName,       // store readable name
-        displayName: user.displayName, // ← add this field!
-        role: user.role,
-        avatarColor: "bg-blue-500"
-      })
-    );
-
-    return user;
-  },
-
-  // --- TEMPORARY LOCAL SEEDING (kept until Phase 2) ---
-  seedLocalDBFromBackend(user: any): User {
-    const db = getEmptyDB(); // start from clean state every time
-
-    const familyId = user.family?.id || Date.now().toString();
-
-    const newFamily: Family = {
-      id: familyId,
-      name: user.family?.name || "Unknown Family",
-      createdAt: Date.now(),
+    // 4. Map backend user -> frontend User
+    const sessionUser: User = {
+      id: backendUser.id,
+      familyId: backendUser.familyId ?? backendUser.family?.id,
+      username: backendUser.username,
+      name: backendUser.displayName,
+      displayName: backendUser.displayName,
+      role:
+        backendUser.role === "PARENT"
+          ? UserRole.ADMIN
+          : UserRole.USER,
+      avatarColor: backendUser.avatarColor || "bg-blue-500",
     };
 
-    const newAdmin: User = {
-      id: user.id,
-      familyId,
-      username: user.username,
-      name: user.displayName,
-      displayName: user.displayName,
-      role: UserRole.ADMIN,    // enforce admin locally
-      avatarColor: "bg-blue-500",
-    };
+    // 5. Save session locally
+    localStorage.setItem(SESSION_KEY, JSON.stringify(sessionUser));
 
-    const newTemplates: PrizeTemplate[] = DEFAULT_TEMPLATES.map((t, idx) => ({
-      id: `t_${Date.now()}_${idx}`,
-      familyId,
-      ...t,
-    }));
-
-    const newBountyTemplates: BountyTemplate[] = DEFAULT_BOUNTIES.map((b, idx) => ({
-      id: `bt_${Date.now()}_${idx}`,
-      familyId,
-      ...b,
-    }));
-
-    db.families.push(newFamily);
-    db.users.push(newAdmin);
-    db.templates.push(...newTemplates);
-    db.bountyTemplates.push(...newBountyTemplates);
-
-    localStorage.setItem(DB_KEY, JSON.stringify(db));
-    localStorage.setItem(SESSION_KEY, JSON.stringify(newAdmin));
-
-    return newAdmin;
+    return sessionUser;
   },
-
 
   login: async (username: string, password: string): Promise<User> => {
     const res = await fetch(apiUrl("/auth/login"), {
@@ -171,27 +146,52 @@ export const storageService = {
       body: JSON.stringify({ username, password }),
     });
 
-    if (!res.ok) throw new Error("Invalid credentials");
+    if (!res.ok) {
+      throw new Error("Invalid credentials");
+    }
 
     const { token } = await res.json();
+    if (!token) {
+      throw new Error("No token returned from login");
+    }
+
     localStorage.setItem("bribebank_token", token);
 
     const meRes = await fetch(apiUrl("/auth/me"), {
       headers: { Authorization: `Bearer ${token}` },
     });
 
+    if (!meRes.ok) {
+      throw new Error("Failed to fetch user profile");
+    }
+
     const backendUser = await meRes.json();
 
-    // THIS FIXES THE BLANK DASHBOARD
-    const seededUser = storageService.seedLocalDBFromBackend(backendUser);
+    const sessionUser: User = {
+      id: backendUser.id,
+      familyId: backendUser.familyId ?? backendUser.family?.id,
+      username: backendUser.username,
+      name: backendUser.displayName,
+      displayName: backendUser.displayName,
+      role:
+        backendUser.role === "PARENT"
+          ? UserRole.ADMIN
+          : UserRole.USER,
+      avatarColor: "bg-blue-500",
+    };
 
-    return seededUser;
+    localStorage.setItem(SESSION_KEY, JSON.stringify(sessionUser));
+
+    return sessionUser;
   },
 
   logout: () => {
+    // Blow away auth + session + local fake DB
+    localStorage.removeItem("bribebank_token");
     localStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem(DB_KEY);
   },
-
+  
   getCurrentUser: (): User | null => {
     const stored = localStorage.getItem(SESSION_KEY);
     return stored ? JSON.parse(stored) : null;
@@ -199,517 +199,905 @@ export const storageService = {
 
   // --- USER MANAGEMENT ---
 
-  getFamilyUsers: (familyId: string): User[] => {
-    const db = readDB();
-    return db.users.filter(u => u.familyId === familyId);
-  },
+  getFamilyUsers: async (familyId: string): Promise<User[]> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+    const res = await fetch(apiUrl(`/families/${familyId}/users`), {
+      headers: { Authorization: `Bearer ${token}` },
+    });
 
-  createUser: (creator: User, name: string, username: string, password: string, role: UserRole, avatarColor: string): void => {
-    if (creator.role !== UserRole.ADMIN) throw new Error("Unauthorized");
-    const db = readDB();
-    if (db.users.some(u => u.username.toLowerCase() === username.toLowerCase())) {
-      throw new Error("Username already taken");
-    }
-    const newUser: User = {
-      id: 'u_' + Date.now() + Math.random().toString().slice(2,5),
-      familyId: creator.familyId,
-      username,
-      name,
-      password,
-      role,
-      avatarColor
-    };
-    db.users.push(newUser);
-    writeDB(db);
-  },
-
-  updateUser: (adminId: string, userId: string, updates: Partial<User>): void => {
-    const db = readDB();
-    const admin = db.users.find(u => u.id === adminId);
-    // Check admin rights unless updating self (though UI restricts this, good for safety)
-    if (!admin || admin.role !== UserRole.ADMIN) throw new Error("Unauthorized");
-
-    const targetIndex = db.users.findIndex(u => u.id === userId);
-    if (targetIndex === -1) throw new Error("User not found");
-
-    // Check username uniqueness if changing
-    if (updates.username && updates.username.toLowerCase() !== db.users[targetIndex].username.toLowerCase()) {
-         if (db.users.some(u => u.id !== userId && u.username.toLowerCase() === updates.username.toLowerCase())) {
-             throw new Error("Username already taken");
-         }
+    if (!res.ok) {
+      console.error("Failed to fetch family users", res.status);
+      throw new Error("Failed to fetch family users");
     }
 
-    // Apply updates
-    const currentUser = db.users[targetIndex];
-    db.users[targetIndex] = { ...currentUser, ...updates };
-    
-    // Ensure password isn't wiped if empty string passed (handled in UI, but double check)
-    if (updates.password === "") {
-        db.users[targetIndex].password = currentUser.password;
+    const backendUsers = await res.json();
+
+    return backendUsers.map((u: any): User => ({
+      id: u.id,
+      familyId: u.familyId,
+      username: u.username,
+      name: u.displayName,          // <- used by AdminView UI
+      displayName: u.displayName,   // <- for consistency
+      role: u.role === "PARENT" ? UserRole.ADMIN : UserRole.USER,
+      avatarColor: u.avatarColor || "bg-blue-500",
+    }));
+  },
+
+
+  createUser: async (
+    creator: User,
+    name: string,
+    username: string,
+    password: string,
+    role: UserRole,
+    avatarColor: string
+  ): Promise<void> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+    if (!creator.familyId) throw new Error("Creator missing familyId");
+
+    const res = await fetch(apiUrl(`/families/${creator.familyId}/users`), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        username,
+        password,
+        displayName: name,
+        role: role === UserRole.ADMIN ? "PARENT" : "CHILD",
+        avatarColor, // ignored by backend for now
+      }),
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      console.error("createUser failed", res.status, body);
+      throw new Error(body?.error || "Failed to create user");
+    }
+  },
+
+  updateUser: async (
+    adminId: string,
+    userId: string,
+    updates: Partial<User>
+  ): Promise<void> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const payload: any = {};
+    if (updates.username) payload.username = updates.username;
+
+    if ((updates as any).name || (updates as any).displayName) {
+      payload.displayName = (updates as any).name ?? (updates as any).displayName;
     }
 
-    // If updating self, update session storage
-    const sessionUser = storageService.getCurrentUser();
-    if (sessionUser && sessionUser.id === userId) {
-        localStorage.setItem(SESSION_KEY, JSON.stringify(db.users[targetIndex]));
+    if (updates.role) {
+      payload.role =
+        updates.role === UserRole.ADMIN ? "PARENT" : "CHILD";
     }
 
-    writeDB(db);
+    if (updates.avatarColor) {
+      payload.avatarColor = updates.avatarColor;
+    }
+
+    if (Object.keys(payload).length > 0) {
+      const res = await fetch(apiUrl(`/users/${userId}`), {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        console.error("updateUser failed", res.status, body);
+        throw new Error(body?.error || "Failed to update user");
+      }
+    }
+
+    // Password change handled separately
+    if ((updates as any).password) {
+      await storageService.updateUserPassword(
+        adminId,
+        userId,
+        (updates as any).password as string
+      );
+    }
   },
 
-  updateUserPassword: (adminId: string, targetUserId: string, newPassword: string): void => {
-    const db = readDB();
-    const admin = db.users.find(u => u.id === adminId);
-    const targetIndex = db.users.findIndex(u => u.id === targetUserId);
-    if (!admin || admin.role !== UserRole.ADMIN || targetIndex === -1) throw new Error("Unauthorized");
-    db.users[targetIndex].password = newPassword;
-    writeDB(db);
+  updateUserPassword: async (
+    _adminId: string,
+    targetUserId: string,
+    newPassword: string
+  ): Promise<void> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const res = await fetch(apiUrl(`/users/${targetUserId}/password`), {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ newPassword }),
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      console.error("updateUserPassword failed", res.status, body);
+      throw new Error(body?.error || "Failed to update password");
+    }
   },
 
-  deleteUser: (adminId: string, targetUserId: string): void => {
-      const db = readDB();
-      const admin = db.users.find(u => u.id === adminId);
-      if (!admin || admin.role !== UserRole.ADMIN) return;
-      db.users = db.users.filter(u => u.id !== targetUserId);
-      writeDB(db);
+  deleteUser: async (adminId: string, targetUserId: string): Promise<void> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const res = await fetch(apiUrl(`/users/${targetUserId}`), {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      console.error("deleteUser failed", res.status, body);
+      throw new Error(body?.error || "Failed to delete user");
+    }
   },
+
 
   // --- REWARDS (PRIZES) ---
 
-  getTemplates: (familyId: string): PrizeTemplate[] => {
-    const db = readDB();
-    return db.templates.filter(t => t.familyId === familyId);
-  },
-
-  saveTemplate: (template: PrizeTemplate): void => {
-    const db = readDB();
-    const index = db.templates.findIndex(t => t.id === template.id);
-    if (index !== -1) {
-        db.templates[index] = template;
-    } else {
-        db.templates.push(template);
+  // Load reward templates for a family from the backend
+  getTemplates: async (familyId: string): Promise<PrizeTemplate[]> => {
+    const token = getAuthToken();
+    if (!token) {
+      throw new Error("Not authenticated");
     }
-    writeDB(db);
+    const res = await fetch(apiUrl(`/families/${familyId}/rewards`), {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (!res.ok) {
+      console.error("Failed to fetch rewards from backend", res.status);
+      throw new Error("Failed to fetch rewards");
+    }
+
+    const backendRewards = await res.json();
+
+    return backendRewards.map((r: any): PrizeTemplate => ({
+      id: r.id,
+      familyId: r.familyId,
+      title: r.title,
+      description: r.description ?? "",
+      emoji: r.emoji,
+      type: r.type as PrizeType,
+      themeColor: r.themeColor ?? undefined,
+    }));
   },
 
-  deleteTemplate: (id: string): void => {
-    const db = readDB();
-    db.templates = db.templates.filter(t => t.id !== id);
-    writeDB(db);
-  },
+  // Create or update a reward template via backend
+  saveTemplate: async (template: PrizeTemplate): Promise<void> => {
+    const token = getAuthToken();
+    if (!token) {
+      throw new Error("Not authenticated");
+    }
 
-  getAssignments: (familyId: string): AssignedPrize[] => {
-    const db = readDB();
-    return db.assignments.filter(a => a.familyId === familyId);
-  },
+    const isLocalId = /^\d+$/.test(template.id); // new vs existing
 
-  assignPrize: (template: PrizeTemplate, userId: string, adminId: string): void => {
-    const db = readDB();
-    const admin = db.users.find(u => u.id === adminId);
-    const user = db.users.find(u => u.id === userId);
-
-    const newAssignment: AssignedPrize = {
-      id: 'ap_' + Date.now() + Math.random().toString().slice(2,5),
-      familyId: template.familyId,
-      templateId: template.id,
-      userId,
-      assignedBy: adminId,
-      assignedAt: Date.now(),
-      status: PrizeStatus.AVAILABLE,
+    const payload = {
+      title: template.title,
+      emoji: template.emoji,
+      description: template.description,
+      type: template.type,
+      themeColor: template.themeColor,
     };
-    
-    db.assignments.push(newAssignment);
-    
-    // Create Notification for child
-    db.notifications.push({
-        id: 'n_' + Date.now(),
-        familyId: template.familyId,
-        userId,
-        message: `${admin?.name || 'Admin'} sent you a reward: ${template.title}!`,
-        isRead: false,
-        timestamp: Date.now()
+
+    const url = isLocalId
+      ? apiUrl(`/families/${template.familyId}/rewards`)
+      : apiUrl(`/rewards/${template.id}`);
+
+    const method = isLocalId ? "POST" : "PUT";
+
+    const res = await fetch(url, {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
     });
 
-    // Log History
-    db.history.unshift({
-        id: 'h_' + Date.now(),
-        familyId: template.familyId,
-        userId: userId,
-        userName: user?.name || 'User',
-        title: template.title,
-        emoji: template.emoji,
-        action: 'ASSIGNED',
-        timestamp: Date.now(),
-        assignerName: admin?.name || 'Admin'
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      console.error("Failed to save reward template", res.status, body);
+      throw new Error(body?.error || "Failed to save reward template");
+    }
+  },
+
+  // Delete reward template in backend
+  deleteTemplate: async (id: string): Promise<void> => {
+    const token = getAuthToken();
+    if (!token) {
+      throw new Error("Not authenticated");
+    }
+
+    const res = await fetch(apiUrl(`/rewards/${id}`), {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
     });
 
-    writeDB(db);
-  },
-
-  claimPrize: (assignmentId: string): void => {
-    const db = readDB();
-    const index = db.assignments.findIndex(a => a.id === assignmentId);
-    if (index !== -1) {
-      db.assignments[index].status = PrizeStatus.PENDING_APPROVAL;
-      db.assignments[index].claimedAt = Date.now();
-      writeDB(db);
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      console.error("Failed to delete reward template", res.status, body);
+      throw new Error(body?.error || "Failed to delete reward template");
     }
   },
 
-  approvePrize: (assignmentId: string): void => {
-    const db = readDB();
-    const index = db.assignments.findIndex(a => a.id === assignmentId);
-    if (index !== -1) {
-      const assignment = db.assignments[index];
-      const template = db.templates.find(t => t.id === assignment.templateId);
-      const admin = db.users.find(u => u.id === assignment.assignedBy); // Assigner logic preserved
-      const currentUser = db.users.find(u => u.id === storageService.getCurrentUser()?.id); // Approver logic
-      const approverName = currentUser?.name || admin?.name || 'Admin';
-      const child = db.users.find(u => u.id === assignment.userId);
 
-      assignment.status = PrizeStatus.REDEEMED;
-      assignment.redeemedAt = Date.now();
-
-      const newHistory: HistoryEvent = {
-        id: 'h_' + Date.now(),
-        familyId: assignment.familyId,
-        userId: assignment.userId,
-        userName: child?.name || 'User',
-        title: template?.title || 'Reward',
-        emoji: template?.emoji || '🎁',
-        action: 'APPROVED',
-        timestamp: Date.now(),
-        assignerName: approverName
-      };
-      db.history.unshift(newHistory);
-
-      db.notifications.push({
-          id: 'n_' + Date.now(),
-          familyId: assignment.familyId,
-          userId: assignment.userId,
-          message: `Your request to use "${template?.title}" was approved by ${approverName}!`,
-          isRead: false,
-          timestamp: Date.now()
-      });
-
-      writeDB(db);
+  // Load assigned prizes for a family from backend
+  getAssignments: async (familyId: string): Promise<AssignedPrize[]> => {
+    const token = getAuthToken();
+    if (!token) {
+      throw new Error("Not authenticated");
     }
-  },
 
-  rejectClaim: (assignmentId: string): void => {
-    const db = readDB();
-    const index = db.assignments.findIndex(a => a.id === assignmentId);
-    if (index !== -1) {
-      const assignment = db.assignments[index];
-      const template = db.templates.find(t => t.id === assignment.templateId);
-      const admin = db.users.find(u => u.id === assignment.assignedBy);
-      const currentUser = db.users.find(u => u.id === storageService.getCurrentUser()?.id);
-      const denierName = currentUser?.name || admin?.name || 'Admin';
-      const child = db.users.find(u => u.id === assignment.userId);
-
-      // Revert status to AVAILABLE
-      assignment.status = PrizeStatus.AVAILABLE;
-      assignment.claimedAt = undefined;
-
-      const newHistory: HistoryEvent = {
-        id: 'h_' + Date.now(),
-        familyId: assignment.familyId,
-        userId: assignment.userId,
-        userName: child?.name || 'User',
-        title: template?.title || 'Reward',
-        emoji: template?.emoji || '🎁',
-        action: 'DENIED',
-        timestamp: Date.now(),
-        assignerName: denierName
-      };
-      db.history.unshift(newHistory);
-
-      db.notifications.push({
-          id: 'n_' + Date.now(),
-          familyId: assignment.familyId,
-          userId: assignment.userId,
-          message: `Your request for "${template?.title}" was denied by ${denierName}.`,
-          isRead: false,
-          timestamp: Date.now()
-      });
-
-      writeDB(db);
-    }
-  },
-
-  deleteAssignment: (id: string): void => {
-      const db = readDB();
-      const assignment = db.assignments.find(a => a.id === id);
-      
-      if (assignment) {
-          // Notify user if status was AVAILABLE or PENDING (Revoking an active reward)
-          if (assignment.status !== PrizeStatus.REDEEMED) {
-              const template = db.templates.find(t => t.id === assignment.templateId);
-              const currentUser = db.users.find(u => u.id === storageService.getCurrentUser()?.id);
-              const admin = db.users.find(u => u.id === assignment.assignedBy);
-              const revokerName = currentUser?.name || admin?.name || 'Admin';
-              const title = template?.title || 'Unknown Reward';
-              
-              db.notifications.push({
-                  id: 'n_' + Date.now(),
-                  familyId: assignment.familyId,
-                  userId: assignment.userId,
-                  message: `Reward "${title}" was revoked by ${revokerName}.`,
-                  isRead: false,
-                  timestamp: Date.now()
-              });
-          }
-          
-          db.assignments = db.assignments.filter(a => a.id !== id);
-          writeDB(db);
+    const res = await fetch(
+      apiUrl(`/families/${familyId}/assigned-prizes`),
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
       }
+    );
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      console.error("Failed to fetch assigned prizes from backend", res.status, body);
+      throw new Error(body?.error || "Failed to fetch assigned prizes");
+    }
+
+    const backendAssignments = await res.json();
+
+    return backendAssignments.map((a: any): AssignedPrize => ({
+      id: a.id,
+      familyId: a.familyId,
+      templateId: a.templateId,
+      userId: a.userId,
+      assignedBy: a.assignedBy,
+      status: a.status as PrizeStatus,
+      assignedAt: new Date(a.assignedAt).getTime(),
+      claimedAt: a.claimedAt ? new Date(a.claimedAt).getTime() : undefined,
+      redeemedAt: a.redeemedAt ? new Date(a.redeemedAt).getTime() : undefined,
+      title: a.title,
+      emoji: a.emoji,
+      description: a.description ?? undefined,
+      type: a.type as PrizeType,
+      themeColor: a.themeColor ?? undefined,
+    }));
+  },
+
+  // Assign a prize to a child via backend
+  assignPrize: async (
+    template: PrizeTemplate,
+    userId: string,
+    _adminId: string
+  ): Promise<void> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    // Use canonical familyId from the template (comes from backend)
+    const familyId = template.familyId;
+    if (!familyId) {
+      console.error("assignPrize: missing familyId on template", {
+        template,
+        userId,
+      });
+      throw new Error("Missing familyId for assignPrize");
+    }
+
+    const res = await fetch(
+      apiUrl(`/families/${familyId}/assigned-prizes`),
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          templateId: template.id,
+          userId,
+        }),
+      }
+    );
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      console.error("Failed to assign prize", res.status, body);
+      throw new Error(body?.error || "Failed to assign prize");
+    }
+  },
+
+
+    // Child calls this to request use of a prize
+    claimPrize: async (assignmentId: string): Promise<void> => {
+      const token = getAuthToken();
+      if (!token) throw new Error("Not authenticated");
+
+      const res = await fetch(
+        apiUrl(`/assigned-prizes/${assignmentId}/claim`),
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      if (!res.ok) {
+        console.error("Failed to claim prize", res.status);
+        throw new Error("Failed to claim prize");
+      }
+    },
+
+  // Parent approves a pending prize
+  approvePrize: async (assignmentId: string): Promise<void> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const res = await fetch(
+      apiUrl(`/assigned-prizes/${assignmentId}/approve`),
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+
+    if (!res.ok) {
+      console.error("Failed to approve prize", res.status);
+      throw new Error("Failed to approve prize");
+    }
+  },
+
+  // Parent rejects a pending claim
+  rejectClaim: async (assignmentId: string): Promise<void> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const res = await fetch(
+      apiUrl(`/assigned-prizes/${assignmentId}/reject`),
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+
+    if (!res.ok) {
+      console.error("Failed to reject prize claim", res.status);
+      throw new Error("Failed to reject prize claim");
+    }
+  },
+
+  // Parent deletes/revokes an assignment entirely
+  deleteAssignment: async (id: string): Promise<void> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const res = await fetch(apiUrl(`/assigned-prizes/${id}`), {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (!res.ok) {
+      console.error("Failed to delete assignment", res.status);
+      throw new Error("Failed to delete assignment");
+    }
   },
 
   // --- BOUNTIES (TASKS) ---
 
-  getBountyTemplates: (familyId: string): BountyTemplate[] => {
-    const db = readDB();
-    return db.bountyTemplates.filter(b => b.familyId === familyId);
-  },
+  getBountyTemplates: async (familyId: string): Promise<BountyTemplate[]> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
 
-  saveBountyTemplate: (bounty: BountyTemplate): void => {
-    const db = readDB();
-    const index = db.bountyTemplates.findIndex(b => b.id === bounty.id);
-    if(index !== -1) {
-      db.bountyTemplates[index] = bounty;
-    } else {
-      db.bountyTemplates.push(bounty);
+    const res = await fetch(apiUrl(`/families/${familyId}/bounties`), {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      console.error("Failed to fetch bounties from backend", res.status, body);
+      throw new Error(body?.error || "Failed to fetch bounties");
     }
-    writeDB(db);
+
+    const backendBounties = await res.json();
+
+    return backendBounties.map(
+      (b: any): BountyTemplate => ({
+        id: b.id,
+        familyId: b.familyId,
+        title: b.title,
+        emoji: b.emoji,
+        rewardValue: b.rewardValue,
+        rewardTemplateId: b.rewardTemplateId ?? undefined,
+        isFCFS: !!b.isFCFS,
+        themeColor: b.themeColor ?? null,
+      })
+    );
   },
 
-  deleteBountyTemplate: (id: string): void => {
-      const db = readDB();
-      db.bountyTemplates = db.bountyTemplates.filter(b => b.id !== id);
-      writeDB(db);
-  },
+  saveBountyTemplate: async (template: BountyTemplate): Promise<void> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
 
-  assignBounty: (bountyTemp: BountyTemplate, userId: string, adminId: string): void => {
-    const db = readDB();
-    const admin = db.users.find(u => u.id === adminId);
-    const user = db.users.find(u => u.id === userId);
-    
-    const newAssignment: AssignedBounty = {
-      id: 'ab_' + Date.now() + Math.random().toString().slice(2,5),
-      familyId: bountyTemp.familyId,
-      bountyTemplateId: bountyTemp.id,
-      userId,
-      assignedBy: adminId,
-      assignedAt: Date.now(),
-      status: BountyStatus.OFFERED
+    const isLocalId = /^\d+$/.test(template.id); // new vs existing
+
+    const payload = {
+      title: template.title,
+      emoji: template.emoji,
+      rewardValue: template.rewardValue,
+      isFCFS: !!template.isFCFS,
+      themeColor: template.themeColor ?? null,
+      // rewardTemplateId: template.rewardTemplateId ?? null, // only if you wire this in UI
     };
-    db.bountyAssignments.push(newAssignment);
-    
-    // Notify Child
-    db.notifications.push({
-      id: 'n_' + Date.now(),
-      familyId: bountyTemp.familyId,
-      userId,
-      message: `${admin?.name || 'Parent'} added a new task: ${bountyTemp.title}`,
-      isRead: false,
-      timestamp: Date.now()
+
+    const url = isLocalId
+      ? apiUrl(`/families/${template.familyId}/bounties`)
+      : apiUrl(`/bounties/${template.id}`);
+
+    const method = isLocalId ? "POST" : "PUT";
+
+    const res = await fetch(url, {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
     });
 
-    // Log History
-    db.history.unshift({
-        id: 'h_' + Date.now(),
-        familyId: bountyTemp.familyId,
-        userId: userId,
-        userName: user?.name || 'User',
-        title: bountyTemp.title,
-        emoji: bountyTemp.emoji,
-        action: 'ASSIGNED_TASK',
-        timestamp: Date.now(),
-        assignerName: admin?.name || 'Admin'
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      console.error("Failed to save bounty template", res.status, body);
+      throw new Error(body?.error || "Failed to save bounty template");
+    }
+  },
+
+  deleteBountyTemplate: async (id: string): Promise<void> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const res = await fetch(apiUrl(`/bounties/${id}`), {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
     });
 
-    writeDB(db);
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      console.error("Failed to delete bounty template", res.status, body);
+      throw new Error(body?.error || "Failed to delete bounty template");
+    }
   },
 
-  getBountyAssignments: (familyId: string): AssignedBounty[] => {
-    const db = readDB();
-    return db.bountyAssignments.filter(b => b.familyId === familyId);
+  assignBounty: async (
+    familyId: string,
+    bountyId: string,
+    userId: string
+  ): Promise<void> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const res = await fetch(
+      apiUrl(`/families/${familyId}/bounty-assignments`),
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ bountyId, userId }),
+      }
+    );
+
+    // // Notify Child
+    // db.notifications.push({
+    //   id: 'n_' + Date.now(),
+    //   familyId: bountyTemp.familyId,
+    //   userId,
+    //   message: `${admin?.name || 'Parent'} added a new task: ${bountyTemp.title}`,
+    //   isRead: false,
+    //   timestamp: Date.now()
+    // });
+
+    // // Log History
+    // db.history.unshift({
+    //     id: 'h_' + Date.now(),
+    //     familyId: bountyTemp.familyId,
+    //     userId: userId,
+    //     userName: user?.name || 'User',
+    //     title: bountyTemp.title,
+    //     emoji: bountyTemp.emoji,
+    //     action: 'ASSIGNED_TASK',
+    //     timestamp: Date.now(),
+    //     assignerName: admin?.name || 'Admin'
+    // });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      console.error("Failed to assign bounty", res.status, body);
+      throw new Error(body?.error || "Failed to assign bounty");
+    }
   },
 
-  updateBountyStatus: (assignmentId: string, status: BountyStatus): void => {
-    const db = readDB();
-    const index = db.bountyAssignments.findIndex(b => b.id === assignmentId);
-    if(index !== -1) {
-      const assignment = db.bountyAssignments[index];
-      const prevStatus = assignment.status;
-      assignment.status = status;
+  getBountyAssignments: async (familyId: string): Promise<AssignedBounty[]> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const res = await fetch(
+      apiUrl(`/families/${familyId}/bounty-assignments`),
+      {
+        headers: { Authorization: `Bearer ${token}` },
+      }
+    );
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      console.error("Failed to fetch bounty assignments from backend", res.status, body);
+      throw new Error(body?.error || "Failed to fetch bounty assignments");
+    }
+
+    const backendAssignments = await res.json();
+
+    return backendAssignments.map(
+      (a: any): AssignedBounty => ({
+        id: a.id,
+        familyId: a.familyId,
+        bountyTemplateId: a.bountyId,
+        userId: a.userId,
+        assignedBy: a.assignedBy,
+        status: a.status as BountyStatus,
+        assignedAt: new Date(a.assignedAt).getTime(),
+        completedAt: a.completedAt
+          ? new Date(a.completedAt).getTime()
+          : undefined,
+        // if your UI needs bounty/user nested data, you can also keep a.bounty / a.user
+      })
+    );
+  },
+
+  updateBountyStatus: async (
+    assignmentId: string,
+    status: BountyStatus
+  ): Promise<void> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    let endpoint = "";
+
+    if (status === BountyStatus.IN_PROGRESS) {
+      endpoint = `/bounty-assignments/${assignmentId}/accept`;
+    } else if (status === BountyStatus.COMPLETED) {
+      endpoint = `/bounty-assignments/${assignmentId}/complete`;
+    } else {
+      throw new Error("Unsupported bounty status transition");
+    }
+
+    const res = await fetch(apiUrl(endpoint), {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    });
+
+    // if(status === BountyStatus.COMPLETED) {
+    //   assignment.completedAt = Date.now();
       
-      const template = db.bountyTemplates.find(t => t.id === assignment.bountyTemplateId);
-      const child = db.users.find(u => u.id === assignment.userId);
-      const adminId = assignment.assignedBy; // The admin who assigned it
+    //   // Notify Admin when Completed (Waiting for verification)
+    //   db.notifications.push({
+    //       id: 'n_' + Date.now(),
+    //       familyId: assignment.familyId,
+    //       userId: adminId,
+    //       message: `${child?.name} completed task: ${template?.title}. Verify now!`,
+    //       isRead: false,
+    //       timestamp: Date.now()
+    //   });
+    // }
 
-      if(status === BountyStatus.COMPLETED) {
-        assignment.completedAt = Date.now();
-        
-        // Notify Admin when Completed (Waiting for verification)
-        db.notifications.push({
-            id: 'n_' + Date.now(),
-            familyId: assignment.familyId,
-            userId: adminId,
-            message: `${child?.name} completed task: ${template?.title}. Verify now!`,
-            isRead: false,
-            timestamp: Date.now()
-        });
-      }
+    // // Notify Admin when Accepted (Started)
+    // if (status === BountyStatus.IN_PROGRESS && prevStatus === BountyStatus.OFFERED) {
+    //     db.notifications.push({
+    //         id: 'n_' + Date.now(),
+    //         familyId: assignment.familyId,
+    //         userId: adminId,
+    //         message: `${child?.name} accepted the task: ${template?.title}`,
+    //         isRead: false,
+    //         timestamp: Date.now()
+    //     });
+    // }
 
-      // Notify Admin when Accepted (Started)
-      if (status === BountyStatus.IN_PROGRESS && prevStatus === BountyStatus.OFFERED) {
-          db.notifications.push({
-              id: 'n_' + Date.now(),
-              familyId: assignment.familyId,
-              userId: adminId,
-              message: `${child?.name} accepted the task: ${template?.title}`,
-              isRead: false,
-              timestamp: Date.now()
-          });
-      }
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      console.error("updateBountyStatus error:", res.status, body);
+      throw new Error(body?.error || "Failed to update bounty status");
+    }
+  },
 
-      // FIRST COME FIRST SERVED LOGIC
-      if (status === BountyStatus.IN_PROGRESS) {
-        if (template && template.isFCFS) {
-          // Find other assignments of this template that are still OFFERED
-          const otherAssignments = db.bountyAssignments.filter(
-            b => b.bountyTemplateId === assignment.bountyTemplateId && 
-                 b.status === BountyStatus.OFFERED && 
-                 b.id !== assignmentId
-          );
+  verifyBounty: async (assignmentId: string): Promise<void> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
 
-          // Remove them
-          const idsToRemove = otherAssignments.map(b => b.id);
-          db.bountyAssignments = db.bountyAssignments.filter(b => !idsToRemove.includes(b.id));
+    const res = await fetch(
+      apiUrl(`/bounty-assignments/${assignmentId}/verify`),
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`
         }
       }
+    );
 
-      writeDB(db);
+    // // 3. Log History
+    // db.history.unshift({
+    //   id: 'h_' + Date.now(),
+    //   familyId: bountyAssignment.familyId,
+    //   userId: bountyAssignment.userId,
+    //   userName: child?.name || 'User',
+    //   title: bountyTemplate.title,
+    //   emoji: bountyTemplate.emoji,
+    //   action: 'VERIFIED_TASK',
+    //   timestamp: Date.now(),
+    //   assignerName: verifierName
+    // });
+
+    // // 4. Notify Child
+    // db.notifications.push({
+    //   id: 'n_' + Date.now(),
+    //   familyId: bountyAssignment.familyId,
+    //   userId: bountyAssignment.userId,
+    //   message: `Task "${bountyTemplate.title}" verified by ${verifierName}! Reward added.`,
+    //   isRead: false,
+    //   timestamp: Date.now()
+    // });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      console.error("verifyBounty error:", res.status, body);
+      throw new Error(body?.error || "Failed to verify bounty");
     }
   },
 
-  verifyBounty: (assignmentId: string): void => {
-    const db = readDB();
-    const index = db.bountyAssignments.findIndex(b => b.id === assignmentId);
-    
-    if(index !== -1) {
-      const bountyAssignment = db.bountyAssignments[index];
-      const bountyTemplate = db.bountyTemplates.find(t => t.id === bountyAssignment.bountyTemplateId);
-      const admin = db.users.find(u => u.id === bountyAssignment.assignedBy); // Assigner
-      const currentUser = db.users.find(u => u.id === storageService.getCurrentUser()?.id); // Verifier
-      const verifierName = currentUser?.name || admin?.name || 'Admin';
-      const child = db.users.find(u => u.id === bountyAssignment.userId);
+  deleteBountyAssignment: async (id: string): Promise<void> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
 
-      if(!bountyTemplate) return;
-
-      // 1. Update Bounty Status
-      bountyAssignment.status = BountyStatus.VERIFIED;
-
-      // 2. Create Prize Assignment based on reward logic
-      let prizeTemplateId = bountyTemplate.rewardTemplateId;
-      
-      // If reward is CASH/Generic (no template ID), create a temporary custom template for it or handle as money
-      if (!prizeTemplateId) {
-        // Create a specific prize instance for this payout
-        const cashTemplate: PrizeTemplate = {
-            id: 't_cash_' + Date.now(),
-            familyId: bountyAssignment.familyId,
-            title: bountyTemplate.rewardValue,
-            description: `Reward for completing: ${bountyTemplate.title}`,
-            emoji: '💵',
-            type: PrizeType.MONEY,
-            themeColor: 'bg-green-100 text-green-800 border-green-200'
-        };
-        db.templates.push(cashTemplate);
-        prizeTemplateId = cashTemplate.id;
+    const res = await fetch(apiUrl(`/bounty-assignments/${id}`), {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${token}`
       }
+    });
 
-      // Assign the prize
-      const prizeAssignment: AssignedPrize = {
-        id: 'ap_' + Date.now(),
-        familyId: bountyAssignment.familyId,
-        templateId: prizeTemplateId,
-        userId: bountyAssignment.userId,
-        assignedBy: bountyAssignment.assignedBy,
-        assignedAt: Date.now(),
-        status: PrizeStatus.AVAILABLE
-      };
-      db.assignments.push(prizeAssignment);
-
-      // 3. Log History
-      db.history.unshift({
-        id: 'h_' + Date.now(),
-        familyId: bountyAssignment.familyId,
-        userId: bountyAssignment.userId,
-        userName: child?.name || 'User',
-        title: bountyTemplate.title,
-        emoji: bountyTemplate.emoji,
-        action: 'VERIFIED_TASK',
-        timestamp: Date.now(),
-        assignerName: verifierName
-      });
-
-      // 4. Notify Child
-      db.notifications.push({
-        id: 'n_' + Date.now(),
-        familyId: bountyAssignment.familyId,
-        userId: bountyAssignment.userId,
-        message: `Task "${bountyTemplate.title}" verified by ${verifierName}! Reward added.`,
-        isRead: false,
-        timestamp: Date.now()
-      });
-
-      writeDB(db);
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      console.error("deleteBountyAssignment error:", res.status, body);
+      throw new Error(body?.error || "Failed to delete bounty assignment");
     }
-  },
-
-  deleteBountyAssignment: (id: string): void => {
-    const db = readDB();
-    db.bountyAssignments = db.bountyAssignments.filter(b => b.id !== id);
-    writeDB(db);
   },
 
   // --- COMMON ---
 
-  getHistoryEvents: (userId: string): HistoryEvent[] => {
-    const db = readDB();
-    return db.history.filter(h => h.userId === userId);
-  },
-  
-  getFamilyHistory: (familyId: string): HistoryEvent[] => {
-      const db = readDB();
-      return db.history.filter(h => h.familyId === familyId);
-  },
+  // Per-child history (WalletView)
+  getHistoryEvents: async (
+    familyId: string,
+    userId: string
+  ): Promise<HistoryEvent[]> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
 
-  getNotifications: (userId: string): AppNotification[] => {
-    const db = readDB();
-    return db.notifications.filter(n => n.userId === userId).sort((a, b) => b.timestamp - a.timestamp);
-  },
-
-  markNotificationRead: (id: string): void => {
-      const db = readDB();
-      const index = db.notifications.findIndex(n => n.id === id);
-      if (index !== -1) {
-          db.notifications[index].isRead = true;
-          writeDB(db);
+    const query = userId ? `?userId=${encodeURIComponent(userId)}` : "";
+    const res = await fetch(
+      apiUrl(`/families/${familyId}/history${query}`),
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
       }
+    );
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      console.error(
+        "getHistoryEvents error",
+        res.status,
+        body
+      );
+      throw new Error(body?.error || "Failed to load history");
+    }
+
+    const backendEvents = await res.json();
+
+    return backendEvents
+      .map((h: any): HistoryEvent => ({
+        id: h.id,
+        familyId: h.familyId,
+        userId: h.userId,
+        userName: h.userName,
+        title: h.title,
+        emoji: h.emoji,
+        action: h.action,
+        assignerName: h.assignerName,
+        // Frontend expects `timestamp` as number
+        timestamp:
+          typeof h.timestamp === "number"
+            ? h.timestamp
+            : h.createdAt
+            ? new Date(h.createdAt).getTime()
+            : Date.now(),
+      }))
+      .sort((a, b) => b.timestamp - a.timestamp);
   },
 
-  markAllNotificationsRead: (userId: string): void => {
-      const db = readDB();
-      let updated = false;
-      db.notifications.forEach(n => {
-          if (n.userId === userId && !n.isRead) {
-              n.isRead = true;
-              updated = true;
-          }
-      });
-      if (updated) writeDB(db);
+  // Family-wide history (AdminView)
+  getFamilyHistory: async (
+    familyId: string
+  ): Promise<HistoryEvent[]> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const res = await fetch(
+      apiUrl(`/families/${familyId}/history`),
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      console.error(
+        "getFamilyHistory error",
+        res.status,
+        body
+      );
+      throw new Error(body?.error || "Failed to load family history");
+    }
+
+    const backendEvents = await res.json();
+
+    return backendEvents
+      .map((h: any): HistoryEvent => ({
+        id: h.id,
+        familyId: h.familyId,
+        userId: h.userId,
+        userName: h.userName,
+        title: h.title,
+        emoji: h.emoji,
+        action: h.action,
+        assignerName: h.assignerName,
+        timestamp:
+          typeof h.timestamp === "number"
+            ? h.timestamp
+            : h.createdAt
+            ? new Date(h.createdAt).getTime()
+            : Date.now(),
+      }))
+      .sort((a, b) => b.timestamp - a.timestamp);
+  },
+
+  getNotifications: async (
+    userId: string
+  ): Promise<AppNotification[]> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const res = await fetch(
+      apiUrl(`/users/${userId}/notifications`),
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      console.error(
+        "getNotifications error",
+        res.status,
+        body
+      );
+      throw new Error(body?.error || "Failed to load notifications");
+    }
+
+    const backendNotifications = await res.json();
+
+    return backendNotifications
+      .map((n: any): AppNotification => ({
+        id: n.id,
+        userId: n.userId,
+        message: n.message,
+        isRead: !!n.isRead,
+        timestamp:
+          typeof n.timestamp === "number"
+            ? n.timestamp
+            : n.createdAt
+            ? new Date(n.createdAt).getTime()
+            : Date.now(),
+      }))
+      .sort((a, b) => b.timestamp - a.timestamp);
+  },
+
+  markNotificationRead: async (id: string): Promise<void> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const res = await fetch(
+      apiUrl(`/notifications/${id}/read`),
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      console.error(
+        "markNotificationRead error",
+        res.status,
+        body
+      );
+      throw new Error(
+        body?.error || "Failed to mark notification read"
+      );
+    }
+  },
+
+  markAllNotificationsRead: async (
+    userId: string
+  ): Promise<void> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const res = await fetch(
+      apiUrl(`/users/${userId}/notifications/read-all`),
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      console.error(
+        "markAllNotificationsRead error",
+        res.status,
+        body
+      );
+      throw new Error(
+        body?.error || "Failed to mark all notifications read"
+      );
+    }
   },
 };

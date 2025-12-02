@@ -82,7 +82,7 @@ const handleSignUp = async (e: React.FormEvent) => {
         <div className="bg-indigo-50 p-8 text-center border-b border-indigo-100">
           <div className="flex justify-center mb-4">
             <img
-              src="https://raw.githubusercontent.com/iCanHazSkillz/BribeBank/refs/heads/main/BribeBankLogo.png"
+              src="https://raw.githubusercontent.com/iCanHazSkillz/BribeBank/refs/heads/master/BribeBankLogo.png"
               alt="BribeBank Logo"
               className="w-32 h-32 object-contain drop-shadow-md"
             />
