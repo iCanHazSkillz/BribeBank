@@ -109,48 +109,54 @@ BribeBank/
 ├── reset-db.sh             # Dev DB reset helper
 └── README.md
 ```
+
+---
+
 ## Running Locally (Dev)
 ### Backend (bribebank-api)
-cd bribebank-api
-cp .env.example .env   # if you have one; otherwise create .env manually
+`cd bribebank-api`
+
+create `.env` file with your favorite editor
 
 
-.env should define something like:
+**.env should define something like:**
 
+```text
 DATABASE_URL=postgresql://bribebank:password@localhost:5432/bribebank?schema=public
 JWT_SECRET=change-me
 PORT=3001
 CORS_ORIGIN=http://localhost:5173
-
+```
 
 Then:
 
+```text
 npm install
 npx prisma migrate dev
-npm run dev    # or npm run start
-
+npm run dev`    # or npm run start
+```
 
 API will typically be on http://localhost:3001.
 
 ### Frontend (bribebank-frontend)
-cd bribebank-frontend
-npm install
+`cd bribebank-frontend`
+`npm install`
 
 
-config.ts should point to the API:
-
+**config.ts should point to the API:**
+```text
 export const API_BASE =
   import.meta.env.VITE_API_BASE || "http://localhost:3001";
 
-
+```
 (Optional) set VITE_API_BASE in .env:
 
-VITE_API_BASE=http://localhost:3001
+`VITE_API_BASE=http://localhost:3001`
 
 
 Then:
 
-npm run dev
+`npm run dev`
 
 
 Frontend will run on http://localhost:5173.
@@ -159,8 +165,9 @@ Frontend will run on http://localhost:5173.
 
 From the repo root:
 
-docker compose build
-docker compose up -d
+`docker compose build`
+
+`docker compose up -d`
 
 
 ## Roadmap Ideas
