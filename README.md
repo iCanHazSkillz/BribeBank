@@ -108,9 +108,9 @@ BribeBank/
 ├── docker-compose.yml      # Multi-container setup
 ├── reset-db.sh             # Dev DB reset helper
 └── README.md
-
-Running Locally (Dev)
-Backend (bribebank-api)
+```
+## Running Locally (Dev)
+### Backend (bribebank-api)
 cd bribebank-api
 cp .env.example .env   # if you have one; otherwise create .env manually
 
@@ -132,7 +132,7 @@ npm run dev    # or npm run start
 
 API will typically be on http://localhost:3001.
 
-Frontend (bribebank-frontend)
+### Frontend (bribebank-frontend)
 cd bribebank-frontend
 npm install
 
@@ -155,7 +155,7 @@ npm run dev
 
 Frontend will run on http://localhost:5173.
 
-Running with Docker
+### Running with Docker
 
 From the repo root:
 
@@ -163,21 +163,16 @@ docker compose build
 docker compose up -d
 
 
-Check logs:
+## Roadmap Ideas
 
-docker compose logs -f bribebank-api
-docker compose logs -f bribebank-frontend
+- Scheduled / recurring bounties
 
-Roadmap Ideas
+- In-app currency system and store for purchasing kid's wanted items
 
-Scheduled / recurring bounties
+- Expiry for tasks
 
-In-app currency system and store for purchasing kid's wanted items
+- Exportable history for parents
 
-Expiry for tasks
-
-Exportable history for parents
-
-License
+## License
 
 TBD.
