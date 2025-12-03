@@ -1,3 +1,4 @@
+![alt text](https://github.com/iCanHazSkillz/BribeBank/blob/master/bribebank-frontend/src/assets/BribeBankLogo.webp?raw=true)
 # BribeBank
 
 BribeBank is a **family rewards wallet** for parents and kids.
@@ -140,6 +141,7 @@ API will typically be on http://localhost:3001.
 
 ### Frontend (bribebank-frontend)
 `cd bribebank-frontend`
+
 `npm install`
 
 
