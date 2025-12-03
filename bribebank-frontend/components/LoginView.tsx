@@ -3,6 +3,7 @@ import { User } from "../types";
 import { storageService } from "../services/storageService";
 import { apiService } from "../services/apiService";
 import { Users, Lock, ArrowRight } from "lucide-react";
+import BribeBankLogo from "../src/assets/BribeBankLogo.webp";
 
 interface LoginViewProps {
   onLogin: (user: User) => void;
@@ -82,7 +83,7 @@ const handleSignUp = async (e: React.FormEvent) => {
         <div className="bg-indigo-50 p-8 text-center border-b border-indigo-100">
           <div className="flex justify-center mb-4">
             <img
-              src="https://raw.githubusercontent.com/iCanHazSkillz/BribeBank/refs/heads/master/BribeBankLogo.png"
+              src={BribeBankLogo}
               alt="BribeBank Logo"
               className="w-32 h-32 object-contain drop-shadow-md"
             />
