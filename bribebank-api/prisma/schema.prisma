@@ -54,8 +54,29 @@ model User {
   assignedPrizes    AssignedPrize[]
   bountyAssignments BountyAssignment[]
   historyEvents     HistoryEvent[]
+  pushSubscriptions PushSubscription[] 
 
   @@index([familyId, createdAt])
+}
+
+//--------------------------------------------------
+// PUSH SUBSCRIPTION (App Notifications)
+//--------------------------------------------------
+
+model PushSubscription {
+  id        String   @id @default(cuid())
+
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
 }
 
 enum Role {

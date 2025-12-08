@@ -9,6 +9,7 @@ import userRoutes from "./routes/users.js";
 import eventsRouter from "./routes/events.js";
 import historyRoutes from "./routes/history.js";
 import notificationRoutes from "./routes/notifications.js";
+import pushRoutes from "./routes/push.js";
 
 const app = express();
 
@@ -30,6 +31,7 @@ app.use(userRoutes);
 app.use("/events", eventsRouter);
 app.use(historyRoutes);
 app.use(notificationRoutes);
+app.use("/push", pushRoutes);
 
 app.get("/", (_req, res) => {
     res.json({ message: "BribeBank API Online" });

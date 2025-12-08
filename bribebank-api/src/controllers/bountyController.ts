@@ -3,6 +3,7 @@ import { BountyStatus, Role, PrizeStatus, PrizeType } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { assertFamilyMember, assertParent, getRequestUser } from "../lib/authHelpers.js";
 import { broadcastToFamily } from "../realtime/eventBus.js";
+import { sendPushToUser } from "../services/pushService.js";
 import { SseEvent } from "../types/sseEvents";
 import { addHistoryEvent } from "../services/historyService.js";
 import { addNotification } from "../services/notificationService.js";
@@ -24,7 +25,7 @@ export const getFamilyBounties = async (req: Request, res: Response) => {
 
     const bounties = await prisma.bounty.findMany({
       where: { familyId },
-      orderBy: { createdAt: "asc" },
+      orderBy: { createdAt: "desc" },
     });
 
     return res.json(bounties);
@@ -259,6 +260,9 @@ export const getFamilyBountyAssignments = async (
  * POST /families/:familyId/bounty-assignments
  * Assign a bounty to a child
  */
+// Make sure you have this import at the top of bountyController.ts:
+// import { sendPushToUser } from "../services/pushService.js";
+
 export const assignBounty = async (req: Request, res: Response) => {
   const { familyId } = req.params;
   const { bountyId, userId } = req.body;
@@ -290,9 +294,16 @@ export const assignBounty = async (req: Request, res: Response) => {
       return res.status(404).json({ error: "USER_NOT_FOUND" });
     }
 
+    if (child.id === parent.id) {
+      return res
+        .status(400)
+        .json({ error: "CANNOT_ASSIGN_TASK_TO_SELF" });
+    }
+
     const parentName = parent.displayName || parent.username || "Parent";
     const childName = child.displayName || child.username || "Child";
     const emoji = bounty.emoji || "🧹";
+    const title = bounty.title || "Task";
 
     // Assignment + history + notification as one atomic unit
     const assignment = await prisma.$transaction(async (tx) => {
@@ -317,9 +328,9 @@ export const assignBounty = async (req: Request, res: Response) => {
           familyId,
           userId: child.id,
           userName: childName,
-          title: bounty.title,
+          title,
           emoji,
-          action: "ASSIGNED_TASK",
+          action: "TASK_ASSIGNED", // keep your naming consistent across app
           assignerName: parentName,
         },
         tx
@@ -328,13 +339,32 @@ export const assignBounty = async (req: Request, res: Response) => {
       await addNotification(
         {
           userId: child.id,
-          message: `${parentName} assigned you a new task: ${bounty.title}`,
+          message: `${parentName} assigned you a new task: ${title}`,
         },
         tx
       );
 
       return created;
     });
+
+    // Push (non-blocking safety)
+    try {
+      await sendPushToUser(child.id, {
+        title: "New task assigned 🧹",
+        body: `${parentName} assigned: ${title}`,
+        tag: "task-assigned",
+        type: "TASK_ASSIGNED",
+        familyId,
+        bountyId: bounty.id,
+        assignmentId: assignment.id,
+
+        // Deep link for your App.tsx + WalletView parser
+        url: "/?view=wallet&walletTab=tasks",
+      });
+    } catch (pushErr) {
+      // Don't fail the request just because push failed
+      console.warn("assignBounty push failed:", pushErr);
+    }
 
     const event: SseEvent = {
       type: "WALLET_UPDATE",
@@ -356,7 +386,7 @@ export const assignBounty = async (req: Request, res: Response) => {
   }
 };
 
-
+// POST /bounty-assignments/:id/accept
 // POST /bounty-assignments/:id/accept
 export const acceptAssignedBounty = async (req: Request, res: Response) => {
   const { id } = req.params;
@@ -368,10 +398,16 @@ export const acceptAssignedBounty = async (req: Request, res: Response) => {
   try {
     const assignment = await prisma.bountyAssignment.findUnique({
       where: { id },
+      include: { bounty: true },
     });
 
     if (!assignment) {
       return res.status(404).json({ error: "NOT_FOUND" });
+    }
+
+    const bounty = assignment.bounty;
+    if (!bounty) {
+      return res.status(404).json({ error: "BOUNTY_NOT_FOUND" });
     }
 
     // Only the assigned child can accept
@@ -384,61 +420,136 @@ export const acceptAssignedBounty = async (req: Request, res: Response) => {
       return res.status(400).json({ error: "INVALID_STATUS" });
     }
 
-    // Load bounty for details
-    const bounty = await prisma.bounty.findUnique({
-      where: { id: assignment.bountyId },
-    });
-
-    if (!bounty) {
-      return res.status(404).json({ error: "BOUNTY_NOT_FOUND" });
-    }
-
-    const updated = await prisma.bountyAssignment.update({
-      where: { id },
-      data: {
-        status: BountyStatus.IN_PROGRESS,
-      },
-    });
-
-    // FIRST COME FIRST SERVED: remove other OFFERED assignments
-    if (bounty.isFCFS) {
-      await prisma.bountyAssignment.deleteMany({
-        where: {
-          bountyId: assignment.bountyId,
-          familyId: assignment.familyId,
-          status: BountyStatus.OFFERED,
-          NOT: { id: assignment.id },
-        },
-      });
-    }
-
     const childName = user.displayName || user.username || "Child";
     const emoji = bounty.emoji || "🧹";
+    const title = bounty.title || "Task";
 
-    // History: child accepted the task
-    await addHistoryEvent({
-      familyId: assignment.familyId,
-      userId: assignment.userId,
-      userName: childName,
-      title: bounty.title,
-      emoji,
-      action: "ACCEPTED_TASK",
-      assignerName: childName, // actor is the child
+    // We'll capture these inside the transaction so we don't re-query later
+    let parentIds: string[] = [];
+    let fcfsLoserUserIds: string[] = [];
+
+    const updated = await prisma.$transaction(async (tx) => {
+      // If FCFS, preload the other OFFERED assignments so we can notify losers
+      if (bounty.isFCFS) {
+        const others = await tx.bountyAssignment.findMany({
+          where: {
+            bountyId: assignment.bountyId,
+            familyId: assignment.familyId,
+            status: BountyStatus.OFFERED,
+            NOT: { id: assignment.id },
+          },
+          select: { id: true, userId: true },
+        });
+
+        fcfsLoserUserIds = others.map((o) => o.userId);
+
+        if (others.length) {
+          await tx.bountyAssignment.deleteMany({
+            where: { id: { in: others.map((o) => o.id) } },
+          });
+        }
+      }
+
+      const updatedAssignment = await tx.bountyAssignment.update({
+        where: { id },
+        data: { status: BountyStatus.IN_PROGRESS },
+      });
+
+      await addHistoryEvent(
+        {
+          familyId: assignment.familyId,
+          userId: assignment.userId,
+          userName: childName,
+          title,
+          emoji,
+          action: "TASK_ACCEPTED", // keep your action string for consistency
+          assignerName: childName, // actor is the child
+        },
+        tx
+      );
+
+      const parents = await tx.user.findMany({
+        where: { familyId: assignment.familyId, role: "PARENT" },
+        select: { id: true },
+      });
+
+      parentIds = parents.map((p) => p.id);
+
+      // Parent in-app notifications
+      await Promise.all(
+        parentIds.map((pid) =>
+          addNotification(
+            {
+              userId: pid,
+              message: bounty.isFCFS
+                ? `${childName} accepted FCFS task: ${title}`
+                : `${childName} accepted task: ${title}`,
+            },
+            tx
+          )
+        )
+      );
+
+      // FCFS loser in-app notifications
+      if (bounty.isFCFS && fcfsLoserUserIds.length) {
+        await Promise.all(
+          fcfsLoserUserIds.map((uid) =>
+            addNotification(
+              {
+                userId: uid,
+                message: `Too late — "${title}" was claimed by ${childName}.`,
+              },
+              tx
+            )
+          )
+        );
+      }
+
+      return updatedAssignment;
     });
 
-    // Notify all parents
-    const parents = await prisma.user.findMany({
-      where: { familyId: assignment.familyId, role: "PARENT" },
-    });
+    // Push to parents (after transaction succeeds)
+    try {
+      await Promise.all(
+        parentIds.map((pid) =>
+          sendPushToUser(pid, {
+            title: "Task accepted ✅",
+            body: bounty.isFCFS
+              ? `${childName} accepted FCFS task: ${title}`
+              : `${childName} accepted: ${title}`,
+            tag: "task-accepted",
+            type: "TASK_ACCEPTED",
+            familyId: assignment.familyId,
+            bountyId: bounty.id,
+            assignmentId: assignment.id,
 
-    await Promise.all(
-      parents.map((parent) =>
-        addNotification({
-          userId: parent.id,
-          message: `${childName} accepted task: ${bounty.title}`,
-        })
-      )
-    );
+            // Accept doesn't need approvals — tasks view is more logical
+            url: "/?view=admin&adminTab=tasks",
+          })
+        )
+      );
+    } catch (pushErr) {
+      console.warn("acceptAssignedBounty parent push failed:", pushErr);
+    }
+
+    // Optional: push to FCFS losers (nice UX)
+    if (bounty.isFCFS && fcfsLoserUserIds.length) {
+      await Promise.all(
+        fcfsLoserUserIds.map((uid) =>
+          sendPushToUser(uid, {
+            title: "Task already claimed",
+            body: `"${title}" was claimed by ${childName}.`,
+            tag: "task-fcfs-missed",
+            type: "TASK_FCFS_MISSED",
+            familyId: assignment.familyId,
+            bountyId: bounty.id,
+            url: "/?view=wallet&walletTab=tasks",
+          }).catch((err) =>
+            console.warn("acceptAssignedBounty loser push failed:", err)
+          )
+        )
+      );
+    }
 
     const event: SseEvent = {
       type: "WALLET_UPDATE",
@@ -459,6 +570,8 @@ export const acceptAssignedBounty = async (req: Request, res: Response) => {
     return res.status(500).json({ error: "INTERNAL_SERVER_ERROR" });
   }
 };
+
+
 
 // POST /bounty-assignments/:id/complete
 export const completeAssignedBounty = async (req: Request, res: Response) => {
@@ -498,52 +611,91 @@ export const completeAssignedBounty = async (req: Request, res: Response) => {
       return res.status(400).json({ error: "INVALID_STATUS" });
     }
 
-    const updated = await prisma.bountyAssignment.update({
-      where: { id },
-      data: {
-        status: BountyStatus.COMPLETED,
-        completedAt: new Date(),
-      },
-    });
-
     const childName = child.displayName || child.username || "Child";
     const emoji = bounty.emoji || "🧹";
+    const title = bounty.title || "Task";
+    const now = new Date();
 
-    // History: child marked task complete (pending verification)
-    await addHistoryEvent({
-      familyId: assignment.familyId,
-      userId: assignment.userId,
-      userName: childName,
-      title: bounty.title,
-      emoji,
-      action: "COMPLETED_TASK",
-      assignerName: childName, // actor is the child
+    let parentIds: string[] = [];
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const updatedAssignment = await tx.bountyAssignment.update({
+        where: { id },
+        data: {
+          status: BountyStatus.COMPLETED,
+          completedAt: now,
+        },
+      });
+
+      await addHistoryEvent(
+        {
+          familyId: assignment.familyId,
+          userId: assignment.userId,
+          userName: childName,
+          title,
+          emoji,
+          action: "TASK_COMPLETED",
+          assignerName: childName, // actor is the child
+        },
+        tx
+      );
+
+      const parents = await tx.user.findMany({
+        where: { familyId: assignment.familyId, role: "PARENT" },
+        select: { id: true },
+      });
+
+      parentIds = parents.map((p) => p.id);
+
+      await Promise.all(
+        parentIds.map((pid) =>
+          addNotification(
+            {
+              userId: pid,
+              message: `${childName} marked task "${title}" as complete. Waiting for verification.`,
+            },
+            tx
+          )
+        )
+      );
+
+      return updatedAssignment;
     });
 
-    // Notify all parents that verification is needed
-    const parents = await prisma.user.findMany({
-      where: { familyId: assignment.familyId, role: "PARENT" },
-    });
+    // Push to parents: "verification needed"
+    try {
+      await Promise.all(
+        parentIds.map((pid) =>
+          sendPushToUser(pid, {
+            title: "Task completed 🧹",
+            body: `${childName} completed: ${title}. Tap to verify.`,
+            tag: "task-completed",
+            type: "TASK_COMPLETED",
+            familyId: assignment.familyId,
+            bountyId: bounty.id,
+            assignmentId: assignment.id,
+            childId: child.id,
 
-    await Promise.all(
-      parents.map((parent) =>
-        addNotification({
-          userId: parent.id,
-          message: `${childName} marked task "${bounty.title}" as complete. Waiting for verification.`,
-        })
-      )
-    );
+            // Deep link to parent approvals
+            url: "/?view=admin&adminTab=approvals",
+          })
+        )
+      );
+    } catch (pushErr) {
+      console.warn("completeAssignedBounty push failed:", pushErr);
+    }
 
     // Broadcast to admin dashboards (child action)
     const event: SseEvent = {
       type: "CHILD_ACTION",
+      familyId: assignment.familyId,
       subtype: "TASK_COMPLETED",
       id,
       userId: user.id,
       timestamp: Date.now(),
     };
 
-    broadcastToFamily(user.familyId, event);
+    broadcastToFamily(assignment.familyId, event);
 
     return res.json(updated);
   } catch (err: any) {
@@ -587,6 +739,12 @@ export const verifyAssignedBounty = async (req: Request, res: Response) => {
     const parent = await assertFamilyMember(req, existingAssignment.familyId);
     assertParent(parent);
 
+    if (parent.id === child.id) {
+      return res
+        .status(403)
+        .json({ error: "CANNOT_VERIFY_OWN_TASK" });
+    }
+    
     if (existingAssignment.status !== BountyStatus.COMPLETED) {
       return res.status(400).json({ error: "INVALID_STATUS" });
     }
@@ -623,7 +781,7 @@ export const verifyAssignedBounty = async (req: Request, res: Response) => {
       } else {
         // fallback when template reference is stale
         snapshotTitle = bounty.rewardValue;
-        snapshotEmoji = "💵";
+        snapshotEmoji = "🎀";
         snapshotDescription = `Reward for completing: ${bounty.title}`;
         snapshotType = PrizeType.PRIVILEGE;
         snapshotThemeColor = "#22c55e";
@@ -631,7 +789,7 @@ export const verifyAssignedBounty = async (req: Request, res: Response) => {
     } else {
       // Bounty-based reward only
       snapshotTitle = bounty.rewardValue;
-      snapshotEmoji = "💵";
+      snapshotEmoji = "🎀";
       snapshotDescription = `Reward for completing: ${bounty.title}`;
       snapshotType = PrizeType.PRIVILEGE;
       snapshotThemeColor = "#22c55e";
@@ -682,6 +840,22 @@ export const verifyAssignedBounty = async (req: Request, res: Response) => {
       return prize;
     });
 
+    // --- PUSH NOTIFICATION (fixed) ---
+    try {
+      await sendPushToUser(child.id, {
+        title: "Your task was verified ✅",
+        body: `${parentName} verified: ${bounty.title}`,
+        tag: "reward-verified",
+        type: "REWARD_VERIFIED",
+        familyId: existingAssignment.familyId,
+        assignmentId: existingAssignment.id,
+        // If you want a deep link, adjust as desired:
+        url: "/?view=wallet&walletTab=wallet",
+      });
+    } catch (pushErr) {
+      console.warn("verifyAssignedBounty push failed:", pushErr);
+    }
+
     const event: SseEvent = {
       type: "WALLET_UPDATE",
       familyId: existingAssignment.familyId,
@@ -701,6 +875,7 @@ export const verifyAssignedBounty = async (req: Request, res: Response) => {
     return res.status(500).json({ error: "INTERNAL_SERVER_ERROR" });
   }
 };
+
 
 // DELETE /bounty-assignments/:id
 export const deleteAssignedBounty = async (req: Request, res: Response) => {

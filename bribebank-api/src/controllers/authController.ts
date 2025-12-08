@@ -36,8 +36,21 @@ export const registerParent = async (req: Request, res: Response) => {
   console.log("req.body =", req.body);
 
   try {
+    const { username, password, displayName, familyName } = req.body as {
+      username?: string;
+      password?: string;
+      displayName?: string;
+      familyName?: string;
+    };
+
+    if (!username || !password || !displayName || !familyName) {
+      return res.status(400).json({ error: "MISSING_FIELDS" });
+    }
+
+    const normalizedUsername = username.trim().toLowerCase();
+
     console.log("Hashing password...");
-    const hashed = await bcrypt.hash(req.body.password, 10);
+    const hashed = await bcrypt.hash(password, 10);
 
     console.log("Generating join code...");
     const joinCode = generateJoinCode();
@@ -45,7 +58,7 @@ export const registerParent = async (req: Request, res: Response) => {
     console.log("Creating family...");
     const family = await prisma.family.create({
       data: {
-        name: req.body.familyName,
+        name: familyName,
         joinCode,
         joinCodeExpiry: new Date(Date.now() + 86400000),
       },
@@ -55,9 +68,9 @@ export const registerParent = async (req: Request, res: Response) => {
     const user = await prisma.user.create({
       data: {
         familyId: family.id,
-        username: req.body.username,
+        username: normalizedUsername,      // <-- canonical lowercase
         password: hashed,
-        displayName: req.body.displayName,
+        displayName,
         role: "PARENT",
         avatarColor: pickAvatarColor(),
       },
@@ -70,11 +83,9 @@ export const registerParent = async (req: Request, res: Response) => {
       token: signToken(user.id),
       joinCode,
     });
-
   } catch (err: unknown) {
-    // Proper narrowing
     if (err instanceof Prisma.PrismaClientKnownRequestError) {
-      // Unique constraint violation
+      // Unique constraint violation on username
       if (err.code === "P2002") {
         return res.status(409).json({ error: "USERNAME_TAKEN" });
       }
@@ -86,65 +97,107 @@ export const registerParent = async (req: Request, res: Response) => {
 };
 
 
+
 // -----------------------------------------------------
 // LOGIN
 // -----------------------------------------------------
 export const login = async (req: Request, res: Response) => {
-    try {
-        const { username, password } = req.body;
+  try {
+    const { username, password } = req.body as {
+      username?: string;
+      password?: string;
+    };
 
-        const user = await prisma.user.findUnique({ where: { username } });
-        if (!user) return res.status(400).json({ error: "Invalid credentials" });
-
-        const valid = await bcrypt.compare(password, user.password);
-        if (!valid) return res.status(400).json({ error: "Invalid credentials" });
-
-        return res.json({
-            token: signToken(user.id),
-        });
-    } catch {
-        return res.status(400).json({ error: "Login failed" });
+    if (!username || !password) {
+      return res.status(400).json({ error: "MISSING_CREDENTIALS" });
     }
+
+    const normalizedUsername = username.trim().toLowerCase();
+
+    const user = await prisma.user.findUnique({
+      where: { username: normalizedUsername }, // <-- field is `username`
+    });
+
+    if (!user) {
+      return res.status(400).json({ error: "Invalid credentials" });
+    }
+
+    const valid = await bcrypt.compare(password, user.password);
+    if (!valid) {
+      return res.status(400).json({ error: "Invalid credentials" });
+    }
+
+    return res.json({
+      token: signToken(user.id),
+    });
+  } catch (err) {
+    console.error("login error:", err);
+    return res.status(400).json({ error: "Login failed" });
+  }
 };
+
 
 // -----------------------------------------------------
 // CHILD JOIN
 // -----------------------------------------------------
 export const joinFamily = async (req: Request, res: Response) => {
-    try {
-        const { joinCode, username, password, displayName } = req.body;
+  try {
+    const { joinCode, username, password, displayName } = req.body as {
+      joinCode?: string;
+      username?: string;
+      password?: string;
+      displayName?: string;
+    };
 
-        const family = await prisma.family.findFirst({
-            where: {
-                joinCode,
-                joinCodeExpiry: { gt: new Date() },
-            },
-        });
-
-        if (!family)
-            return res.status(400).json({ error: "Invalid or expired join code" });
-
-        const hashed = await bcrypt.hash(password, 10);
-
-        const user = await prisma.user.create({
-            data: {
-                familyId: family.id,
-                username,
-                password: hashed,
-                displayName,
-                role: "CHILD",
-                avatarColor: pickAvatarColor(),
-            },
-        });
-
-        return res.json({
-            message: "Child account created",
-            token: signToken(user.id),
-            familyName: family.name,
-        });
-    } catch {
-        return res.status(400).json({ error: "Child registration failed" });
+    if (!joinCode || !username || !password || !displayName) {
+      return res.status(400).json({ error: "MISSING_FIELDS" });
     }
+
+    const normalizedJoinCode = joinCode.trim().toUpperCase();
+    const normalizedUsername = username.trim().toLowerCase();
+
+    const family = await prisma.family.findFirst({
+      where: {
+        joinCode: normalizedJoinCode,
+        joinCodeExpiry: { gt: new Date() },
+      },
+    });
+
+    if (!family) {
+      return res
+        .status(400)
+        .json({ error: "Invalid or expired join code" });
+    }
+
+    const hashed = await bcrypt.hash(password, 10);
+
+    const user = await prisma.user.create({
+      data: {
+        familyId: family.id,
+        username: normalizedUsername, // <-- canonical lowercase
+        password: hashed,
+        displayName,
+        role: "CHILD",
+        avatarColor: pickAvatarColor(),
+      },
+    });
+
+    return res.json({
+      message: "Child account created",
+      token: signToken(user.id),
+      familyName: family.name,
+    });
+  } catch (err: unknown) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError) {
+      if (err.code === "P2002") {
+        // unique constraint violation (likely username)
+        return res.status(409).json({ error: "USERNAME_TAKEN" });
+      }
+    }
+
+    console.error("joinFamily error:", err);
+    return res.status(400).json({ error: "Child registration failed" });
+  }
 };
 
 // -----------------------------------------------------

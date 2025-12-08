@@ -30,9 +30,11 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
       return;
     }
 
+    const normalizedUsername = username.trim().toLowerCase();
+
     try {
       // Single source of truth for auth + local seeding
-      const user = await storageService.login(username, password);
+      const user = await storageService.login(normalizedUsername, password);
       onLogin(user);
     } catch (err: any) {
       console.error("Login failed:", err);
@@ -58,7 +60,8 @@ const handleSignUp = async (e: React.FormEvent) => {
       // 2) Immediately log in via the normal path so we:
       //    - get a valid JWThing-a-magig
       //    - seed the local DB in one consistent place
-      const user = await storageService.login(username, password);
+      const normalizedUsername = username.trim().toLowerCase();
+      const user = await storageService.login(normalizedUsername, password);
       onLogin(user);
     } catch (err: any) {
       console.error("Registration/login failed:", err);
@@ -147,6 +150,9 @@ const handleSignUp = async (e: React.FormEvent) => {
                   placeholder="username"
                   className="w-full p-3 pl-10 bg-white rounded-xl border border-gray-300 text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
                   value={username}
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
                   onChange={(e) => setUsername(e.target.value)}
                 />
                 <Users

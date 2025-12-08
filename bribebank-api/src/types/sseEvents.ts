@@ -1,12 +1,17 @@
 // shared SseEvent type (backend + frontend)
 
 export type SseEvent =
-  | { type: "CONNECTED" }
+  | {
+      type: "CONNECTED";
+      message: string;
+      timestamp: number;
+    }
   | {
       type: "CHILD_ACTION";
+      familyId: string;
       subtype: "REWARD_CLAIMED" | "TASK_COMPLETED";
-      id: string;        // assignment id
-      userId: string;    // child id
+      id: string;          // assignment id
+      userId: string;      // child id
       timestamp: number;
     }
   | {

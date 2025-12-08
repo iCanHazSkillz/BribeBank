@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import { sendPushToUser } from "../services/pushService.js";
 import { PrizeStatus, PrizeType, Role } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { assertFamilyMember, assertParent, getRequestUser } from "../lib/authHelpers.js";
@@ -24,7 +25,7 @@ export const getFamilyRewards = async (req: Request, res: Response) => {
 
     const rewards = await prisma.reward.findMany({
       where: { familyId },
-      orderBy: { createdAt: "asc" },
+      orderBy: { createdAt: "desc" },
     });
 
     return res.json(rewards);
@@ -243,6 +244,12 @@ export const assignPrize = async (req: Request, res: Response) => {
       return res.status(404).json({ error: "USER_NOT_FOUND" });
     }
 
+    if (child.id === parent.id) {
+      return res
+        .status(400)
+        .json({ error: "CANNOT_ASSIGN_REWARD_TO_SELF" });
+    }
+
     const parentName = parent.displayName || parent.username || "Parent";
     const childName = child.displayName || child.username || "Child";
     const emoji = template.emoji || "🎁";
@@ -288,6 +295,24 @@ export const assignPrize = async (req: Request, res: Response) => {
 
       return created;
     });
+
+    try {
+      await sendPushToUser(child.id, {
+        title: "New reward 🎁",
+        body: `${parentName} gave you: ${template.title}`,
+        tag: "reward-assigned",
+        type: "REWARD_ASSIGNED",
+        familyId,
+        assignmentId: assignment.id,
+        templateId: template.id,
+
+        // Deep link for your App.tsx parser
+        url: "/?view=wallet",
+      });
+    } catch (pushErr) {
+      // Don't fail the request just because push failed
+      console.warn("assignPrize push failed:", pushErr);
+    }
 
     const event: SseEvent = {
       type: "WALLET_UPDATE",
@@ -377,16 +402,31 @@ export const claimAssignedPrize = async (req: Request, res: Response) => {
       )
     );
 
+    // Web Push: notify all parents
+    await Promise.all(
+      parents.map((parent) =>
+        sendPushToUser(parent.id, {
+          title: "Reward claimed",
+          body: `${childName} wants to claim: ${title}`,
+          type: "REWARD_CLAIMED",
+          familyId: assignment.familyId,
+          assignmentId: assignment.id,
+          url: "/?view=admin&adminTab=approvals",
+        })
+      )
+    );
+
     // SSE: broadcast child action to admin dashboard(s)
     const event: SseEvent = {
       type: "CHILD_ACTION",
+      familyId: assignment.familyId,
       subtype: "REWARD_CLAIMED",
-      id,
-      userId: user.id,
+      id: assignment.id,
+      userId: assignment.id,
       timestamp: Date.now(),
     };
 
-    broadcastToFamily(user.familyId, event);
+    broadcastToFamily(assignment.familyId, event);
 
     return res.json(updated);
   } catch (err: any) {
@@ -420,6 +460,12 @@ export const approveAssignedPrize = async (req: Request, res: Response) => {
     const parent = await assertFamilyMember(req, assignment.familyId);
     assertParent(parent);
 
+    if (parent.id === assignment.userId) {
+      return res
+        .status(403)
+        .json({ error: "CANNOT_APPROVE_OWN_REWARD" });
+    }
+
     if (assignment.status !== PrizeStatus.PENDING_APPROVAL) {
       return res.status(400).json({ error: "INVALID_STATUS" });
     }
@@ -451,6 +497,24 @@ export const approveAssignedPrize = async (req: Request, res: Response) => {
       userId: assignment.userId,
       message: `${parentName} approved your reward: ${title}`,
     });
+
+    try {
+      await sendPushToUser(assignment.userId, {
+        title: "Your reward was approved ✅",
+        body: `${parentName} approved: ${title}`,
+        tag: "reward-approved",
+        type: "REWARD_APPROVED",
+        familyId: assignment.familyId,
+        assignmentId: assignment.id,
+        templateId: assignment.templateId ?? undefined,
+
+        // Deep link for your App.tsx parser
+        url: "/?view=wallet&walletTab=history",
+      });
+    } catch (pushErr) {
+      // Don't fail the request just because push failed
+      console.warn("approveAssignedPrize push failed:", pushErr);
+    }
 
     const event: SseEvent = {
       type: "WALLET_UPDATE",
@@ -491,9 +555,12 @@ export const rejectAssignedPrize = async (req: Request, res: Response) => {
     const parent = await assertFamilyMember(req, assignment.familyId);
     assertParent(parent);
 
-    const user = await assertFamilyMember(req, assignment.familyId);
-    assertParent(user);
-
+    if (parent.id === assignment.userId) {
+      return res
+        .status(403)
+        .json({ error: "CANNOT_REJECT_OWN_REWARD" });
+    }
+    
     if (assignment.status !== PrizeStatus.PENDING_APPROVAL) {
       return res.status(400).json({ error: "INVALID_STATUS" });
     }
@@ -528,6 +595,24 @@ export const rejectAssignedPrize = async (req: Request, res: Response) => {
       }`,
     });
     
+    try {
+      await sendPushToUser(assignment.userId, {
+        title: "Your reward was denied ❌",
+        body: `${parentName} rejected: ${title}`,
+        tag: "reward-rejected",
+        type: "REWARD_REJECTED",
+        familyId: assignment.familyId,
+        assignmentId: assignment.id,
+        templateId: assignment.templateId ?? undefined,
+
+        // Deep link for your App.tsx parser
+        url: "/?view=wallet&walletTab=history",
+      });
+    } catch (pushErr) {
+      console.warn("rejectAssignedPrize push failed:", pushErr);
+    }
+
+
     const event: SseEvent = {
       type: "WALLET_UPDATE",
       familyId: assignment.familyId,

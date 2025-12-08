@@ -8,7 +8,16 @@ import { SseEvent } from "../types/sseEvents";
 
 interface WalletViewProps {
   currentUser: User;
+  initialTab?: "wallet" | "tasks" | "history";
 }
+
+type WalletTab = "wallet" | "tasks" | "history";
+
+const getWalletTabFromUrl = (): WalletTab | null => {
+  const params = new URLSearchParams(window.location.search);
+  const raw = params.get("walletTab") || params.get("tab");
+  return raw === "wallet" || raw === "tasks" || raw === "history" ? raw : null;
+};
 
 interface GroupedPrize {
     templateId: string;
@@ -19,9 +28,10 @@ interface GroupedPrize {
     assignedBy: string;
 }
 
-export const WalletView: React.FC<WalletViewProps> = ({ currentUser }) => {
-  const [tab, setTab] = useState<'wallet' | 'tasks' | 'history'>('wallet');
-  
+export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab }) => {
+  const [tab, setTab] = useState<WalletTab>(() => {
+    return initialTab ?? getWalletTabFromUrl() ?? "wallet";
+  }); 
   // Data State
   const [myPrizes, setMyPrizes] = useState<AssignedPrize[]>([]);
   const [myBounties, setMyBounties] = useState<BountyAssignment[]>([]);
@@ -100,7 +110,6 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser }) => {
     }
   };
 
-
   useEffect(() => {
     refreshData();
   }, [currentUser.id]);
@@ -150,7 +159,62 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser }) => {
     return () => source.close();
   }, [currentUser?.familyId]);
 
-  const resolveUserName = (id: string) => familyUsers.find(u => u.id === id)?.name || 'Admin';
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        refreshData();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, [refreshData]);
+  
+  useEffect(() => {
+    if (initialTab && (initialTab === "wallet" || initialTab === "tasks" || initialTab === "history")) {
+      setTab(initialTab);
+    }
+  }, [initialTab]);
+
+  useEffect(() => {
+    const applyTabFromUrl = () => {
+      const t = getWalletTabFromUrl();
+      if (t) setTab(t);
+
+      // only remove params if we actually used one
+      if (t) {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("walletTab");
+        url.searchParams.delete("tab");
+        window.history.replaceState({}, "", url.toString());
+      }
+    };
+
+    applyTabFromUrl();
+
+    window.addEventListener("focus", applyTabFromUrl);
+    window.addEventListener("popstate", applyTabFromUrl);
+    document.addEventListener("visibilitychange", applyTabFromUrl);
+
+    return () => {
+      window.removeEventListener("focus", applyTabFromUrl);
+      window.removeEventListener("popstate", applyTabFromUrl);
+      document.removeEventListener("visibilitychange", applyTabFromUrl);
+    };
+  }, []);
+
+  const resolveUserName = (value?: string | null) => {
+    if (!value) return "Parent"; // fallback label
+
+    // If the value happens to be a user ID, resolve against familyUsers
+    const byId = familyUsers.find((u) => u.id === value);
+    if (byId) return byId.name;
+
+    // Otherwise it's already a display name from the backend
+    return value;
+  };
 
   // Actions
   const handleClaim = async (assignmentId: string) => {
@@ -241,41 +305,71 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser }) => {
     }
   };
 
+// --------- Grouped Prizes (fixed snapshot stacking) ---------
+
+const normalize = (v?: string | null) => (v ?? "").trim().toLowerCase();
+
+// For rewards that DON'T have a templateId (e.g., created from bounties),
+// build a stable "reward identity" so only truly identical rewards stack.
+const getSnapshotIdentity = (p: any) => {
+  const title = normalize(p.title);
+  const emoji = (p.emoji ?? "").trim();
+  const type = String(p.type ?? "");
+  const color = normalize(p.themeColor);
+
+  // Intentionally NOT including description so
+  // "Reward for completing: X" doesn't prevent stacking identical rewards.
+  return `${title}|${emoji}|${type}|${color}`;
+};
+
 const groupedPrizes: GroupedPrize[] = Object.values(
-    myPrizes.reduce((acc, prize) => {
-      if (prize.status === PrizeStatus.REDEEMED) return acc;
+  myPrizes.reduce((acc, prize) => {
+    if (prize.status === PrizeStatus.REDEEMED) return acc;
 
-      const key = `${prize.templateId ?? 'snapshot'}-${prize.status}`;
+    const hasTemplate = !!prize.templateId;
 
-      if (!acc[key]) {
-        const template = templates.find((t) => t.id === prize.templateId);
+    const baseKey = hasTemplate
+      ? `T:${prize.templateId}`
+      : `S:${getSnapshotIdentity(prize)}`;
 
-        const resolvedTemplate: PrizeTemplate = {
-          id: template?.id || 'snapshot',
-          familyId: prize.familyId,
-          title: prize.title || template?.title || 'Unknown',
-          description:
-            prize.description ?? template?.description ?? '?',
-          emoji: prize.emoji || template?.emoji || '❓',
-          type: prize.type ?? template?.type ?? PrizeType.CUSTOM,
-          themeColor: prize.themeColor ?? template?.themeColor
-        };
+    const key = `${baseKey}-${prize.status}`;
 
-        acc[key] = {
-          templateId: prize.templateId ?? 'snapshot',
-          template: resolvedTemplate,
-          ids: [],
-          count: 0,
-          status: prize.status,
-          assignedBy: resolveUserName(prize.assignedBy)
-        };
-      }
+    if (!acc[key]) {
+      const template = hasTemplate
+        ? templates.find((t) => t.id === prize.templateId)
+        : undefined;
 
-      acc[key].ids.push(prize.id);
-      acc[key].count++;
-      return acc;
-    }, {} as Record<string, GroupedPrize>)
-  );
+      // Use a stable "group template id" for snapshots so UI types stay happy.
+      const groupTemplateId = hasTemplate
+        ? (prize.templateId as string)
+        : `snapshot:${getSnapshotIdentity(prize)}`;
+
+      const resolvedTemplate: PrizeTemplate = {
+        id: template?.id || groupTemplateId,
+        familyId: prize.familyId,
+        title: prize.title || template?.title || "Unknown",
+        description: prize.description ?? template?.description ?? "?",
+        emoji: prize.emoji || template?.emoji || "❓",
+        type: prize.type ?? template?.type ?? PrizeType.CUSTOM,
+        themeColor: prize.themeColor ?? template?.themeColor
+      };
+
+      acc[key] = {
+        templateId: groupTemplateId,
+        template: resolvedTemplate,
+        ids: [],
+        count: 0,
+        status: prize.status,
+        assignedBy: resolveUserName(prize.assignedBy)
+      };
+    }
+
+    acc[key].ids.push(prize.id);
+    acc[key].count++;
+    return acc;
+  }, {} as Record<string, GroupedPrize>)
+);
+
 
   // Active Bounties
   const activeBounties = myBounties.filter(b => b.status !== BountyStatus.VERIFIED);

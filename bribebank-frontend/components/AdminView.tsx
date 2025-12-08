@@ -5,12 +5,15 @@ import { API_BASE } from "../config";
 import { PrizeCard } from './PrizeCard';
 import { Trash2, Check, X, Gift, Edit2, CheckCircle, AlertCircle, UserPlus, Shield, User as UserIcon, KeyRound, History, Plus, ListTodo, CircleDollarSign, Search, Zap, Bell, Settings } from 'lucide-react';
 import { SseEvent } from "../types/sseEvents";
+import EmojiPicker from "emoji-picker-react";
+
 
 interface AdminViewProps {
   currentUser: User;
+  initialTab?: string;
 }
 
-const EMOJI_OPTIONS = ['🎁', '🍦', '🛌', '🎮', '🎬', '🍕', '💵', '🧸', '🧹', '📱', '🍔', '🚲', '🎨', '⚽', '🎸', '🏖️', '🐕', '📚', '🍽️', '🥕'];
+const QUICK_EMOJI_OPTIONS = ['🎁', '🧹', '🍕', '💵', '📱'];
 const AVATAR_COLORS = ['bg-pink-400', 'bg-teal-400', 'bg-blue-500', 'bg-purple-500', 'bg-orange-400', 'bg-green-500', 'bg-red-400', 'bg-indigo-500'];
 const PASTEL_COLORS = [
     'bg-red-100 text-red-800 border-red-200',
@@ -25,7 +28,7 @@ const PASTEL_COLORS = [
     'bg-gray-100 text-gray-800 border-gray-200',
 ];
 
-export const AdminView: React.FC<AdminViewProps> = ({ currentUser }) => {
+export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, }) => {
   const [tab, setTab] = useState<'assign' | 'approvals' | 'create' | 'users'>('assign');
   const [assignSubTab, setAssignSubTab] = useState<'rewards' | 'bounties'>('rewards');
 
@@ -60,6 +63,10 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser }) => {
   const [bountyEmoji, setBountyEmoji] = useState('🧹');
   const [bountyFCFS, setBountyFCFS] = useState(false);
   const [bountyColor, setBountyColor] = useState(PASTEL_COLORS[6]);
+  const [emojiPickerTarget, setEmojiPickerTarget] =
+    useState<"prize" | "bounty" | null>(null);
+  const [showPrizeEmojiPicker, setShowPrizeEmojiPicker] = useState(false);
+  const [showBountyEmojiPicker, setShowBountyEmojiPicker] = useState(false);
 
   // User Management State
   const [userFormView, setUserFormView] = useState(false);
@@ -197,6 +204,25 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser }) => {
     return () => source.close();
   }, [currentUser?.familyId]);
 
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        refreshData();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, [refreshData]);
+
+    useEffect(() => {
+    if (initialTab) {
+      setTab(initialTab as any);
+      refreshData();
+    }
+  }, [initialTab]);
 
   const showToast = (message: string, type: 'success' | 'error') => {
       setToast({ message, type });
@@ -572,13 +598,63 @@ const handleBulkAssign = async () => {
   };
 
   // Derived State
-  const pendingApprovals = assignments.filter(a => a.status === PrizeStatus.PENDING_APPROVAL);
-  const pendingBounties = bountyAssignments.filter(b => b.status === BountyStatus.COMPLETED);
+  const pendingApprovals = assignments.filter(a =>
+    a.status === PrizeStatus.PENDING_APPROVAL &&
+    a.userId !== currentUser.id
+  );
+
+  const pendingBounties = bountyAssignments.filter(b =>
+    b.status === BountyStatus.COMPLETED &&
+    b.userId !== currentUser.id
+  );
+
   const totalPending = pendingApprovals.length + pendingBounties.length;
-  const kids = users.filter(u => u.role === UserRole.USER);
+  const assignableUsers = users.filter(u => u.id !== currentUser.id);
 
   const filteredTemplates = templates.filter(t => t.title.toLowerCase().includes(searchTerm.toLowerCase()));
   const filteredBounties = bountyTemplates.filter(b => b.title.toLowerCase().includes(searchTerm.toLowerCase()));
+
+  // IconPicker helper
+  const IconPicker: React.FC<{
+    value: string;
+    onChange: (emoji: string) => void;
+    target: "prize" | "bounty";
+  }> = ({ value, onChange, target }) => {
+    return (
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-2">
+          Icon
+        </label>
+
+        <div className="flex flex-wrap gap-2">
+          {QUICK_EMOJI_OPTIONS.map((emoji) => (
+            <button
+              key={emoji}
+              type="button"
+              onClick={() => onChange(emoji)}
+              title={emoji}
+              className={`w-10 h-10 rounded-xl border text-lg flex items-center justify-center transition-all ${
+                value === emoji
+                  ? "bg-indigo-50 border-indigo-400 ring-2 ring-indigo-200"
+                  : "bg-gray-50 border-gray-200 hover:border-gray-300"
+              }`}
+            >
+              {emoji}
+            </button>
+          ))}
+
+          <button
+            type="button"
+            onClick={() => setEmojiPickerTarget(target)}
+            className="h-10 px-3 rounded-xl border border-gray-200 bg-white text-sm font-medium text-gray-700 flex items-center gap-1 hover:bg-gray-50"
+          >
+            <Search size={14} />
+            <span>More</span>
+          </button>
+        </div>
+      </div>
+    );
+  };
 
   // Calculate viewing rewards once
   const rewardsForViewingUser = viewingRewardsForUser 
@@ -595,6 +671,43 @@ const handleBulkAssign = async () => {
                   <p className="text-sm font-bold">{toast.message}</p>
               </div>
           </div>
+      )}
+
+      {emojiPickerTarget && (
+        <div
+          className="fixed inset-0 z-[90] bg-black/50 flex items-center justify-center p-4"
+          onClick={() => setEmojiPickerTarget(null)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="text-sm font-semibold text-gray-700">
+                Choose an icon
+              </h4>
+              <button
+                type="button"
+                onClick={() => setEmojiPickerTarget(null)}
+                className="p-1 rounded-md hover:bg-gray-100"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <EmojiPicker
+              onEmojiClick={(emojiData: any) => {
+                const chosen = emojiData?.emoji;
+                if (!chosen) return;
+
+                if (emojiPickerTarget === "prize") setPrizeEmoji(chosen);
+                if (emojiPickerTarget === "bounty") setBountyEmoji(chosen);
+
+                setEmojiPickerTarget(null);
+              }}
+            />
+          </div>
+        </div>
       )}
 
       {confirmState && (
@@ -799,20 +912,41 @@ const handleBulkAssign = async () => {
             </div>
 
             <div className="mb-6 overflow-x-auto no-scrollbar">
-              <label className="block text-sm font-medium text-gray-500 mb-2">Select Children</label>
+              <label className="block text-sm font-medium text-gray-500 mb-2">
+                Select Family Members
+              </label>
               <div className="flex gap-3">
-                {kids.map(kid => {
-                  const isSelected = selectedUsers.includes(kid.id);
+                {assignableUsers.map((user) => {
+                  const isSelected = selectedUsers.includes(user.id);
+
                   return (
                     <button
-                        key={kid.id}
-                        onClick={() => setSelectedUsers(prev => prev.includes(kid.id) ? prev.filter(id => id !== kid.id) : [...prev, kid.id])}
-                        className={`flex items-center gap-2 px-4 py-3 rounded-xl border-2 transition-all ${isSelected ? 'border-indigo-500 bg-indigo-50 ring-2 ring-indigo-200' : 'border-gray-200 bg-white'}`}
+                      key={user.id}
+                      onClick={() =>
+                        setSelectedUsers((prev) =>
+                          prev.includes(user.id)
+                            ? prev.filter((id) => id !== user.id)
+                            : [...prev, user.id]
+                        )
+                      }
+                      className={`flex items-center gap-2 px-4 py-2 rounded-full border text-sm font-medium transition-all shadow-sm ${
+                        isSelected
+                          ? "bg-indigo-50 ring-2 ring-indigo-200"
+                          : "border-gray-200 bg-white"
+                      }`}
                     >
-                        <div className={`w-8 h-8 rounded-full ${kid.avatarColor} flex items-center justify-center`}>
-                            {isSelected && <Check size={16} className="text-white" />}
-                        </div>
-                        <span className={`font-semibold ${isSelected ? 'text-indigo-700' : 'text-gray-700'}`}>{kid.name}</span>
+                      <div
+                        className={`w-8 h-8 rounded-full ${user.avatarColor} flex items-center justify-center`}
+                      >
+                        {isSelected && <Check size={16} className="text-white" />}
+                      </div>
+                      <span
+                        className={`font-semibold ${
+                          isSelected ? "text-indigo-700" : "text-gray-700"
+                        }`}
+                      >
+                        {user.name}
+                      </span>
                     </button>
                   );
                 })}
@@ -927,7 +1061,10 @@ const handleBulkAssign = async () => {
                         {pendingBounties.map(b => {
                             const template = bountyTemplates.find(t => t.id === b.bountyTemplateId);
                             const user = users.find(u => u.id === b.userId);
-                            if(!template) return null;
+                            const isSelfVerification = b.userId === currentUser.id;
+
+                            if(!template || isSelfVerification) return null;
+
                             return (
                                 <div key={b.id} className="bg-white p-4 rounded-2xl shadow-sm border border-green-200">
                                     <div className="flex justify-between items-start">
@@ -954,6 +1091,12 @@ const handleBulkAssign = async () => {
 
             {pendingApprovals.map((assignment) => {
                 const user = users.find((u) => u.id === assignment.userId);
+                const isSelfClaim = assignment.userId === currentUser.id;
+
+                if (isSelfClaim) {
+                  // Do not show approval controls for your own claims
+                  return null;
+                }
 
                 // derive a theme if the snapshot doesn't carry one
                 const themeColor =
@@ -1032,105 +1175,378 @@ const handleBulkAssign = async () => {
           </div>
         )}
 
-        {tab === 'create' && (
+        {tab === "create" && (
           <div className="space-y-6">
             <div className="flex bg-gray-100 p-1 rounded-xl mb-4">
-                <button onClick={() => setCreateMode('reward')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${createMode === 'reward' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-500'}`}>Reward</button>
-                <button onClick={() => setCreateMode('bounty')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${createMode === 'bounty' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-500'}`}>Task/Bounty</button>
+              <button
+                type="button"
+                onClick={() => setCreateMode("reward")}
+                className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${
+                  createMode === "reward"
+                    ? "bg-white shadow-sm text-indigo-600"
+                    : "text-gray-500"
+                }`}
+              >
+                Reward
+              </button>
+              <button
+                type="button"
+                onClick={() => setCreateMode("bounty")}
+                className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${
+                  createMode === "bounty"
+                    ? "bg-white shadow-sm text-indigo-600"
+                    : "text-gray-500"
+                }`}
+              >
+                Task/Bounty
+              </button>
             </div>
 
             <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
               <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-xl font-bold text-gray-800">{editingId ? 'Edit' : 'Create'} {createMode === 'reward' ? 'Reward' : 'Task'}</h3>
-                  {editingId && <button onClick={() => { resetForms(); setTab('assign');}} className="text-gray-400">Cancel</button>}
+                <h3 className="text-xl font-bold text-gray-800">
+                  {editingId ? "Edit" : "Create"}{" "}
+                  {createMode === "reward" ? "Reward" : "Task"}
+                </h3>
+                {editingId && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      resetForms();
+                      setTab("assign");
+                    }}
+                    className="text-gray-400"
+                  >
+                    Cancel
+                  </button>
+                )}
               </div>
 
-              {createMode === 'reward' ? (
-                  <div className="space-y-4">
-                      <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">Icon</label>
-                          <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
-                              {EMOJI_OPTIONS.map(emoji => (
-                                  <button key={emoji} onClick={() => setPrizeEmoji(emoji)} className={`min-w-[3rem] aspect-square flex items-center justify-center text-xl rounded-xl border transition-all ${prizeEmoji === emoji ? 'bg-indigo-100 border-indigo-500' : 'bg-gray-50 border-gray-200'}`}>{emoji}</button>
-                              ))}
-                          </div>
-                      </div>
-                      <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
-                          <input type="text" value={prizeTitle} onChange={(e) => setPrizeTitle(e.target.value)} placeholder="e.g. Extra Screen Time" className="w-full p-3 rounded-xl border border-gray-300 focus:border-indigo-500 outline-none" />
-                      </div>
-                      <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-                          <textarea value={prizeDesc} onChange={(e) => setPrizeDesc(e.target.value)} placeholder="Details..." rows={2} className="w-full p-3 rounded-xl border border-gray-300 focus:border-indigo-500 outline-none resize-none" />
-                      </div>
-                      <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">Card Color</label>
-                          <div className="flex flex-wrap gap-2">
-                              {PASTEL_COLORS.map(c => (
-                                  <button key={c} onClick={() => setPrizeColor(c)} className={`w-8 h-8 rounded-full border-2 ${c.split(' ')[0]} ${prizeColor === c ? 'border-gray-600 scale-110' : 'border-transparent'}`} />
-                              ))}
-                          </div>
-                      </div>
-                  </div>
-              ) : (
-                  <div className="space-y-4">
-                      <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">Icon</label>
-                          <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
-                              {EMOJI_OPTIONS.map(emoji => (
-                                  <button key={emoji} onClick={() => setBountyEmoji(emoji)} className={`min-w-[3rem] aspect-square flex items-center justify-center text-xl rounded-xl border transition-all ${bountyEmoji === emoji ? 'bg-indigo-100 border-indigo-500' : 'bg-gray-50 border-gray-200'}`}>{emoji}</button>
-                              ))}
-                          </div>
-                      </div>
-                      <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Task Title</label>
-                          <input type="text" value={bountyTitle} onChange={(e) => setBountyTitle(e.target.value)} placeholder="e.g. Wash Dishes" className="w-full p-3 rounded-xl border border-gray-300 focus:border-indigo-500 outline-none" />
-                      </div>
-                      <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Reward Value</label>
-                          <div className="relative">
-                              <input type="text" value={bountyRewardValue} onChange={(e) => setBountyRewardValue(e.target.value)} placeholder="e.g. $5 or 30 mins TV" className="w-full p-3 pl-10 rounded-xl border border-gray-300 focus:border-indigo-500 outline-none" />
-                              <CircleDollarSign className="absolute left-3 top-3.5 text-gray-400" size={18}/>
-                          </div>
-                      </div>
-                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Card Color</label>
-                        <div className="flex flex-wrap gap-2">
-                          {PASTEL_COLORS.map(c => (
+              {createMode === "reward" ? (
+                <div className="space-y-4">
+                  {/* ---------------- Icon (Reward) ---------------- */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Icon
+                    </label>
+
+                    <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
+                      {QUICK_EMOJI_OPTIONS.map((emoji) => {
+                        const isSelected = prizeEmoji === emoji;
+
+                        return (
+                          <button
+                            key={emoji}
+                            type="button"
+                            onClick={() => setPrizeEmoji(emoji)}
+                            aria-pressed={isSelected}
+                            className={`min-w-[3rem] aspect-square flex items-center justify-center text-xl rounded-xl border transition-all ${
+                              isSelected
+                                ? "bg-indigo-100 border-indigo-500"
+                                : "bg-gray-50 border-gray-200 hover:bg-gray-100"
+                            }`}
+                            title={emoji}
+                          >
+                            {emoji}
+                          </button>
+                        );
+                      })}
+
+                      {/* Show a chip for a non-quick-picked chosen emoji */}
+                      {!!prizeEmoji &&
+                        !QUICK_EMOJI_OPTIONS.includes(prizeEmoji) && (
+                          <button
+                            type="button"
+                            onClick={() => setShowPrizeEmojiPicker(true)}
+                            className="min-w-[3rem] aspect-square flex items-center justify-center text-xl rounded-xl border bg-indigo-50 border-indigo-200"
+                            title="Current icon (click to change)"
+                          >
+                            {prizeEmoji}
+                          </button>
+                        )}
+
+                      {/* "More" button */}
+                      <button
+                        type="button"
+                        onClick={() => setShowPrizeEmojiPicker(true)}
+                        className="min-w-[3rem] aspect-square flex items-center justify-center text-lg rounded-xl border bg-white border-gray-200 hover:bg-gray-50 font-bold"
+                        title="More icons"
+                      >
+                        +
+                      </button>
+                    </div>
+
+                    {/* Full picker modal */}
+                    {showPrizeEmojiPicker && (
+                      <div
+                        className="fixed inset-0 bg-black/40 z-[90] flex items-center justify-center p-4"
+                        onClick={() => setShowPrizeEmojiPicker(false)}
+                      >
+                        <div
+                          className="bg-white rounded-2xl shadow-2xl p-3 max-w-[95vw]"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <div className="flex items-center justify-between mb-2 px-1">
+                            <span className="text-sm font-semibold text-gray-700">
+                              Choose an icon
+                            </span>
                             <button
-                              key={c}
-                              onClick={() => setBountyColor(c)}
-                              className={`w-8 h-8 rounded-full border-2 ${c.split(' ')[0]} ${
-                                bountyColor === c ? 'border-gray-600 scale-110' : 'border-transparent'
-                              }`}
-                            />
-                          ))}
+                              type="button"
+                              className="text-gray-400 hover:text-gray-600"
+                              onClick={() => setShowPrizeEmojiPicker(false)}
+                            >
+                              ✕
+                            </button>
+                          </div>
+
+                          <EmojiPicker
+                            onEmojiClick={(emojiData) => {
+                              setPrizeEmoji(emojiData.emoji);
+                              setShowPrizeEmojiPicker(false);
+                            }}
+                          />
                         </div>
                       </div>
-                      <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl border border-gray-200 cursor-pointer" onClick={() => setBountyFCFS(!bountyFCFS)}>
-                          <div className={`w-6 h-6 rounded-md flex items-center justify-center border transition-all ${bountyFCFS ? 'bg-indigo-600 border-indigo-600' : 'bg-white border-gray-300'}`}>
-                              {bountyFCFS && <Check size={16} className="text-white" />}
-                          </div>
-                          <div>
-                              <p className="font-bold text-gray-800 text-sm">First Come First Served</p>
-                              <p className="text-xs text-gray-500">If one child claims this task, it disappears for others.</p>
-                          </div>
-                      </div>
+                    )}
                   </div>
+
+                  {/* ---------------- Title ---------------- */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Title
+                    </label>
+                    <input
+                      type="text"
+                      value={prizeTitle}
+                      onChange={(e) => setPrizeTitle(e.target.value)}
+                      placeholder="e.g. Extra Screen Time"
+                      className="w-full p-3 rounded-xl border border-gray-300 focus:border-indigo-500 outline-none"
+                    />
+                  </div>
+
+                  {/* ---------------- Description ---------------- */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Description
+                    </label>
+                    <textarea
+                      value={prizeDesc}
+                      onChange={(e) => setPrizeDesc(e.target.value)}
+                      placeholder="Details..."
+                      rows={2}
+                      className="w-full p-3 rounded-xl border border-gray-300 focus:border-indigo-500 outline-none resize-none"
+                    />
+                  </div>
+
+                  {/* ---------------- Card Color ---------------- */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Card Color
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      {PASTEL_COLORS.map((c) => (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => setPrizeColor(c)}
+                          className={`w-8 h-8 rounded-full border-2 ${c.split(" ")[0]} ${
+                            prizeColor === c
+                              ? "border-gray-600 scale-110"
+                              : "border-transparent"
+                          }`}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {/* ---------------- Icon (Bounty) ---------------- */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Icon
+                    </label>
+
+                    <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
+                      {QUICK_EMOJI_OPTIONS.map((emoji) => {
+                        const isSelected = bountyEmoji === emoji;
+
+                        return (
+                          <button
+                            key={emoji}
+                            type="button"
+                            onClick={() => setBountyEmoji(emoji)}
+                            aria-pressed={isSelected}
+                            className={`min-w-[3rem] aspect-square flex items-center justify-center text-xl rounded-xl border transition-all ${
+                              isSelected
+                                ? "bg-indigo-100 border-indigo-500"
+                                : "bg-gray-50 border-gray-200 hover:bg-gray-100"
+                            }`}
+                            title={emoji}
+                          >
+                            {emoji}
+                          </button>
+                        );
+                      })}
+
+                      {/* Show a chip for a non-quick-picked chosen emoji */}
+                      {!!bountyEmoji &&
+                        !QUICK_EMOJI_OPTIONS.includes(bountyEmoji) && (
+                          <button
+                            type="button"
+                            onClick={() => setShowBountyEmojiPicker(true)}
+                            className="min-w-[3rem] aspect-square flex items-center justify-center text-xl rounded-xl border bg-indigo-50 border-indigo-200"
+                            title="Current icon (click to change)"
+                          >
+                            {bountyEmoji}
+                          </button>
+                        )}
+
+                      <button
+                        type="button"
+                        onClick={() => setShowBountyEmojiPicker(true)}
+                        className="min-w-[3rem] aspect-square flex items-center justify-center text-lg rounded-xl border bg-white border-gray-200 hover:bg-gray-50 font-bold"
+                        title="More icons"
+                      >
+                        +
+                      </button>
+                    </div>
+
+                    {showBountyEmojiPicker && (
+                      <div
+                        className="fixed inset-0 bg-black/40 z-[90] flex items-center justify-center p-4"
+                        onClick={() => setShowBountyEmojiPicker(false)}
+                      >
+                        <div
+                          className="bg-white rounded-2xl shadow-2xl p-3 max-w-[95vw]"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <div className="flex items-center justify-between mb-2 px-1">
+                            <span className="text-sm font-semibold text-gray-700">
+                              Choose an icon
+                            </span>
+                            <button
+                              type="button"
+                              className="text-gray-400 hover:text-gray-600"
+                              onClick={() => setShowBountyEmojiPicker(false)}
+                            >
+                              ✕
+                            </button>
+                          </div>
+
+                          <EmojiPicker
+                            onEmojiClick={(emojiData) => {
+                              setBountyEmoji(emojiData.emoji);
+                              setShowBountyEmojiPicker(false);
+                            }}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* ---------------- Task Title ---------------- */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Task Title
+                    </label>
+                    <input
+                      type="text"
+                      value={bountyTitle}
+                      onChange={(e) => setBountyTitle(e.target.value)}
+                      placeholder="e.g. Wash Dishes"
+                      className="w-full p-3 rounded-xl border border-gray-300 focus:border-indigo-500 outline-none"
+                    />
+                  </div>
+
+                  {/* ---------------- Reward Value ---------------- */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Reward Value
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={bountyRewardValue}
+                        onChange={(e) => setBountyRewardValue(e.target.value)}
+                        placeholder="e.g. $5 or 30 mins TV"
+                        className="w-full p-3 pl-10 rounded-xl border border-gray-300 focus:border-indigo-500 outline-none"
+                      />
+                      <CircleDollarSign
+                        className="absolute left-3 top-3.5 text-gray-400"
+                        size={18}
+                      />
+                    </div>
+                  </div>
+
+                  {/* ---------------- Card Color ---------------- */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Card Color
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      {PASTEL_COLORS.map((c) => (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => setBountyColor(c)}
+                          className={`w-8 h-8 rounded-full border-2 ${c.split(" ")[0]} ${
+                            bountyColor === c
+                              ? "border-gray-600 scale-110"
+                              : "border-transparent"
+                          }`}
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* ---------------- FCFS Toggle ---------------- */}
+                  <div
+                    className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl border border-gray-200 cursor-pointer"
+                    onClick={() => setBountyFCFS(!bountyFCFS)}
+                  >
+                    <div
+                      className={`w-6 h-6 rounded-md flex items-center justify-center border transition-all ${
+                        bountyFCFS
+                          ? "bg-indigo-600 border-indigo-600"
+                          : "bg-white border-gray-300"
+                      }`}
+                    >
+                      {bountyFCFS && <Check size={16} className="text-white" />}
+                    </div>
+                    <div>
+                      <p className="font-bold text-gray-800 text-sm">
+                        First Come First Served
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        If one child claims this task, it disappears for others.
+                      </p>
+                    </div>
+                  </div>
+                </div>
               )}
 
-              <button onClick={handleSaveTemplate} className="w-full mt-6 bg-indigo-600 text-white font-bold py-3.5 rounded-xl hover:bg-indigo-700 shadow-lg shadow-indigo-200">
-                {editingId ? 'Update' : 'Save Template'}
+              <button
+                type="button"
+                onClick={handleSaveTemplate}
+                className="w-full mt-6 bg-indigo-600 text-white font-bold py-3.5 rounded-xl hover:bg-indigo-700 shadow-lg shadow-indigo-200"
+              >
+                {editingId ? "Update" : "Save Template"}
               </button>
-              
+
               {editingId && (
-                  <button onClick={() => handleDeleteTemplate(editingId, createMode === 'bounty')} className="w-full mt-2 text-red-500 font-semibold py-2">
-                      Delete Template
-                  </button>
+                <button
+                  type="button"
+                  onClick={() => handleDeleteTemplate(editingId, createMode === "bounty")}
+                  className="w-full mt-2 text-red-500 font-semibold py-2"
+                >
+                  Delete Template
+                </button>
               )}
             </div>
           </div>
         )}
+
         
         {/* Users Tab */}
         {tab === 'users' && (
@@ -1177,8 +1593,19 @@ const handleBulkAssign = async () => {
                                 <input type="text" value={newUserName} onChange={e => setNewUserName(e.target.value)} className="w-full p-3 rounded-xl border border-gray-300" placeholder="Display Name" />
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
-                                <input type="text" value={newUserUsername} onChange={e => setNewUserUsername(e.target.value)} className="w-full p-3 rounded-xl border border-gray-300" placeholder="Username" />
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                  Username
+                                </label>
+                                <input
+                                  type="text"
+                                  value={newUserUsername}
+                                  onChange={e => setNewUserUsername(e.target.value)}
+                                  className="w-full p-3 rounded-xl border border-gray-300"
+                                  placeholder="Username"
+                                  autoCapitalize="none"
+                                  autoCorrect="off"
+                                  spellCheck={false}
+                               />
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">Password {editingUser && <span className="text-xs font-normal text-gray-500">(Leave blank to keep current)</span>}</label>

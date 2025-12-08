@@ -12,7 +12,8 @@ import {
   AssignedBounty, 
   BountyStatus 
 } from '../types';
-import { apiUrl } from "../config";
+import { API_BASE, apiUrl } from "../config";
+
 const DB_KEY = 'famrewards_production_db_v3'; // Bumped version
 const SESSION_KEY = 'famrewards_session_v1';
 
@@ -54,6 +55,58 @@ const writeDB = (data: DatabaseSchema) => {
 const getAuthToken = (): string | null => {
   return localStorage.getItem("bribebank_token");
 };
+
+type PushSubscriptionKeys = {
+  p256dh: string;
+  auth: string;
+};
+
+type PushSubscription = {
+  endpoint: string;
+  keys: PushSubscriptionKeys;
+};
+
+//Helper to convert VAPID key
+function urlBase64ToUint8Array(base64String: string): Uint8Array {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding)
+    .replace(/-/g, "+")
+    .replace(/_/g, "/");
+
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
+async function fetchPushPublicKey(): Promise<string | null> {
+  try {
+    const res = await fetch(`${API_BASE}/push/public-key`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.publicKey as string;
+  } catch (e) {
+    console.error("fetchPushPublicKey error", e);
+    return null;
+  }
+}
+
+async function sendPushSubscriptionToServer(subscription: PushSubscription) {
+  const token = localStorage.getItem("bribebank_token");
+  if (!token) return;
+
+  await fetch(`${API_BASE}/push/subscribe`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(subscription),
+  });
+}
 
 // DEFAULT TEMPLATES for new families
 const DEFAULT_TEMPLATES = [
@@ -196,6 +249,41 @@ export const storageService = {
     const stored = localStorage.getItem(SESSION_KEY);
     return stored ? JSON.parse(stored) : null;
   },
+
+  refreshSession: async (): Promise<User> => {
+    const token = getAuthToken();
+    if (!token) {
+      throw new Error("No auth token");
+    }
+
+    const res = await fetch(apiUrl("/auth/me"), {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (!res.ok) {
+      // Token invalid / expired
+      throw new Error("SESSION_INVALID");
+    }
+
+    const backendUser = await res.json();
+
+    const sessionUser: User = {
+      id: backendUser.id,
+      familyId: backendUser.familyId ?? backendUser.family?.id,
+      username: backendUser.username,
+      name: backendUser.displayName,
+      displayName: backendUser.displayName,
+      role:
+        backendUser.role === "PARENT"
+          ? UserRole.ADMIN
+          : UserRole.USER,
+      avatarColor: backendUser.avatarColor ?? "bg-blue-500",
+    };
+
+    localStorage.setItem(SESSION_KEY, JSON.stringify(sessionUser));
+    return sessionUser;
+  },
+
 
   // --- USER MANAGEMENT ---
 
@@ -1098,6 +1186,70 @@ export const storageService = {
       throw new Error(
         body?.error || "Failed to mark all notifications read"
       );
+    }
+  },
+
+  registerPushNotifications: async (): Promise<void> => {
+    try {
+      // Basic capability check
+      if (
+        !("serviceWorker" in navigator) ||
+        !("PushManager" in window) ||
+        !("Notification" in window)
+      ) {
+        console.log("[push] Push or SW not supported in this browser");
+        return;
+      }
+
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") {
+        console.log("[push] Notification permission not granted");
+        return;
+      }
+
+      const publicKey = await fetchPushPublicKey();
+      if (!publicKey) {
+        console.warn("[push] No VAPID public key available");
+        return;
+      }
+
+      const registration = await navigator.serviceWorker.ready;
+
+      const existingSub = await registration.pushManager.getSubscription();
+      if (existingSub) {
+        // Already have one, just ensure backend knows about it
+        const subPayload: PushSubscription = {
+          endpoint: existingSub.endpoint,
+          keys: {
+            p256dh:
+              existingSub.toJSON().keys?.p256dh ??
+              "", // TS appeasement
+            auth: existingSub.toJSON().keys?.auth ?? "",
+          },
+        };
+        await sendPushSubscriptionToServer(subPayload);
+        return;
+      }
+
+      const newSub = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(publicKey),
+      });
+
+      const subJson = newSub.toJSON();
+
+      const payload: PushSubscription = {
+        endpoint: newSub.endpoint,
+        keys: {
+          p256dh: subJson.keys?.p256dh ?? "",
+          auth: subJson.keys?.auth ?? "",
+        },
+      };
+
+      await sendPushSubscriptionToServer(payload);
+      console.log("[push] Subscription registered");
+    } catch (e) {
+      console.error("[push] registerPushNotifications error", e);
     }
   },
 };
