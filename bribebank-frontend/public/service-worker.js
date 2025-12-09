@@ -1,11 +1,11 @@
 // public/service-worker.js
 
 // Simple versioned cache name
-const CACHE_NAME = "bribebank-static-v2";
+const CACHE_NAME = "bribebank-static-v6";
 
 // Which files (at minimum) to cache on install.
 // You can expand this (CSS, fonts, etc.) later or let Workbox handle it.
-const URLS_TO_CACHE = ["/", "/index.html"];
+const URLS_TO_CACHE = ["/", "/index.html", "/icons/bribebank-192.png", "/icons/bribebank-512.png"];
 
 // Install: pre-cache basic shell
 self.addEventListener("install", (event) => {
@@ -33,27 +33,60 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
-// Fetch: network-first for now (we're not going heavy on offline yet)
+// Fetch: limit to same-origin *static* assets + app shell
 self.addEventListener("fetch", (event) => {
-  const { request } = event;
+  const request = event.request;
 
   // Only handle GETs
   if (request.method !== "GET") return;
 
+  const url = new URL(request.url);
+
+  // 1) Never touch cross-origin (your api.* domain)
+  if (url.origin !== self.location.origin) return;
+
+  // 2) Skip anything with query params (prevents token URL caching explosions)
+  //    If you rely on same-origin URLs with queries for static content, remove this.
+  if (url.search) return;
+
+  // 3) Skip SSE explicitly (belt + suspenders)
+  const accept = request.headers.get("accept") || "";
+  if (accept.includes("text/event-stream")) return;
+
+  // 4) Optionally skip obvious API paths if you ever add same-origin APIs
+  if (url.pathname.startsWith("/api")) return;
+
+  // 5) Only handle typical static destinations
+  const dest = request.destination;
+  const allowed = new Set(["document", "script", "style", "image", "font"]);
+  if (dest && !allowed.has(dest)) return;
+
   event.respondWith(
-    fetch(request)
-      .then((response) => {
-        // Optionally cache the response
-        const copy = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
-        return response;
-      })
-      .catch(() => {
-        // Fallback to cache if network fails
-        return caches.match(request);
-      })
+    (async () => {
+      const cache = await caches.open(CACHE_NAME);
+
+      // Stale-while-revalidate-ish for static
+      const cached = await cache.match(request);
+      const fetchPromise = fetch(request)
+        .then(async (response) => {
+          // Only cache good responses
+          if (response && response.ok) {
+            try {
+              await cache.put(request, response.clone());
+            } catch (e) {
+              // Do not let cache failures break fetch
+            }
+          }
+          return response;
+        })
+        .catch(() => null);
+
+      // Return cache immediately if present, otherwise wait for network
+      return cached || (await fetchPromise) || Response.error();
+    })()
   );
 });
+
 
 // --- Web Push handling ---
 self.addEventListener("push", (event) => {
