@@ -141,9 +141,9 @@ self.addEventListener("notificationclick", (event) => {
           // Focus the window first
           await client.focus();
 
-          // Send message to navigate and reload
+          // Set a flag in sessionStorage that we opened from notification
           client.postMessage({ 
-            type: 'NAVIGATE_AND_RELOAD',
+            type: 'SET_NOTIFICATION_FLAG',
             url: targetUrl 
           });
           
@@ -153,8 +153,10 @@ self.addEventListener("notificationclick", (event) => {
         }
       }
 
-      // No existing client - open a new one
-      await self.clients.openWindow(targetUrl);
+      // No existing client - open a new one with flag in URL
+      const urlWithFlag = new URL(targetUrl);
+      urlWithFlag.searchParams.set('_from_notification', '1');
+      await self.clients.openWindow(urlWithFlag.href);
     })()
   );
 });

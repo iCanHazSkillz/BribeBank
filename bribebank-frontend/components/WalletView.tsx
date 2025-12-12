@@ -494,14 +494,7 @@ const groupedPrizes: GroupedPrize[] = Object.values(
           <div className="flex items-center gap-3">
              <div 
                className={`w-10 h-10 rounded-full ${currentUser.avatarColor} shadow-md border-2 border-white flex items-center justify-center text-white font-bold cursor-pointer hover:scale-110 transition-transform`}
-               onClick={() => {
-                 console.log("Avatar clicked, opening account settings");
-                 setSettingsName(currentUser.name);
-                 setSettingsUsername(currentUser.username);
-                 setSettingsPassword('');
-                 setSettingsAvatarColor(currentUser.avatarColor);
-                 setShowAccountSettings(true);
-               }}
+               onClick={handleOpenAccountSettings}
                title="Account Settings"
              >
                  {currentUser.name.charAt(0)}
