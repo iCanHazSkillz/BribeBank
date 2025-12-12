@@ -140,12 +140,20 @@ self.addEventListener("notificationclick", (event) => {
 
           await client.focus();
 
-          // If already at target, don't re-navigate
-          if (client.url === targetUrl) return;
+          // If already at target, reload to ensure fresh state
+          if (client.url === targetUrl) {
+            // Post message to trigger a reload
+            client.postMessage({ type: 'RELOAD_PAGE' });
+            return;
+          }
 
-          // Prefer navigate if available
+          // Navigate and then reload to ensure React re-initializes
           if (typeof client.navigate === "function") {
             await client.navigate(targetUrl);
+            // Force reload after navigation to ensure fresh React state
+            setTimeout(() => {
+              client.postMessage({ type: 'RELOAD_PAGE' });
+            }, 100);
             return;
           }
 

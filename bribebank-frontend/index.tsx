@@ -29,4 +29,12 @@ if ("serviceWorker" in navigator) {
         console.error("[SW] registration failed:", err);
       });
   });
+  
+  // Listen for messages from service worker
+  navigator.serviceWorker.addEventListener("message", (event) => {
+    if (event.data && event.data.type === "RELOAD_PAGE") {
+      console.log("[SW] Reloading page to refresh state after deep link navigation");
+      window.location.reload();
+    }
+  });
 }

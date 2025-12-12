@@ -482,6 +482,10 @@ export const approveAssignedPrize = async (req: Request, res: Response) => {
     const title = assignment.title || "Reward";
     const emoji = assignment.emoji || "🎁";
     const parentName = parent.displayName || parent.username || "Parent";
+    
+    // Check if this is a store purchase (title starts with "STORE:")
+    const isStorePurchase = title.startsWith("STORE:");
+    const displayTitle = isStorePurchase ? title.substring(7) : title; // Remove "STORE: " prefix
 
     await addHistoryEvent({
       familyId: assignment.familyId,
@@ -495,15 +499,19 @@ export const approveAssignedPrize = async (req: Request, res: Response) => {
 
     await addNotification({
       userId: assignment.userId,
-      message: `${parentName} approved your reward: ${title}`,
+      message: isStorePurchase 
+        ? `${parentName} fulfilled your store purchase: ${displayTitle}` 
+        : `${parentName} approved your reward: ${title}`,
     });
 
     try {
       await sendPushToUser(assignment.userId, {
-        title: "Your reward was approved ✅",
-        body: `${parentName} approved: ${title}`,
-        tag: "reward-approved",
-        type: "REWARD_APPROVED",
+        title: isStorePurchase ? "Store purchase fulfilled! 🎉" : "Your reward was approved ✅",
+        body: isStorePurchase 
+          ? `${parentName} fulfilled: ${displayTitle}` 
+          : `${parentName} approved: ${title}`,
+        tag: isStorePurchase ? "store-fulfilled" : "reward-approved",
+        type: isStorePurchase ? "STORE_FULFILLED" : "REWARD_APPROVED",
         familyId: assignment.familyId,
         assignmentId: assignment.id,
         templateId: assignment.templateId ?? undefined,
@@ -564,6 +572,27 @@ export const rejectAssignedPrize = async (req: Request, res: Response) => {
     if (assignment.status !== PrizeStatus.PENDING_APPROVAL) {
       return res.status(400).json({ error: "INVALID_STATUS" });
     }
+    
+    // Check if this is a store purchase (title starts with "STORE:")
+    const title = assignment.title || "Reward";
+    const emoji = assignment.emoji || "❌";
+    const isStorePurchase = title.startsWith("STORE:");
+    const displayTitle = isStorePurchase ? title.substring(7).trim() : title; // Remove "STORE: " prefix
+    
+    // If it's a store purchase, we need to refund the tickets
+    let refundAmount = 0;
+    if (isStorePurchase) {
+      const storeItem = await prisma.storeItem.findFirst({
+        where: {
+          familyId: assignment.familyId,
+          title: displayTitle,
+        },
+      });
+      
+      if (storeItem) {
+        refundAmount = storeItem.cost;
+      }
+    }
 
     const updated = await prisma.assignedPrize.update({
       where: { id },
@@ -572,10 +601,31 @@ export const rejectAssignedPrize = async (req: Request, res: Response) => {
         claimedAt: null,
       },
     });
+    
+    // Refund tickets if it's a store purchase
+    if (isStorePurchase && refundAmount > 0) {
+      await prisma.user.update({
+        where: { id: assignment.userId },
+        data: {
+          ticketBalance: {
+            increment: refundAmount,
+          },
+        },
+      });
+      
+      // Add history event for refund
+      await addHistoryEvent({
+        familyId: assignment.familyId,
+        userId: assignment.userId,
+        userName: assignment.assignedBy || "Child",
+        emoji: "🎟️",
+        title: `Refunded ${refundAmount} tickets`,
+        action: "RECEIVED_TICKETS",
+        assignerName: parent.displayName || parent.username || "Parent",
+      });
+    }
 
     const childName = updated.assignedBy || "Child";
-    const title = assignment.title || "Reward";
-    const emoji = assignment.emoji || "❌";
     const parentName = parent.displayName || parent.username || "Parent";
 
     await addHistoryEvent({
@@ -590,17 +640,19 @@ export const rejectAssignedPrize = async (req: Request, res: Response) => {
 
     await addNotification({
       userId: assignment.userId,
-      message: `${parent.displayName ?? "Parent"} rejected your reward: ${
-        assignment.title ?? "Reward"
-      }`,
+      message: isStorePurchase
+        ? `${parent.displayName ?? "Parent"} denied your store purchase: ${displayTitle}. Tickets refunded.`
+        : `${parent.displayName ?? "Parent"} rejected your reward: ${assignment.title ?? "Reward"}`,
     });
     
     try {
       await sendPushToUser(assignment.userId, {
-        title: "Your reward was denied ❌",
-        body: `${parentName} rejected: ${title}`,
-        tag: "reward-rejected",
-        type: "REWARD_REJECTED",
+        title: isStorePurchase ? "Store purchase denied 💔" : "Your reward was denied ❌",
+        body: isStorePurchase 
+          ? `${parentName} denied: ${displayTitle}. Tickets refunded.` 
+          : `${parentName} rejected: ${title}`,
+        tag: isStorePurchase ? "store-denied" : "reward-rejected",
+        type: isStorePurchase ? "STORE_DENIED" : "REWARD_REJECTED",
         familyId: assignment.familyId,
         assignmentId: assignment.id,
         templateId: assignment.templateId ?? undefined,
