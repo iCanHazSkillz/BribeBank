@@ -249,7 +249,7 @@ export const storageService = {
         backendUser.role === "PARENT"
           ? UserRole.ADMIN
           : UserRole.USER,
-      avatarColor: "bg-blue-500",
+      avatarColor: backendUser.avatarColor || "bg-blue-500",
       ticketBalance: backendUser.ticketBalance || 0,
     };
 

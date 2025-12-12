@@ -5,6 +5,7 @@ import { broadcastToFamily } from "../realtime/eventBus.js";
 import { SseEvent } from "../types/sseEvents.js";
 import { addHistoryEvent } from "../services/historyService.js";
 import { addNotification } from "../services/notificationService.js";
+import { sendPushToUser } from "../services/pushService.js";
 
 /**
  * POST /users/:userId/tickets
@@ -68,6 +69,21 @@ export const giveTickets = async (req: Request, res: Response) => {
       userId: userId,
       message: `${caller.displayName} gave you ${amount} tickets!`,
     });
+
+    // Send push notification
+    try {
+      await sendPushToUser(userId, {
+        title: "You received tickets! 🎟️",
+        body: `${caller.displayName} gave you ${amount} tickets!`,
+        tag: "tickets-received",
+        type: "TICKETS_GIVEN",
+        familyId: targetUser.familyId,
+        userId: userId,
+        url: "/?view=wallet&walletTab=wallet",
+      });
+    } catch (pushErr) {
+      console.warn("giveTickets push failed:", pushErr);
+    }
 
     // Broadcast SSE event
     const event: SseEvent = {

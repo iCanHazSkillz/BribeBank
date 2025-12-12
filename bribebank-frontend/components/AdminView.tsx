@@ -11,6 +11,7 @@ import EmojiPicker from "emoji-picker-react";
 interface AdminViewProps {
   currentUser: User;
   initialTab?: string;
+  onUserUpdate?: () => void;
 }
 
 const QUICK_EMOJI_OPTIONS = ['🎁', '🧹', '🍕', '💵', '📱'];
@@ -28,7 +29,7 @@ const PASTEL_COLORS = [
     'bg-gray-100 text-gray-800 border-gray-200',
 ];
 
-export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, }) => {
+export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, onUserUpdate }) => {
   const [tab, setTab] = useState<'assign' | 'approvals' | 'create' | 'users' | 'store'>('assign');
   const [assignSubTab, setAssignSubTab] = useState<'rewards' | 'bounties' | 'tickets'>('rewards');
 
@@ -593,6 +594,11 @@ const handleBulkAssign = async () => {
           ...(newUserPassword ? { password: newUserPassword } : {}),
         } as any);
         showToast("User updated successfully", "success");
+        
+        // If admin updated themselves, refresh their session
+        if (editingUser.id === currentUser.id && onUserUpdate) {
+          onUserUpdate();
+        }
       } else {
         if (!newUserPassword) {
           showToast("Password is required for new users", "error");

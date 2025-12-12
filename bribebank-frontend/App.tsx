@@ -130,6 +130,30 @@ const App: React.FC = () => {
     void init();
   }, []);
 
+  useEffect(() => {
+    const refreshCurrentUser = async () => {
+      if (!currentUser) return;
+      
+      try {
+        const freshUser = await storageService.refreshSession();
+        setCurrentUser(freshUser);
+      } catch (err) {
+        console.error("Failed to refresh user session", err);
+      }
+    };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        refreshCurrentUser();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, [currentUser?.id]);
+
   const handleLogin = async (user: User) => {
     setCurrentUser(user);
 
@@ -147,6 +171,15 @@ const App: React.FC = () => {
     setInitialWalletTab(undefined);
   };
 
+  const handleUserUpdate = async () => {
+    try {
+      const freshUser = await storageService.refreshSession();
+      setCurrentUser(freshUser);
+    } catch (err) {
+      console.error("Failed to refresh user after update", err);
+    }
+  };
+
   if (!currentUser || view === "login") {
     return <LoginView onLogin={handleLogin} />;
   }
@@ -156,7 +189,11 @@ const App: React.FC = () => {
       {/* Content Area */}
       <main className="h-full overflow-y-auto no-scrollbar">
         {view === "admin" && currentUser.role === UserRole.ADMIN && (
-          <AdminView currentUser={currentUser} initialTab={initialAdminTab} />
+          <AdminView 
+            currentUser={currentUser} 
+            initialTab={initialAdminTab}
+            onUserUpdate={handleUserUpdate}
+          />
         )}
 
         {view === "wallet" && (

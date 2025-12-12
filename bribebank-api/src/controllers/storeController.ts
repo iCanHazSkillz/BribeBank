@@ -5,6 +5,7 @@ import { assertFamilyMember, assertParent, getRequestUser } from "../lib/authHel
 import { broadcastToFamily } from "../realtime/eventBus.js";
 import { SseEvent } from "../types/sseEvents.js";
 import { addNotification } from "../services/notificationService.js";
+import { sendPushToUser } from "../services/pushService.js";
 
 /**
  * GET /families/:familyId/store-items
@@ -282,6 +283,21 @@ export const purchaseStoreItem = async (req: Request, res: Response) => {
         userId: parent.id,
         message: `${user.displayName} bought "${item.title}" from the store! Please fulfill.`,
       });
+
+      // Send push notification to parent
+      try {
+        await sendPushToUser(parent.id, {
+          title: "Store Purchase Request 🛍️",
+          body: `${user.displayName} bought "${item.title}" - Please fulfill!`,
+          tag: "store-purchase",
+          type: "STORE_PURCHASE",
+          familyId: user.familyId,
+          assignmentId: assignment.id,
+          url: "/?view=admin&adminTab=approvals",
+        });
+      } catch (pushErr) {
+        console.warn("purchaseStoreItem push failed for parent:", parent.id, pushErr);
+      }
     }
 
     // Broadcast SSE event
