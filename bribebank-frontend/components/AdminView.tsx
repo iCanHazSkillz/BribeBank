@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { AssignedPrize, PrizeStatus, PrizeTemplate, User, PrizeType, UserRole, HistoryEvent, BountyTemplate, AssignedBounty, BountyStatus, AppNotification } from '../types';
+import { AssignedPrize, PrizeStatus, PrizeTemplate, User, PrizeType, UserRole, HistoryEvent, BountyTemplate, AssignedBounty, BountyStatus, AppNotification, StoreItem, WheelSegment } from '../types';
 import { storageService } from '../services/storageService';
 import { API_BASE } from "../config";
 import { PrizeCard } from './PrizeCard';
-import { Trash2, Check, X, Gift, Edit2, CheckCircle, AlertCircle, UserPlus, Shield, User as UserIcon, KeyRound, History, Plus, ListTodo, CircleDollarSign, Search, Zap, Bell, Settings } from 'lucide-react';
+import { Trash2, Check, X, Gift, Edit2, CheckCircle, AlertCircle, UserPlus, Shield, User as UserIcon, KeyRound, History, Plus, ListTodo, CircleDollarSign, Search, Zap, Bell, Settings, ShoppingBag, Link as Linkicon, Image as ImageIcon, Ticket, RotateCcw, Send } from 'lucide-react';
 import { SseEvent } from "../types/sseEvents";
 import EmojiPicker from "emoji-picker-react";
 
@@ -29,8 +29,8 @@ const PASTEL_COLORS = [
 ];
 
 export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, }) => {
-  const [tab, setTab] = useState<'assign' | 'approvals' | 'create' | 'users'>('assign');
-  const [assignSubTab, setAssignSubTab] = useState<'rewards' | 'bounties'>('rewards');
+  const [tab, setTab] = useState<'assign' | 'approvals' | 'create' | 'users' | 'store'>('assign');
+  const [assignSubTab, setAssignSubTab] = useState<'rewards' | 'bounties' | 'tickets'>('rewards');
 
   // Data State
   const [users, setUsers] = useState<User[]>([]);
@@ -38,6 +38,8 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, }
   const [bountyAssignments, setBountyAssignments] = useState<AssignedBounty[]>([]);
   const [templates, setTemplates] = useState<PrizeTemplate[]>([]);
   const [bountyTemplates, setBountyTemplates] = useState<BountyTemplate[]>([]);
+  const [storeItems, setStoreItems] = useState<StoreItem[]>([]);
+  const [wheelSegments, setWheelSegments] = useState<WheelSegment[]>([]);
   const [history, setHistory] = useState<HistoryEvent[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   
@@ -46,6 +48,14 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, }
   const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
   const [selectedTemplateIds, setSelectedTemplateIds] = useState<string[]>([]);
   const [selectedBountyTemplateIds, setSelectedBountyTemplateIds] = useState<string[]>([]);
+  const [ticketAmount, setTicketAmount] = useState('');
+  
+  // Store Item Form
+  const [storeItemTitle, setStoreItemTitle] = useState('');
+  const [storeItemCost, setStoreItemCost] = useState('');
+  const [storeItemImage, setStoreItemImage] = useState('');
+  const [storeItemLink, setStoreItemLink] = useState('');
+  const [editingStoreItemId, setEditingStoreItemId] = useState<string | null>(null);
   
   // Create Template State
   const [createMode, setCreateMode] = useState<'reward' | 'bounty'>('reward');
@@ -59,6 +69,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, }
 
   // Bounty Form
   const [bountyTitle, setBountyTitle] = useState('');
+  const [bountyRewardType, setBountyRewardType] = useState<'CUSTOM' | 'TICKETS'>('CUSTOM');
   const [bountyRewardValue, setBountyRewardValue] = useState('');
   const [bountyEmoji, setBountyEmoji] = useState('🧹');
   const [bountyFCFS, setBountyFCFS] = useState(false);
@@ -67,6 +78,9 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, }
     useState<"prize" | "bounty" | null>(null);
   const [showPrizeEmojiPicker, setShowPrizeEmojiPicker] = useState(false);
   const [showBountyEmojiPicker, setShowBountyEmojiPicker] = useState(false);
+
+  // Wheel Edit State
+  const [showWheelEdit, setShowWheelEdit] = useState(false);
 
   // User Management State
   const [userFormView, setUserFormView] = useState(false);
@@ -116,6 +130,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, }
         usersFromApi,
         historyFromApi,
         notificationsFromApi,
+        storeItemsFromApi,
       ] = await Promise.all([
         storageService.getTemplates(familyId),         // Reward templates
         storageService.getAssignments(familyId),       // Assigned rewards
@@ -124,6 +139,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, }
         storageService.getFamilyUsers(familyId),
         storageService.getFamilyHistory(familyId),
         storageService.getNotifications(currentUser.id),
+        storageService.getStoreItems(familyId),        // Store items
       ]);
 
       //----------------------------------------------------
@@ -141,6 +157,11 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, }
       // Users
       //----------------------------------------------------
       setUsers(usersFromApi);
+
+      //----------------------------------------------------
+      // Store Items
+      //----------------------------------------------------
+      setStoreItems(storeItemsFromApi);
 
       //----------------------------------------------------
       // History + notifications (from backend)
@@ -193,6 +214,21 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, }
             refreshData();
             break;
 
+          case "TICKETS_GIVEN":
+            refreshData();
+            break;
+
+          case "STORE_ITEM_ADDED":
+          case "STORE_ITEM_UPDATED":
+          case "STORE_ITEM_DELETED":
+            refreshData();
+            break;
+
+          case "STORE_PURCHASE":
+            refreshData();
+            showToast("A child purchased a store item!", "success");
+            break;
+
           default:
             console.warn("Unknown SSE event:", event);
         }
@@ -230,8 +266,11 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, }
 
   const resetForms = () => {
     setPrizeTitle(''); setPrizeDesc(''); setPrizeEmoji('🎁'); setPrizeColor(PASTEL_COLORS[6]);
-    setBountyTitle(''); setBountyRewardValue(''); setBountyEmoji('🧹'); setBountyFCFS(false); setBountyColor(PASTEL_COLORS[6]);
+    setBountyTitle(''); setBountyRewardType('CUSTOM'); setBountyRewardValue(''); setBountyEmoji('🧹'); setBountyFCFS(false); setBountyColor(PASTEL_COLORS[6]);
+    setStoreItemTitle(''); setStoreItemCost(''); setStoreItemImage(''); setStoreItemLink('');
     setEditingId(null);
+    setEditingStoreItemId(null);
+    setTicketAmount('');
   };
 
   // --- ACTIONS ---
@@ -342,13 +381,39 @@ const handleBulkAssign = async () => {
       // BOUNTY TEMPLATE
       // ------------------------------------
       else if (createMode === "bounty") {
-        if (!bountyTitle || !bountyRewardValue) return;
+        if (!bountyTitle) {
+          showToast("Please enter a bounty title", "error");
+          return;
+        }
+
+        if (!bountyRewardValue || !bountyRewardValue.trim()) {
+          if (bountyRewardType === 'TICKETS') {
+            showToast("Please enter a ticket amount", "error");
+          } else {
+            showToast("Please enter a reward value", "error");
+          }
+          return;
+        }
+
+        // Validate ticket amount is a positive number
+        if (bountyRewardType === 'TICKETS') {
+          const ticketAmount = parseInt(bountyRewardValue);
+          if (isNaN(ticketAmount)) {
+            showToast("Ticket amount must be a number", "error");
+            return;
+          }
+          if (ticketAmount <= 0) {
+            showToast("Ticket amount must be a positive number", "error");
+            return;
+          }
+        }
 
         const bounty: BountyTemplate = {
           id: editingId || Date.now().toString(), // numeric IDs = create
           familyId: currentUser.familyId,
           title: bountyTitle,
           emoji: bountyEmoji,
+          rewardType: bountyRewardType,
           rewardValue: bountyRewardValue,
           rewardTemplateId: undefined, // not used yet
           isFCFS: bountyFCFS,
@@ -447,6 +512,7 @@ const handleBulkAssign = async () => {
       setCreateMode('bounty');
       setEditingId(b.id);
       setBountyTitle(b.title);
+      setBountyRewardType(b.rewardType || 'CUSTOM');
       setBountyRewardValue(b.rewardValue);
       setBountyEmoji(b.emoji);
       setBountyFCFS(!!b.isFCFS);
@@ -573,6 +639,96 @@ const handleBulkAssign = async () => {
       showToast("User deleted.", "success");
     } catch (e: any) {
       showToast(e.message || "Error deleting user", "error");
+    }
+  };
+
+  // Store Item Management
+  const handleSaveStoreItem = async () => {
+    try {
+      if (!storeItemTitle || !storeItemCost) {
+        showToast("Title and Cost are required", "error");
+        return;
+      }
+
+      const cost = parseInt(storeItemCost);
+      if (isNaN(cost) || cost <= 0) {
+        showToast("Cost must be a positive number", "error");
+        return;
+      }
+
+      const item: StoreItem = {
+        id: editingStoreItemId || Date.now().toString(),
+        familyId: currentUser.familyId,
+        title: storeItemTitle,
+        cost,
+        imageUrl: storeItemImage || undefined,
+        productUrl: storeItemLink || undefined,
+      };
+
+      await storageService.saveStoreItem(item);
+      showToast("Store item saved!", "success");
+      resetForms();
+      await refreshData();
+    } catch (err) {
+      console.error("Failed to save store item", err);
+      showToast("Failed to save store item", "error");
+    }
+  };
+
+  const handleEditStoreItem = (item: StoreItem) => {
+    setEditingStoreItemId(item.id);
+    setStoreItemTitle(item.title);
+    setStoreItemCost(item.cost.toString());
+    setStoreItemImage(item.imageUrl || '');
+    setStoreItemLink(item.productUrl || '');
+  };
+
+  const handleDeleteStoreItem = async (id: string) => {
+    const ok = await confirm({
+      title: "Delete Store Item?",
+      message: "Remove this item from the store? This cannot be undone.",
+      confirmLabel: "Delete Item",
+      cancelLabel: "Cancel",
+      destructive: true,
+    });
+
+    if (!ok) return;
+
+    try {
+      await storageService.deleteStoreItem(id);
+      showToast("Store item deleted", "success");
+      await refreshData();
+    } catch (err) {
+      console.error("Failed to delete store item", err);
+      showToast("Failed to delete store item", "error");
+    }
+  };
+
+  // Ticket Management
+  const handleGiveTickets = async () => {
+    try {
+      if (selectedUsers.length === 0) {
+        showToast("Select at least one child", "error");
+        return;
+      }
+
+      const amount = parseInt(ticketAmount);
+      if (isNaN(amount) || amount <= 0) {
+        showToast("Enter a valid ticket amount", "error");
+        return;
+      }
+
+      for (const userId of selectedUsers) {
+        await storageService.giveTickets(userId, amount);
+      }
+
+      showToast(`Gave ${amount} tickets to ${selectedUsers.length} child(ren)!`, "success");
+      setTicketAmount('');
+      setSelectedUsers([]);
+      await refreshData();
+    } catch (err) {
+      console.error("Failed to give tickets", err);
+      showToast("Failed to give tickets", "error");
     }
   };
 
@@ -885,19 +1041,29 @@ const handleBulkAssign = async () => {
       </header>
 
       {/* Main Tabs */}
-      <div className="flex p-4 gap-2 overflow-x-auto no-scrollbar">
+      <div className="flex p-4 gap-2 justify-around">
         {[
-            { id: 'assign', label: 'Assign' },
-            { id: 'approvals', label: `Approvals (${totalPending})` },
-            { id: 'create', label: 'Create New' },
-            { id: 'users', label: 'Family' }
+            { id: 'assign', label: 'Assign', icon: Send },
+            { id: 'approvals', label: `${totalPending}`, fullLabel: 'Approvals', icon: CheckCircle },
+            { id: 'create', label: 'Create', icon: Plus },
+            { id: 'store', label: 'Store', icon: ShoppingBag },
+            { id: 'users', label: 'Family', icon: UserIcon }
         ].map(t => (
             <button 
                 key={t.id}
                 onClick={() => { setTab(t.id as any); resetForms(); }}
-                className={`px-4 py-2 rounded-full text-sm font-semibold whitespace-nowrap transition-colors ${tab === t.id ? 'bg-indigo-600 text-white' : 'bg-white text-gray-600 border border-gray-100'}`}
+                className={`flex flex-col items-center gap-1 px-3 py-2 rounded-xl flex-1 transition-colors ${tab === t.id ? 'bg-indigo-600 text-white' : 'bg-white text-gray-600'}`}
+                title={t.fullLabel || t.label}
             >
-                {t.label}
+                <div className="relative">
+                    <t.icon size={20} />
+                    {t.id === 'approvals' && totalPending > 0 && (
+                        <span className={`absolute -top-1 -right-1 min-w-[16px] h-4 flex items-center justify-center text-[10px] font-bold rounded-full px-1 ${tab === t.id ? 'bg-white text-indigo-600' : 'bg-red-500 text-white'}`}>
+                            {totalPending}
+                        </span>
+                    )}
+                </div>
+                <span className="text-xs font-semibold">{t.id === 'approvals' ? 'Approvals' : t.label}</span>
             </button>
         ))}
       </div>
@@ -909,6 +1075,7 @@ const handleBulkAssign = async () => {
             <div className="flex gap-4 mb-6 border-b border-gray-200">
                 <button onClick={() => setAssignSubTab('rewards')} className={`pb-2 text-sm font-bold ${assignSubTab === 'rewards' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-400'}`}>Give Rewards</button>
                 <button onClick={() => setAssignSubTab('bounties')} className={`pb-2 text-sm font-bold ${assignSubTab === 'bounties' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-400'}`}>Assign Tasks</button>
+                <button onClick={() => setAssignSubTab('tickets')} className={`pb-2 text-sm font-bold ${assignSubTab === 'tickets' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-400'}`}>Give Tickets</button>
             </div>
 
             <div className="mb-6 overflow-x-auto no-scrollbar">
@@ -953,33 +1120,47 @@ const handleBulkAssign = async () => {
               </div>
             </div>
 
-            {/* Search Bar */}
-            <div className="mb-4 relative">
-                <input 
-                    type="text" 
-                    placeholder={assignSubTab === 'rewards' ? "Search rewards..." : "Search tasks..."}
-                    value={searchTerm}
-                    onChange={e => setSearchTerm(e.target.value)}
-                    className="w-full pl-10 pr-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-all text-gray-900 placeholder-gray-400"
-                />
-                <Search className="absolute left-3 top-3.5 text-gray-400" size={20}/>
-            </div>
-            
+            {/* Conditional rendering based on subtab */}
             {assignSubTab === 'rewards' ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pb-24">
-                    {filteredTemplates.length === 0 && <div className="col-span-2 text-center py-8 text-gray-400">No rewards found.</div>}
-                    {filteredTemplates.map(t => (
-                        <PrizeCard 
-                            key={t.id} 
-                            {...t} 
-                            variant="template"
-                            highlight={selectedTemplateIds.includes(t.id)}
-                            onClick={() => setSelectedTemplateIds(prev => prev.includes(t.id) ? prev.filter(id => id !== t.id) : [...prev, t.id])}
-                            onEdit={() => handleEditReward(t)}
+                <>
+                    {/* Search Bar */}
+                    <div className="mb-4 relative">
+                        <input 
+                            type="text" 
+                            placeholder="Search rewards..."
+                            value={searchTerm}
+                            onChange={e => setSearchTerm(e.target.value)}
+                            className="w-full pl-10 pr-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-all text-gray-900 placeholder-gray-400"
                         />
-                    ))}
-                </div>
-            ) : (
+                        <Search className="absolute left-3 top-3.5 text-gray-400" size={20}/>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pb-24">
+                        {filteredTemplates.length === 0 && <div className="col-span-2 text-center py-8 text-gray-400">No rewards found.</div>}
+                        {filteredTemplates.map(t => (
+                            <PrizeCard 
+                                key={t.id} 
+                                {...t} 
+                                variant="template"
+                                highlight={selectedTemplateIds.includes(t.id)}
+                                onClick={() => setSelectedTemplateIds(prev => prev.includes(t.id) ? prev.filter(id => id !== t.id) : [...prev, t.id])}
+                                onEdit={() => handleEditReward(t)}
+                            />
+                        ))}
+                    </div>
+                </>
+            ) : assignSubTab === 'bounties' ? (
+                <>
+                    {/* Search Bar */}
+                    <div className="mb-4 relative">
+                        <input 
+                            type="text" 
+                            placeholder="Search tasks..."
+                            value={searchTerm}
+                            onChange={e => setSearchTerm(e.target.value)}
+                            className="w-full pl-10 pr-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-all text-gray-900 placeholder-gray-400"
+                        />
+                        <Search className="absolute left-3 top-3.5 text-gray-400" size={20}/>
+                    </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pb-24">
                     {filteredBounties.length === 0 && <div className="col-span-2 text-center text-gray-400 py-8 italic">No task templates found.</div>}
                     {filteredBounties.map(b => {
@@ -1026,7 +1207,12 @@ const handleBulkAssign = async () => {
                           </div>
 
                           <p className="text-sm text-gray-500 font-medium flex items-center gap-1 mt-1">
-                            <Gift size={14} /> Reward: {b.rewardValue}
+                            {b.rewardType === 'TICKETS' ? (
+                              <Ticket size={14} className="text-amber-500" />
+                            ) : (
+                              <Gift size={14} />
+                            )}
+                            Reward: {b.rewardValue}{b.rewardType === 'TICKETS' ? ' Tickets' : ''}
                           </p>
 
                           {selected && (
@@ -1038,13 +1224,73 @@ const handleBulkAssign = async () => {
                       );
                     })}
                 </div>
+                </>
+            ) : (
+                <>
+                    {/* Tickets Section */}
+                    <div className="flex flex-col items-center justify-center py-10 px-4">
+                        <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 w-full max-w-sm text-center">
+                            <div className="w-16 h-16 bg-gradient-to-br from-purple-500 to-indigo-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                                <Ticket size={32} className="text-white" />
+                            </div>
+                            <h3 className="text-xl font-bold text-gray-800 mb-2">Give Tickets</h3>
+                            <p className="text-sm text-gray-500 mb-6">
+                                Children can use tickets to spin the prize wheel or purchase items from the store
+                            </p>
+
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-2 text-left">
+                                        Number of Tickets
+                                    </label>
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        value={ticketAmount}
+                                        onChange={(e) => setTicketAmount(e.target.value)}
+                                        placeholder="Enter amount..."
+                                        className="w-full p-3 border border-gray-300 rounded-xl text-center text-2xl font-bold text-indigo-600 focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none"
+                                    />
+                                </div>
+
+                                {selectedUsers.length > 0 && ticketAmount && parseInt(ticketAmount) > 0 && (
+                                    <div className="bg-indigo-50 p-3 rounded-xl">
+                                        <p className="text-sm text-indigo-800 font-medium">
+                                            Give <span className="font-bold">{ticketAmount}</span> tickets to{' '}
+                                            <span className="font-bold">{selectedUsers.length}</span> child(ren)
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </>
             )}
 
-            {(selectedTemplateIds.length > 0 || selectedBountyTemplateIds.length > 0) && (
+            {/* Action Buttons */}
+            {assignSubTab === 'rewards' && selectedTemplateIds.length > 0 && (
                 <div className="fixed bottom-24 left-0 right-0 px-6 z-30 flex justify-center animate-bounce-in">
                     <button onClick={handleBulkAssign} className="bg-gray-900 text-white w-full max-w-md py-4 rounded-2xl shadow-2xl flex items-center justify-center gap-3 font-bold text-lg">
-                        {assignSubTab === 'rewards' ? <Gift size={24} className="text-indigo-400"/> : <ListTodo size={24} className="text-indigo-400"/>}
-                        <span>{assignSubTab === 'rewards' ? 'Send Rewards' : 'Assign Tasks'}</span>
+                        <Gift size={24} className="text-indigo-400"/>
+                        <span>Send Rewards</span>
+                    </button>
+                </div>
+            )}
+
+            {assignSubTab === 'bounties' && selectedBountyTemplateIds.length > 0 && (
+                <div className="fixed bottom-24 left-0 right-0 px-6 z-30 flex justify-center animate-bounce-in">
+                    <button onClick={handleBulkAssign} className="bg-gray-900 text-white w-full max-w-md py-4 rounded-2xl shadow-2xl flex items-center justify-center gap-3 font-bold text-lg">
+                        <ListTodo size={24} className="text-indigo-400"/>
+                        <span>Assign Tasks</span>
+                    </button>
+                </div>
+            )}
+
+            {assignSubTab === 'tickets' && selectedUsers.length > 0 && ticketAmount && parseInt(ticketAmount) > 0 && (
+                <div className="fixed bottom-24 left-0 right-0 px-6 z-30 flex justify-center animate-bounce-in">
+                    <button onClick={handleGiveTickets} className="bg-gray-900 text-white w-full max-w-md py-4 rounded-2xl shadow-2xl flex items-center justify-center gap-3 font-bold text-lg">
+                        <Send size={24} className="text-purple-400"/>
+                        <span>Give Tickets</span>
                     </button>
                 </div>
             )}
@@ -1459,23 +1705,52 @@ const handleBulkAssign = async () => {
                     />
                   </div>
 
+                  {/* ---------------- Reward Type Toggle ---------------- */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Reward Type
+                    </label>
+                    <div className="flex bg-gray-50 p-1 rounded-lg border border-gray-200">
+                      <button 
+                        type="button"
+                        onClick={() => setBountyRewardType('CUSTOM')} 
+                        className={`flex-1 py-1.5 rounded-md text-xs font-bold transition-all ${bountyRewardType === 'CUSTOM' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500'}`}
+                      >
+                        Custom
+                      </button>
+                      <button 
+                        type="button"
+                        onClick={() => setBountyRewardType('TICKETS')} 
+                        className={`flex-1 py-1.5 rounded-md text-xs font-bold transition-all ${bountyRewardType === 'TICKETS' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500'}`}
+                      >
+                        Tickets
+                      </button>
+                    </div>
+                  </div>
+
                   {/* ---------------- Reward Value ---------------- */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Reward Value
+                      {bountyRewardType === 'TICKETS' ? 'Ticket Amount' : 'Reward Value'}
                     </label>
                     <div className="relative">
                       <input
-                        type="text"
+                        type={bountyRewardType === 'TICKETS' ? "number" : "text"}
                         value={bountyRewardValue}
                         onChange={(e) => setBountyRewardValue(e.target.value)}
-                        placeholder="e.g. $5 or 30 mins TV"
+                        placeholder={bountyRewardType === 'TICKETS' ? "e.g. 5" : "e.g. $5 or 30 mins TV"}
                         className="w-full p-3 pl-10 rounded-xl border border-gray-300 focus:border-indigo-500 outline-none"
+                        min={bountyRewardType === 'TICKETS' ? "1" : undefined}
+                        step={bountyRewardType === 'TICKETS' ? "1" : undefined}
                       />
-                      <CircleDollarSign
-                        className="absolute left-3 top-3.5 text-gray-400"
-                        size={18}
-                      />
+                      {bountyRewardType === 'TICKETS' ? (
+                        <Ticket className="absolute left-3 top-3.5 text-gray-400" size={18}/>
+                      ) : (
+                        <CircleDollarSign
+                          className="absolute left-3 top-3.5 text-gray-400"
+                          size={18}
+                        />
+                      )}
                     </div>
                   </div>
 
@@ -1548,6 +1823,160 @@ const handleBulkAssign = async () => {
         )}
 
         
+        {/* Store Tab */}
+        {tab === 'store' && (
+            <div className="space-y-6">
+                <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+                    <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                        <ShoppingBag size={24} />
+                        {editingStoreItemId ? 'Edit' : 'Add'} Store Item
+                    </h3>
+                    <div className="space-y-4">
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Item Title</label>
+                            <input
+                                type="text"
+                                value={storeItemTitle}
+                                onChange={(e) => setStoreItemTitle(e.target.value)}
+                                placeholder="e.g. LEGO Star Wars Set"
+                                className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none"
+                            />
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Ticket Cost</label>
+                            <div className="relative">
+                                <input
+                                    type="number"
+                                    min="1"
+                                    value={storeItemCost}
+                                    onChange={(e) => setStoreItemCost(e.target.value)}
+                                    placeholder="e.g. 50"
+                                    className="w-full p-3 pl-10 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none"
+                                />
+                                <Ticket size={20} className="absolute left-3 top-3.5 text-purple-400" />
+                            </div>
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Image URL (optional)</label>
+                            <div className="relative">
+                                <input
+                                    type="url"
+                                    value={storeItemImage}
+                                    onChange={(e) => setStoreItemImage(e.target.value)}
+                                    placeholder="https://..."
+                                    className="w-full p-3 pl-10 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none"
+                                />
+                                <ImageIcon size={20} className="absolute left-3 top-3.5 text-gray-400" />
+                            </div>
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Product Link (optional)</label>
+                            <div className="relative">
+                                <input
+                                    type="url"
+                                    value={storeItemLink}
+                                    onChange={(e) => setStoreItemLink(e.target.value)}
+                                    placeholder="https://..."
+                                    className="w-full p-3 pl-10 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none"
+                                />
+                                <Linkicon size={20} className="absolute left-3 top-3.5 text-gray-400" />
+                            </div>
+                        </div>
+
+                        <div className="flex gap-3 pt-2">
+                            <button
+                                onClick={handleSaveStoreItem}
+                                className="flex-1 py-3 bg-indigo-600 text-white font-bold rounded-xl shadow-lg hover:bg-indigo-700 transition-colors"
+                            >
+                                {editingStoreItemId ? 'Update Item' : 'Add to Store'}
+                            </button>
+                            {editingStoreItemId && (
+                                <button
+                                    onClick={resetForms}
+                                    className="px-6 py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+                        <ShoppingBag size={20}/>
+                        Store Inventory ({storeItems.length} items)
+                    </h3>
+                    {storeItems.length === 0 ? (
+                        <div className="bg-white p-8 rounded-2xl text-center text-gray-400">
+                            <ShoppingBag size={48} className="mx-auto mb-3 opacity-20" />
+                            <p className="font-medium">No items in store yet</p>
+                            <p className="text-sm">Add items above for children to purchase with tickets</p>
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            {storeItems.map((item) => (
+                                <div
+                                    key={item.id}
+                                    className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow"
+                                >
+                                    {item.imageUrl && (
+                                        <div className="mb-3 rounded-xl overflow-hidden bg-gray-100 aspect-video">
+                                            <img
+                                                src={item.imageUrl}
+                                                alt={item.title}
+                                                className="w-full h-full object-cover"
+                                                onError={(e) => {
+                                                    e.currentTarget.style.display = 'none';
+                                                }}
+                                            />
+                                        </div>
+                                    )}
+                                    <div className="flex justify-between items-start mb-2">
+                                        <div className="flex-1">
+                                            <h4 className="font-bold text-gray-800">{item.title}</h4>
+                                            <div className="flex items-center gap-1 mt-1">
+                                                <Ticket size={16} className="text-purple-500" />
+                                                <span className="text-lg font-bold text-purple-600">{item.cost}</span>
+                                            </div>
+                                        </div>
+                                        <div className="flex gap-1">
+                                            <button
+                                                onClick={() => handleEditStoreItem(item)}
+                                                className="p-2 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 transition-colors"
+                                            >
+                                                <Edit2 size={16} />
+                                            </button>
+                                            <button
+                                                onClick={() => handleDeleteStoreItem(item.id)}
+                                                className="p-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors"
+                                            >
+                                                <Trash2 size={16} />
+                                            </button>
+                                        </div>
+                                    </div>
+                                    {item.productUrl && (
+                                        <a
+                                            href={item.productUrl}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="text-xs text-indigo-600 hover:text-indigo-700 flex items-center gap-1 mt-2"
+                                        >
+                                            <Linkicon size={12} />
+                                            View Product
+                                        </a>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </div>
+        )}
+
         {/* Users Tab */}
         {tab === 'users' && (
             <div className="space-y-6">
@@ -1570,9 +1999,15 @@ const handleBulkAssign = async () => {
                                                 <p className="text-xs text-gray-500">@{u.username}</p>
                                             </div>
                                         </div>
-                                        <div className="flex gap-2">
+                                        <div className="flex items-center gap-2">
                                             {u.role !== UserRole.ADMIN && (
-                                                <button onClick={(e) => {e.stopPropagation(); setViewingRewardsForUser(u.id)}} className="text-indigo-500 p-2 hover:bg-indigo-100 rounded-lg"><Gift size={18}/></button>
+                                                <>
+                                                    <div className="flex items-center gap-1 px-2 py-1 bg-amber-50 rounded-lg">
+                                                        <Ticket size={16} className="text-amber-500" />
+                                                        <span className="text-sm font-semibold text-amber-600">{u.ticketBalance || 0}</span>
+                                                    </div>
+                                                    <button onClick={(e) => {e.stopPropagation(); setViewingRewardsForUser(u.id)}} className="text-indigo-500 p-2 hover:bg-indigo-100 rounded-lg"><Gift size={18}/></button>
+                                                </>
                                             )}
                                             <button className="text-gray-400 p-2 rounded-lg"><Settings size={18}/></button>
                                         </div>

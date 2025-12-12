@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { AssignedPrize, PrizeStatus, PrizeTemplate, User, PrizeType, HistoryEvent, AppNotification, BountyAssignment, BountyTemplate, BountyStatus } from '../types';
+import { AssignedPrize, PrizeStatus, PrizeTemplate, User, PrizeType, HistoryEvent, AppNotification, BountyAssignment, BountyTemplate, BountyStatus, StoreItem } from '../types';
 import { storageService } from '../services/storageService';
 import { API_BASE } from "../config";
 import { PrizeCard } from './PrizeCard';
-import { History, Ticket, Bell, X, CheckCircle, XCircle, ListTodo, Play, Trash2, ThumbsUp, ThumbsDown, gift } from 'lucide-react';
+import { History, Ticket, Bell, X, CheckCircle, XCircle, ListTodo, Play, Trash2, ThumbsUp, ThumbsDown, gift, ShoppingBag, Link as LinkIcon, Image as ImageIcon } from 'lucide-react';
 import { SseEvent } from "../types/sseEvents";
 
 interface WalletViewProps {
@@ -11,12 +11,12 @@ interface WalletViewProps {
   initialTab?: "wallet" | "tasks" | "history";
 }
 
-type WalletTab = "wallet" | "tasks" | "history";
+type WalletTab = "wallet" | "tasks" | "store" | "history";
 
 const getWalletTabFromUrl = (): WalletTab | null => {
   const params = new URLSearchParams(window.location.search);
   const raw = params.get("walletTab") || params.get("tab");
-  return raw === "wallet" || raw === "tasks" || raw === "history" ? raw : null;
+  return raw === "wallet" || raw === "tasks" || raw === "store" || raw === "history" ? raw : null;
 };
 
 interface GroupedPrize {
@@ -40,6 +40,8 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab 
   const [historyEvents, setHistoryEvents] = useState<HistoryEvent[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [familyUsers, setFamilyUsers] = useState<User[]>([]);
+  const [storeItems, setStoreItems] = useState<StoreItem[]>([]);
+  const [ticketBalance, setTicketBalance] = useState(currentUser.ticketBalance);
   const [toast, setToast] = useState<{message: string, type: 'info' | 'success' | 'error' } | null>(null);
 
   // UI State
@@ -76,6 +78,7 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab 
         usersFromApi,
         historyFromApi,
         notificationsFromApi,
+        storeItemsFromApi,
       ] = await Promise.all([
         storageService.getAssignments(familyId),          // prizes
         storageService.getTemplates(familyId),           // prize templates
@@ -84,6 +87,7 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab 
         storageService.getFamilyUsers(familyId),
         storageService.getHistoryEvents(familyId, currentUser.id),
         storageService.getNotifications(currentUser.id),
+        storageService.getStoreItems(familyId),          // store items
       ]);
 
       setMyPrizes(
@@ -105,6 +109,13 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab 
       setNotifications(
         notificationsFromApi.filter((n) => !n.isRead)
       );
+      setStoreItems(storeItemsFromApi);
+      
+      // Update ticket balance from family users list
+      const updatedCurrentUser = usersFromApi.find(u => u.id === currentUser.id);
+      if (updatedCurrentUser) {
+        setTicketBalance(updatedCurrentUser.ticketBalance);
+      }
     } catch (err) {
       console.error("Failed to refresh wallet data", err);
     }
@@ -113,6 +124,11 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab 
   useEffect(() => {
     refreshData();
   }, [currentUser.id]);
+
+  useEffect(() => {
+    // Sync ticket balance when currentUser prop changes
+    setTicketBalance(currentUser.ticketBalance);
+  }, [currentUser.ticketBalance]);
 
   useEffect(() => {
       if(toast) {
@@ -146,6 +162,25 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab 
 
           case "WALLET_UPDATE":
             refreshData();
+            break;
+
+          case "TICKETS_GIVEN":
+            if (event.userId === currentUser.id) {
+              refreshData();
+              setToast({ message: `You received ${event.amount} tickets!`, type: "success" });
+            }
+            break;
+
+          case "STORE_ITEM_ADDED":
+          case "STORE_ITEM_UPDATED":
+          case "STORE_ITEM_DELETED":
+            refreshData();
+            break;
+
+          case "STORE_PURCHASE":
+            if (event.userId === currentUser.id) {
+              refreshData();
+            }
             break;
 
           default:
@@ -291,6 +326,32 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab 
     }
   };
 
+  const handlePurchaseStoreItem = async (item: StoreItem) => {
+    try {
+      if (ticketBalance < item.cost) {
+        setToast({ message: "Not enough tickets!", type: "error" });
+        return;
+      }
+
+      const ok = await confirm({
+        title: `Purchase ${item.title}?`,
+        message: `This will cost ${item.cost} tickets. Your parents will be notified to fulfill this request.`,
+        confirmLabel: `Buy for ${item.cost} tickets`,
+        cancelLabel: "Cancel",
+        destructive: false,
+      });
+
+      if (!ok) return;
+
+      await storageService.purchaseStoreItem(item.id, currentUser.id);
+      setToast({ message: "Purchase request sent to parents!", type: "success" });
+      await refreshData();
+    } catch (err) {
+      console.error("Failed to purchase store item", err);
+      setToast({ message: "Failed to purchase item", type: "error" });
+    }
+  };
+
   const handleClearAllNotifications = async () => {
     try {
       await storageService.markAllNotificationsRead(currentUser.id);
@@ -397,7 +458,14 @@ const groupedPrizes: GroupedPrize[] = Object.values(
              </div>
           </div>
           
-          <div className="relative">
+          <div className="flex items-center gap-3">
+            {/* Ticket Balance */}
+            <div className="bg-gradient-to-r from-purple-500 to-indigo-600 px-3 py-2 rounded-full flex items-center gap-2 shadow-md">
+              <Ticket size={16} className="text-white" />
+              <span className="text-white font-bold text-sm">{ticketBalance}</span>
+            </div>
+
+            <div className="relative">
                 <button 
                     onClick={() => setShowNotifications(!showNotifications)} 
                     className="relative p-2 text-gray-600 hover:bg-gray-100 rounded-full transition-colors"
@@ -440,6 +508,7 @@ const groupedPrizes: GroupedPrize[] = Object.values(
                     </div>
                 )}
             </div>
+          </div>
         </div>
       </header>
 
@@ -449,6 +518,7 @@ const groupedPrizes: GroupedPrize[] = Object.values(
             <ListTodo size={16} /> Tasks
             {activeBounties.length > 0 && <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full text-[10px] flex items-center justify-center text-white border border-white">{activeBounties.length}</span>}
         </button>
+        <button onClick={() => setTab('store')} className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-bold transition-colors ${tab === 'store' ? 'bg-gray-900 text-white' : 'bg-white text-gray-600'}`}><ShoppingBag size={16} /> Store</button>
         <button onClick={() => setTab('history')} className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-bold transition-colors ${tab === 'history' ? 'bg-gray-900 text-white' : 'bg-white text-gray-600'}`}><History size={16} /> History</button>
       </div>
 
@@ -540,11 +610,15 @@ const groupedPrizes: GroupedPrize[] = Object.values(
                     const t = bountyTemplates.find(temp => temp.id === b.bountyTemplateId);
                     if(!t) return null;
                     
+                    const rewardDescription = t.rewardType === 'TICKETS' 
+                      ? `Reward: ${t.rewardValue} Tickets`
+                      : `Reward: ${t.rewardValue}`;
+                    
                     return (
                         <div key={b.id} className="relative">
                             <PrizeCard 
                                 title={t.title}
-                                description={`Reward: ${t.rewardValue}`}
+                                description={rewardDescription}
                                 emoji={t.emoji}
                                 variant="bounty"
                                 status={b.status}
@@ -591,6 +665,89 @@ const groupedPrizes: GroupedPrize[] = Object.values(
                         </div>
                     );
                 })}
+            </div>
+        )}
+
+        {tab === 'store' && (
+            <div className="space-y-4">
+                {storeItems.length === 0 ? (
+                    <div className="text-center py-16 opacity-60">
+                        <ShoppingBag size={64} className="mx-auto mb-4 text-gray-300" />
+                        <h3 className="text-lg font-bold text-gray-800">Store is Empty</h3>
+                        <p className="text-sm text-gray-500 mt-1">No items available yet</p>
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {storeItems.map((item) => (
+                            <div
+                                key={item.id}
+                                className="bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-100 hover:shadow-md transition-shadow"
+                            >
+                                {item.imageUrl && (
+                                    <div className="aspect-video bg-gray-100 overflow-hidden">
+                                        <img
+                                            src={item.imageUrl}
+                                            alt={item.title}
+                                            className="w-full h-full object-cover"
+                                            onError={(e) => {
+                                                e.currentTarget.style.display = 'none';
+                                            }}
+                                        />
+                                    </div>
+                                )}
+                                <div className="p-4">
+                                    <h3 className="font-bold text-gray-800 mb-2">{item.title}</h3>
+                                    
+                                    <div className="flex items-center justify-between mb-3">
+                                        <div className="flex items-center gap-1">
+                                            <Ticket size={20} className="text-purple-500" />
+                                            <span className="text-xl font-bold text-purple-600">{item.cost}</span>
+                                        </div>
+                                        {ticketBalance >= item.cost ? (
+                                            <span className="text-xs text-green-600 font-medium bg-green-50 px-2 py-1 rounded">
+                                                Can afford
+                                            </span>
+                                        ) : (
+                                            <span className="text-xs text-gray-400 font-medium">
+                                                Need {item.cost - ticketBalance} more
+                                            </span>
+                                        )}
+                                    </div>
+
+                                    {item.description && (
+                                        <p className="text-xs text-gray-500 mb-3">{item.description}</p>
+                                    )}
+
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={() => handlePurchaseStoreItem(item)}
+                                            disabled={ticketBalance < item.cost}
+                                            className={`flex-1 py-2 rounded-xl font-bold text-sm transition-colors ${
+                                                ticketBalance >= item.cost
+                                                    ? 'bg-indigo-600 text-white hover:bg-indigo-700'
+                                                    : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                            }`}
+                                        >
+                                            {ticketBalance >= item.cost ? 'Purchase' : 'Not Enough Tickets'}
+                                        </button>
+                                        
+                                        {item.productUrl && (
+                                            <a
+                                                href={item.productUrl}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="p-2 bg-gray-100 text-gray-600 rounded-xl hover:bg-gray-200 transition-colors flex items-center justify-center"
+                                                title="View Product"
+                                            >
+                                                <LinkIcon size={18} />
+                                            </a>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
             </div>
         )}
 

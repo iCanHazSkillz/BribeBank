@@ -30,6 +30,8 @@ model Family {
   assignedPrizes    AssignedPrize[]
   bountyAssignments BountyAssignment[]
   historyEvents     HistoryEvent[]
+  storeItems        StoreItem[]
+  wheelSegments     WheelSegment[]
 }
 
 // -----------------------------------------------------
@@ -46,6 +48,7 @@ model User {
   displayName String
   role        Role       @default(CHILD) // PARENT or CHILD
   avatarColor String?    @default("bg-blue-500")
+  ticketBalance Int      @default(0)
 
   createdAt   DateTime   @default(now())
 
@@ -114,7 +117,8 @@ model Bounty {
 
   title       String
   emoji       String
-  rewardValue String   // e.g. "$5" or "Ice Cream"
+  rewardType  String?   // "CUSTOM" or "TICKETS"
+  rewardValue String   // e.g. "$5" or "Ice Cream" or ticket count
   themeColor      String?  // e.g. "bg-amber-500 text-white"
 
   rewardTemplateId String?
@@ -268,4 +272,42 @@ model Notification {
   createdAt DateTime @default(now())
 
   @@index([userId, isRead])
+}
+
+// -----------------------------------------------------
+// STORE ITEMS
+// -----------------------------------------------------
+
+model StoreItem {
+  id          String   @id @default(cuid())
+  familyId    String
+  family      Family   @relation(fields: [familyId], references: [id])
+
+  title       String
+  cost        Int
+  imageUrl    String?
+  productUrl  String?
+  description String?
+
+  createdAt   DateTime @default(now())
+
+  @@index([familyId, createdAt])
+}
+
+// -----------------------------------------------------
+// WHEEL SEGMENTS
+// -----------------------------------------------------
+
+model WheelSegment {
+  id       String @id @default(cuid())
+  familyId String
+  family   Family @relation(fields: [familyId], references: [id])
+
+  label    String
+  color    String
+  prob     Float  @default(0.1)
+  
+  createdAt DateTime @default(now())
+
+  @@index([familyId])
 }

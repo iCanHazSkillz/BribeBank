@@ -1,0 +1,68 @@
+services:
+  bribebank-db:
+    image: postgres:15
+    container_name: bribebank-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: bribebank
+    volumes:
+      - ${PG_VOLUME_PATH:-./.local/postgres}:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "5432:5432"
+    networks:
+      - bribebank_net
+
+  # API dev container (hot reload if your package.json has a dev script)
+  bribebank-api:
+    image: node:20-bookworm
+    container_name: bribebank-api
+    working_dir: /app
+    restart: unless-stopped
+    volumes:
+      - ./bribebank-api:/app
+      - /app/node_modules
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      PORT: 3001
+      NODE_ENV: development
+      CHOKIDAR_USEPOLLING: "true"
+    command: sh -c "npm install && npm run dev"
+    depends_on:
+      bribebank-db:
+        condition: service_healthy
+    ports:
+      - "3040:3001"
+    networks:
+      - bribebank_net
+
+  # Frontend dev container (Vite)
+  bribebank-frontend:
+    image: node:20-alpine
+    container_name: bribebank-frontend
+    working_dir: /app
+    restart: unless-stopped
+    volumes:
+      - ./bribebank-frontend:/app
+      - /app/node_modules
+    environment:
+      VITE_API_URL: ${VITE_API_URL}
+      CHOKIDAR_USEPOLLING: "true"
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
+    depends_on:
+      - bribebank-api
+    ports:
+      - "5173:5173"
+    networks:
+      - bribebank_net
+
+networks:
+  bribebank_net:
+    driver: bridge

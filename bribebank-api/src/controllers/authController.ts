@@ -249,6 +249,7 @@ export const getMe = async (req: Request, res: Response) => {
                 displayName: true,
                 role: true,
                 avatarColor: true,
+                ticketBalance: true,
                 family: {
                     select: { id: true, name: true, joinCode: true, joinCodeExpiry: true },
                 },

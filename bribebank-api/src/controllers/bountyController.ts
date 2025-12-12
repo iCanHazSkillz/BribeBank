@@ -47,7 +47,7 @@ export const getFamilyBounties = async (req: Request, res: Response) => {
  */
 export const createBounty = async (req: Request, res: Response) => {
   const { familyId } = req.params;
-  const { title, emoji, rewardValue, isFCFS, rewardTemplateId, themeColor } = req.body;
+  const { title, emoji, rewardType, rewardValue, isFCFS, rewardTemplateId, themeColor } = req.body;
 
   if (!familyId) {
     return res.status(400).json({ error: "MISSING_FAMILY_ID" });
@@ -65,6 +65,7 @@ export const createBounty = async (req: Request, res: Response) => {
         familyId,
         title,
         emoji,
+        rewardType: rewardType ?? null,
         rewardValue,
         isFCFS: !!isFCFS,
         rewardTemplateId: rewardTemplateId ?? null,
@@ -101,7 +102,7 @@ export const createBounty = async (req: Request, res: Response) => {
  */
 export const updateBounty = async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { title, emoji, rewardValue, isFCFS, rewardTemplateId, themeColor } = req.body;
+  const { title, emoji, rewardType, rewardValue, isFCFS, rewardTemplateId, themeColor } = req.body;
 
   if (!id) {
     return res.status(400).json({ error: "MISSING_BOUNTY_ID" });
@@ -124,6 +125,7 @@ export const updateBounty = async (req: Request, res: Response) => {
       data: {
         title: title ?? existing.title,
         emoji: emoji ?? existing.emoji,
+        rewardType: rewardType !== undefined ? rewardType : existing.rewardType,
         rewardValue: rewardValue ?? existing.rewardValue,
         isFCFS:
           typeof isFCFS === "boolean" ? isFCFS : existing.isFCFS,
@@ -758,7 +760,97 @@ export const verifyAssignedBounty = async (req: Request, res: Response) => {
       },
     });
 
-    // 2) Build snapshot fields for reward
+    const parentName = parent.displayName || parent.username || "Parent";
+    const childName = child.displayName || child.username || "Child";
+
+    // 2) Check if this is a ticket-based reward
+    if (bounty.rewardType === 'TICKETS') {
+      // Add tickets directly to child's balance
+      const ticketAmount = parseInt(bounty.rewardValue);
+      
+      if (isNaN(ticketAmount) || ticketAmount <= 0) {
+        return res.status(400).json({ error: "INVALID_TICKET_AMOUNT" });
+      }
+
+      await prisma.$transaction(async (tx) => {
+        // Update child's ticket balance
+        await tx.user.update({
+          where: { id: child.id },
+          data: {
+            ticketBalance: {
+              increment: ticketAmount,
+            },
+          },
+        });
+
+        // Log task verification
+        await addHistoryEvent(
+          {
+            familyId: existingAssignment.familyId,
+            userId: existingAssignment.userId,
+            userName: childName,
+            title: bounty.title,
+            emoji: bounty.emoji || "🧹",
+            action: "VERIFIED_TASK",
+            assignerName: parentName,
+          },
+          tx
+        );
+
+        // Log ticket earnings
+        await addHistoryEvent(
+          {
+            familyId: existingAssignment.familyId,
+            userId: existingAssignment.userId,
+            userName: childName,
+            title: `${ticketAmount} Tickets`,
+            emoji: "🎟️",
+            action: "EARNED_TICKETS",
+            assignerName: parentName,
+          },
+          tx
+        );
+
+        await addNotification(
+          {
+            userId: existingAssignment.userId,
+            message: `Task "${bounty.title}" verified! +${ticketAmount} tickets.`,
+          },
+          tx
+        );
+      });
+
+      // Send push notification
+      try {
+        await sendPushToUser(child.id, {
+          title: "Your task was verified ✅",
+          body: `${parentName} verified: ${bounty.title}. +${ticketAmount} tickets!`,
+          tag: "task-verified",
+          type: "TASK_VERIFIED",
+          familyId: existingAssignment.familyId,
+          assignmentId: existingAssignment.id,
+          url: "/?view=wallet&walletTab=tasks",
+        });
+      } catch (pushErr) {
+        console.warn("verifyAssignedBounty push failed:", pushErr);
+      }
+
+      const event: SseEvent = {
+        type: "WALLET_UPDATE",
+        familyId: existingAssignment.familyId,
+        reason: "TASK_VERIFIED",
+        timestamp: Date.now(),
+      };
+
+      broadcastToFamily(existingAssignment.familyId, event);
+
+      return res.json({
+        assignment: updatedAssignment,
+        ticketsAwarded: ticketAmount,
+      });
+    }
+
+    // 3) Custom reward - Build snapshot fields for reward card
     let templateId: string | null = null;
     let snapshotTitle: string;
     let snapshotEmoji: string;
@@ -795,10 +887,7 @@ export const verifyAssignedBounty = async (req: Request, res: Response) => {
       snapshotThemeColor = "#22c55e";
     }
 
-    const parentName = parent.displayName || parent.username || "Parent";
-    const childName = child.displayName || child.username || "Child";
-
-    // 3) Transaction: create prize, log history, notify child
+    // 4) Transaction: create prize, log history, notify child
     const createdPrize = await prisma.$transaction(async (tx) => {
       const prize = await tx.assignedPrize.create({
         data: {

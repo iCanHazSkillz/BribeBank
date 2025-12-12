@@ -40,6 +40,7 @@ export const getFamilyUsers = async (req: Request, res: Response) => {
         role: true,
         createdAt: true,
         avatarColor: true,
+        ticketBalance: true,
       },
     });
 

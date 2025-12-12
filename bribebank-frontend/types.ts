@@ -38,9 +38,11 @@ export interface User {
   familyId: string; // Data isolation key
   username: string;
   name: string;
+  //displayName: string;
   role: UserRole;
   avatarColor: string;
-  password?: string; // In a real app, this would never be stored plain text on client
+  password?: string;
+  ticketBalance: number;
 }
 
 export interface PrizeTemplate {
@@ -77,7 +79,8 @@ export interface BountyTemplate {
   familyId: string;
   title: string; // The chore/task
   emoji: string;
-  rewardValue: string; // "$5" or "Screen Time" description
+  rewardType?: 'CUSTOM' | 'TICKETS';
+  rewardValue: string; // "$5" or "Screen Time" description or ticket amount
   rewardTemplateId?: string; // Optional: if linked to an existing prize template
   isFCFS?: boolean; // First Come First Served
   themeColor?: string | null;
@@ -92,6 +95,24 @@ export interface AssignedBounty {
   assignedAt: number;
   status: BountyStatus;
   completedAt?: number;
+}
+
+// STORE INTERFACES
+export interface StoreItem {
+  id: string;
+  familyId: string;
+  title: string;
+  cost: number;
+  imageUrl?: string;
+  productUrl?: string;
+  description?: string;
+}
+
+export interface WheelSegment {
+  id: string;
+  label: string;
+  color: string;
+  prob: number;
 }
 
 export interface HistoryEvent {

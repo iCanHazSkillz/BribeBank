@@ -26,4 +26,39 @@ export type SseEvent =
       familyId: string;
       reason: "REWARD_ASSIGNED" | "REWARD_APPROVED" | "REWARD_REJECTED" | "TASK_ASSIGNED" | "TASK_VERIFIED" | "TASK_REJECTED" | "TASK_ACCEPTED";
       timestamp: number;
+    }
+  | {
+      type: "TICKETS_GIVEN";
+      familyId: string;
+      userId: string;
+      amount: number;
+      newBalance: number;
+      timestamp: number;
+    }
+  | {
+      type: "STORE_ITEM_ADDED";
+      familyId: string;
+      itemId: string;
+      timestamp: number;
+    }
+  | {
+      type: "STORE_ITEM_UPDATED";
+      familyId: string;
+      itemId: string;
+      timestamp: number;
+    }
+  | {
+      type: "STORE_ITEM_DELETED";
+      familyId: string;
+      itemId: string;
+      timestamp: number;
+    }
+  | {
+      type: "STORE_PURCHASE";
+      familyId: string;
+      userId: string;
+      itemId: string;
+      assignmentId: string;
+      newBalance: number;
+      timestamp: number;
     };

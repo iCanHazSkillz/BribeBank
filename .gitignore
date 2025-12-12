@@ -12,6 +12,11 @@ prisma/.cache/
 
 # Local environment files (just in case someone adds them)
 .env
+.env.local
+
+# Local dev data
+.local/
+ai-context.txt
 
 # Docker volumes
 mnt/

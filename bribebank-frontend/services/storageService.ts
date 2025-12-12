@@ -10,11 +10,13 @@ import {
   Family, 
   BountyTemplate, 
   AssignedBounty, 
-  BountyStatus 
+  BountyStatus,
+  StoreItem,
+  WheelSegment
 } from '../types';
 import { API_BASE, apiUrl } from "../config";
 
-const DB_KEY = 'famrewards_production_db_v3'; // Bumped version
+const DB_KEY = 'famrewards_production_db_v6'; // Bumped version
 const SESSION_KEY = 'famrewards_session_v1';
 
 interface DatabaseSchema {
@@ -24,6 +26,8 @@ interface DatabaseSchema {
   assignments: AssignedPrize[];
   bountyTemplates: BountyTemplate[];
   bountyAssignments: AssignedBounty[];
+  storeItems: StoreItem[];
+  wheelSegments: Record<string, WheelSegment[]>; // keyed by familyId
   history: HistoryEvent[];
   notifications: AppNotification[];
 }
@@ -36,6 +40,8 @@ const getEmptyDB = (): DatabaseSchema => ({
   assignments: [],
   bountyTemplates: [],
   bountyAssignments: [],
+  storeItems: [],
+  wheelSegments: {},
   history: [],
   notifications: []
 });
@@ -74,12 +80,12 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
     .replace(/_/g, "/");
 
   const rawData = window.atob(base64);
-  const outputArray = new Uint8Array(rawData.length);
+  const outputArray = new Uint8Array(rawData.length) as Uint8Array;
 
   for (let i = 0; i < rawData.length; ++i) {
     outputArray[i] = rawData.charCodeAt(i);
   }
-  return outputArray;
+  return outputArray as Uint8Array<ArrayBuffer>;
 }
 
 async function fetchPushPublicKey(): Promise<string | null> {
@@ -122,6 +128,18 @@ const DEFAULT_BOUNTIES = [
   { title: 'Clean Room', emoji: '🧹', rewardValue: 'Screen Time', isFCFS: false },
   { title: 'Walk Dog', emoji: '🐕', rewardValue: '$2', isFCFS: true },
   { title: 'Read a Book', emoji: '📚', rewardValue: 'Ice Cream', isFCFS: false },
+];
+
+const DEFAULT_WHEEL_SEGMENTS: WheelSegment[] = [
+    { id: 'ws_1', label: 'Not this time', color: '#9CA3AF', prob: 0.2 },
+    { id: 'ws_2', label: '30 Minute Screen Time', color: '#60A5FA', prob: 0.1 },
+    { id: 'ws_3', label: 'Pick supper', color: '#F472B6', prob: 0.1 },
+    { id: 'ws_4', label: 'Free Pop', color: '#818CF8', prob: 0.1 },
+    { id: 'ws_5', label: 'Candy Run', color: '#FCD34D', prob: 0.1 },
+    { id: 'ws_6', label: 'Date Night', color: '#9CA3AF', prob: 0.1 },
+    { id: 'ws_7', label: '1 Hour Screen Time', color: '#34D399', prob: 0.1 },
+    { id: 'ws_8', label: 'Movie Night', color: '#A78BFA', prob: 0.1 },
+    { id: 'ws_9', label: 'JACKPOT - $20', color: '#EF4444', prob: 0.1 },
 ];
 
 export const storageService = {
@@ -178,12 +196,13 @@ export const storageService = {
       familyId: backendUser.familyId ?? backendUser.family?.id,
       username: backendUser.username,
       name: backendUser.displayName,
-      displayName: backendUser.displayName,
+      //displayName: backendUser.displayName,
       role:
         backendUser.role === "PARENT"
           ? UserRole.ADMIN
           : UserRole.USER,
       avatarColor: backendUser.avatarColor || "bg-blue-500",
+      ticketBalance: backendUser.ticketBalance || 0,
     };
 
     // 5. Save session locally
@@ -225,12 +244,13 @@ export const storageService = {
       familyId: backendUser.familyId ?? backendUser.family?.id,
       username: backendUser.username,
       name: backendUser.displayName,
-      displayName: backendUser.displayName,
+      //displayName: backendUser.displayName,
       role:
         backendUser.role === "PARENT"
           ? UserRole.ADMIN
           : UserRole.USER,
       avatarColor: "bg-blue-500",
+      ticketBalance: backendUser.ticketBalance || 0,
     };
 
     localStorage.setItem(SESSION_KEY, JSON.stringify(sessionUser));
@@ -272,12 +292,13 @@ export const storageService = {
       familyId: backendUser.familyId ?? backendUser.family?.id,
       username: backendUser.username,
       name: backendUser.displayName,
-      displayName: backendUser.displayName,
+      //displayName: backendUser.displayName,
       role:
         backendUser.role === "PARENT"
           ? UserRole.ADMIN
           : UserRole.USER,
       avatarColor: backendUser.avatarColor ?? "bg-blue-500",
+      ticketBalance: backendUser.ticketBalance || 0,
     };
 
     localStorage.setItem(SESSION_KEY, JSON.stringify(sessionUser));
@@ -286,6 +307,32 @@ export const storageService = {
 
 
   // --- USER MANAGEMENT ---
+
+  getUser: async (userId: string): Promise<User> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+    
+    const res = await fetch(apiUrl(`/users/${userId}`), {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (!res.ok) {
+      console.error("Failed to fetch user", res.status);
+      throw new Error("Failed to fetch user");
+    }
+
+    const u = await res.json();
+
+    return {
+      id: u.id,
+      familyId: u.familyId,
+      username: u.username,
+      name: u.displayName,
+      role: u.role === "PARENT" ? UserRole.ADMIN : UserRole.USER,
+      avatarColor: u.avatarColor || "bg-blue-500",
+      ticketBalance: u.ticketBalance || 0,
+    };
+  },
 
   getFamilyUsers: async (familyId: string): Promise<User[]> => {
     const token = getAuthToken();
@@ -306,9 +353,10 @@ export const storageService = {
       familyId: u.familyId,
       username: u.username,
       name: u.displayName,          // <- used by AdminView UI
-      displayName: u.displayName,   // <- for consistency
+      //displayName: u.displayName,   // <- for consistency
       role: u.role === "PARENT" ? UserRole.ADMIN : UserRole.USER,
       avatarColor: u.avatarColor || "bg-blue-500",
+      ticketBalance: u.ticketBalance || 0,
     }));
   },
 
@@ -723,6 +771,7 @@ export const storageService = {
         familyId: b.familyId,
         title: b.title,
         emoji: b.emoji,
+        rewardType: b.rewardType ?? 'CUSTOM',
         rewardValue: b.rewardValue,
         rewardTemplateId: b.rewardTemplateId ?? undefined,
         isFCFS: !!b.isFCFS,
@@ -740,6 +789,7 @@ export const storageService = {
     const payload = {
       title: template.title,
       emoji: template.emoji,
+      rewardType: template.rewardType ?? 'CUSTOM',
       rewardValue: template.rewardValue,
       isFCFS: !!template.isFCFS,
       themeColor: template.themeColor ?? null,
@@ -989,6 +1039,107 @@ export const storageService = {
     }
   },
 
+  giveTickets: async (userId: string, amount: number): Promise<void> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const res = await fetch(apiUrl(`/users/${userId}/tickets`), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ amount }),
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      console.error("giveTickets error:", res.status, body);
+      throw new Error(body?.error || "Failed to give tickets");
+    }
+  },
+
+  // --- STORE ITEMS ---
+
+  getStoreItems: async (familyId: string): Promise<StoreItem[]> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const res = await fetch(apiUrl(`/families/${familyId}/store-items`), {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      console.error("Failed to fetch store items", res.status, body);
+      throw new Error(body?.error || "Failed to fetch store items");
+    }
+
+    return await res.json();
+  },
+
+  saveStoreItem: async (item: StoreItem): Promise<void> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const isLocalId = /^\d+$/.test(item.id);
+    const url = isLocalId
+      ? apiUrl(`/families/${item.familyId}/store-items`)
+      : apiUrl(`/store-items/${item.id}`);
+    const method = isLocalId ? "POST" : "PUT";
+
+    const res = await fetch(url, {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(item),
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      console.error("Failed to save store item", res.status, body);
+      throw new Error(body?.error || "Failed to save store item");
+    }
+  },
+
+  deleteStoreItem: async (id: string): Promise<void> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const res = await fetch(apiUrl(`/store-items/${id}`), {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      console.error("Failed to delete store item", res.status, body);
+      throw new Error(body?.error || "Failed to delete store item");
+    }
+  },
+
+  purchaseStoreItem: async (itemId: string, userId: string): Promise<void> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const res = await fetch(apiUrl(`/store-items/${itemId}/purchase`), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ userId }),
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      console.error("Failed to purchase store item", res.status, body);
+      throw new Error(body?.error || "Failed to purchase store item");
+    }
+  },
+
   // --- COMMON ---
 
   // Per-child history (WalletView)
@@ -1121,6 +1272,7 @@ export const storageService = {
       .map((n: any): AppNotification => ({
         id: n.id,
         userId: n.userId,
+        familyId: n.familyId,
         message: n.message,
         isRead: !!n.isRead,
         timestamp:
@@ -1233,7 +1385,7 @@ export const storageService = {
 
       const newSub = await registration.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(publicKey),
+        applicationServerKey: urlBase64ToUint8Array(publicKey) as BufferSource,
       });
 
       const subJson = newSub.toJSON();
