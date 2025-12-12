@@ -45,6 +45,7 @@ const App: React.FC = () => {
     url.searchParams.delete("adminTab");
     url.searchParams.delete("walletTab");
     url.searchParams.delete("tab");
+    url.searchParams.delete("_t"); // Remove timestamp parameter
 
     // if nothing left, remove the "?" cleanly
     const next =

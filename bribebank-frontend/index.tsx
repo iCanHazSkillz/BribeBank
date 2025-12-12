@@ -32,9 +32,10 @@ if ("serviceWorker" in navigator) {
   
   // Listen for messages from service worker
   navigator.serviceWorker.addEventListener("message", (event) => {
-    if (event.data && event.data.type === "RELOAD_PAGE") {
-      console.log("[SW] Reloading page to refresh state after deep link navigation");
-      window.location.reload();
+    if (event.data && event.data.type === "NAVIGATE_AND_RELOAD") {
+      console.log("[SW] Navigating and reloading:", event.data.url);
+      // Change location which triggers a full page reload
+      window.location.href = event.data.url;
     }
   });
 }

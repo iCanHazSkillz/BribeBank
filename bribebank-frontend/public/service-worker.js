@@ -138,30 +138,18 @@ self.addEventListener("notificationclick", (event) => {
 
           if (clientUrl.origin !== self.location.origin) continue;
 
+          // Focus the window first
           await client.focus();
 
-          // If already at target, reload to ensure fresh state
-          if (client.url === targetUrl) {
-            // Post message to trigger a reload
-            client.postMessage({ type: 'RELOAD_PAGE' });
-            return;
-          }
-
-          // Navigate and then reload to ensure React re-initializes
-          if (typeof client.navigate === "function") {
-            await client.navigate(targetUrl);
-            // Force reload after navigation to ensure fresh React state
-            setTimeout(() => {
-              client.postMessage({ type: 'RELOAD_PAGE' });
-            }, 100);
-            return;
-          }
-
-          // Otherwise open a new window at the target
-          await self.clients.openWindow(targetUrl);
+          // Send message to navigate and reload
+          client.postMessage({ 
+            type: 'NAVIGATE_AND_RELOAD',
+            url: targetUrl 
+          });
+          
           return;
-        } catch {
-          // ignore
+        } catch (err) {
+          console.error("Error handling notification click:", err);
         }
       }
 
