@@ -3,7 +3,7 @@ import { AssignedPrize, PrizeStatus, PrizeTemplate, User, PrizeType, HistoryEven
 import { storageService } from '../services/storageService';
 import { API_BASE } from "../config";
 import { PrizeCard } from './PrizeCard';
-import { History, Ticket, Bell, X, CheckCircle, XCircle, ListTodo, Play, Trash2, ThumbsUp, ThumbsDown, gift, ShoppingBag, Link as LinkIcon, Image as ImageIcon } from 'lucide-react';
+import { History, Ticket, Bell, X, CheckCircle, XCircle, ListTodo, Play, Trash2, ThumbsUp, ThumbsDown, gift, ShoppingBag, Link as LinkIcon, Image as ImageIcon, Settings, User as UserIcon } from 'lucide-react';
 import { SseEvent } from "../types/sseEvents";
 
 interface WalletViewProps {
@@ -46,6 +46,15 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab 
 
   // UI State
   const [showNotifications, setShowNotifications] = useState(false);
+  const [showAccountSettings, setShowAccountSettings] = useState(false);
+
+  // Account Settings State
+  const [settingsName, setSettingsName] = useState(currentUser.name);
+  const [settingsUsername, setSettingsUsername] = useState(currentUser.username);
+  const [settingsPassword, setSettingsPassword] = useState('');
+  const [settingsAvatarColor, setSettingsAvatarColor] = useState(currentUser.avatarColor);
+
+  const AVATAR_COLORS = ['bg-pink-400', 'bg-teal-400', 'bg-blue-500', 'bg-purple-500', 'bg-orange-400', 'bg-green-500', 'bg-red-400', 'bg-indigo-500'];
 
   type ConfirmOptions = {
     title: string;
@@ -366,6 +375,40 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab 
     }
   };
 
+  const handleOpenAccountSettings = () => {
+    setSettingsName(currentUser.name);
+    setSettingsUsername(currentUser.username);
+    setSettingsPassword('');
+    setSettingsAvatarColor(currentUser.avatarColor);
+    setShowAccountSettings(true);
+  };
+
+  const handleSaveAccountSettings = async () => {
+    try {
+      if (!settingsName || !settingsUsername) {
+        setToast({ message: "Name and username are required", type: "error" });
+        return;
+      }
+
+      await storageService.updateUser(currentUser.id, currentUser.id, {
+        name: settingsName,
+        username: settingsUsername,
+        avatarColor: settingsAvatarColor,
+        ...(settingsPassword ? { password: settingsPassword } : {}),
+      } as any);
+
+      setToast({ message: "Account updated successfully!", type: "success" });
+      setShowAccountSettings(false);
+      
+      // Refresh session to get updated user data
+      const freshUser = await storageService.refreshSession();
+      window.location.reload(); // Reload to update currentUser prop
+    } catch (err: any) {
+      console.error("Failed to update account", err);
+      setToast({ message: err.message || "Failed to update account", type: "error" });
+    }
+  };
+
 // --------- Grouped Prizes (fixed snapshot stacking) ---------
 
 const normalize = (v?: string | null) => (v ?? "").trim().toLowerCase();
@@ -449,7 +492,11 @@ const groupedPrizes: GroupedPrize[] = Object.values(
       <header className="bg-white sticky top-0 z-50 px-6 py-4 shadow-sm mb-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-             <div className={`w-10 h-10 rounded-full ${currentUser.avatarColor} shadow-md border-2 border-white flex items-center justify-center text-white font-bold`}>
+             <div 
+               className={`w-10 h-10 rounded-full ${currentUser.avatarColor} shadow-md border-2 border-white flex items-center justify-center text-white font-bold cursor-pointer hover:scale-110 transition-transform`}
+               onClick={handleOpenAccountSettings}
+               title="Account Settings"
+             >
                  {currentUser.name.charAt(0)}
              </div>
              <div>
@@ -597,6 +644,109 @@ const groupedPrizes: GroupedPrize[] = Object.values(
                   }}
                 >
                   {confirmState.confirmLabel ?? "Confirm"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Account Settings Modal */}
+        {showAccountSettings && (
+          <div
+            className="fixed inset-0 bg-black/60 z-[80] flex items-center justify-center"
+            onClick={() => setShowAccountSettings(false)}
+          >
+            <div
+              className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 mx-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-2 mb-4">
+                <Settings size={24} className="text-gray-700" />
+                <h3 className="text-lg font-bold text-gray-900">
+                  Account Settings
+                </h3>
+              </div>
+
+              <div className="space-y-4">
+                {/* Name */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Name
+                  </label>
+                  <input
+                    type="text"
+                    value={settingsName}
+                    onChange={(e) => setSettingsName(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="Your name"
+                  />
+                </div>
+
+                {/* Username */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Username
+                  </label>
+                  <input
+                    type="text"
+                    value={settingsUsername}
+                    onChange={(e) => setSettingsUsername(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="Your username"
+                  />
+                </div>
+
+                {/* Password */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Password
+                  </label>
+                  <input
+                    type="password"
+                    value={settingsPassword}
+                    onChange={(e) => setSettingsPassword(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="Leave blank to keep current"
+                  />
+                </div>
+
+                {/* Avatar Color */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Avatar Color
+                  </label>
+                  <div className="grid grid-cols-6 gap-2">
+                    {AVATAR_COLORS.map((color) => (
+                      <button
+                        key={color}
+                        type="button"
+                        onClick={() => setSettingsAvatarColor(color)}
+                        className={`w-10 h-10 rounded-full ${color} ${
+                          settingsAvatarColor === color
+                            ? 'ring-4 ring-blue-500 ring-offset-2'
+                            : 'hover:scale-110'
+                        } transition-all`}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 mt-6">
+                <button
+                  type="button"
+                  className="px-4 py-2 text-sm rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-50"
+                  onClick={() => setShowAccountSettings(false)}
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="button"
+                  className="px-4 py-2 text-sm rounded-xl text-white bg-blue-600 hover:bg-blue-700"
+                  onClick={handleSaveAccountSettings}
+                >
+                  Save Changes
                 </button>
               </div>
             </div>
@@ -764,8 +914,8 @@ const groupedPrizes: GroupedPrize[] = Object.values(
                              <span className="block text-[10px] text-indigo-500">By {event.assignerName}</span>
                           </p>
                       </div>
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${event.action.includes('APPROVED') || event.action.includes('VERIFIED') || event.action.includes('ASSIGNED') || event.action.includes('ACCEPTED') || event.action.includes('COMPLETED') || event.action.includes('CLAIMED') ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-500'}`}>
-                          {event.action.includes('APPROVED') || event.action.includes('VERIFIED') || event.action.includes('ASSIGNED') || event.action.includes('ACCEPTED') || event.action.includes('COMPLETED') || event.action.includes('CLAIMED') ? <CheckCircle size={18}/> : <XCircle size={18}/>}
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${event.action.includes('APPROVED') || event.action.includes('VERIFIED') || event.action.includes('EARNED') || event.action.includes('RECEIVED') || event.action.includes('ASSIGNED') || event.action.includes('ACCEPTED') || event.action.includes('COMPLETED') || event.action.includes('CLAIMED') ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-500'}`}>
+                          {event.action.includes('APPROVED') || event.action.includes('VERIFIED') || event.action.includes('ASSIGNED') || event.action.includes('ACCEPTED') || event.action.includes('EARNED') || event.action.includes('RECEIVED') || event.action.includes('COMPLETED') || event.action.includes('CLAIMED') ? <CheckCircle size={18}/> : <XCircle size={18}/>}
                       </div>
                   </div>
                 ))}
