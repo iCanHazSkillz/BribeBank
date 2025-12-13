@@ -23,6 +23,7 @@ model Family {
 
   joinCode       String?   @unique
   joinCodeExpiry DateTime?
+  wheelSpinCost  Int       @default(1)
 
   users     User[]
   bounties  Bounty[]

@@ -1404,4 +1404,106 @@ export const storageService = {
       console.error("[push] registerPushNotifications error", e);
     }
   },
+
+  // --- WHEEL ---
+
+  getWheelSegments: async (familyId: string): Promise<WheelSegment[]> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const res = await fetch(apiUrl(`/families/${familyId}/wheel-segments`), {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (!res.ok) {
+      console.error("Failed to get wheel segments", res.status);
+      throw new Error("Failed to get wheel segments");
+    }
+
+    return await res.json();
+  },
+
+  getWheelConfig: async (familyId: string): Promise<{ spinCost: number }> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const res = await fetch(apiUrl(`/families/${familyId}/wheel-config`), {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (!res.ok) {
+      console.error("Failed to get wheel config", res.status);
+      throw new Error("Failed to get wheel config");
+    }
+
+    return await res.json();
+  },
+
+  updateWheelSegments: async (
+    familyId: string,
+    segments: Array<{ label: string; color: string; prob: number }>,
+    spinCost: number
+  ): Promise<{ segments: WheelSegment[]; spinCost: number }> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const res = await fetch(apiUrl(`/families/${familyId}/wheel-segments`), {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ segments, spinCost }),
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      console.error("Failed to update wheel segments", res.status, body);
+      throw new Error(body?.error || "Failed to update wheel segments");
+    }
+
+    return await res.json();
+  },
+
+  resetWheelSegments: async (familyId: string): Promise<WheelSegment[]> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const res = await fetch(apiUrl(`/families/${familyId}/wheel-segments/reset`), {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (!res.ok) {
+      console.error("Failed to reset wheel segments", res.status);
+      throw new Error("Failed to reset wheel segments");
+    }
+
+    return await res.json();
+  },
+
+  spinWheel: async (
+    familyId: string,
+    userId: string
+  ): Promise<{ won: boolean; prize: string; emoji: string; newBalance: number }> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const res = await fetch(apiUrl(`/families/${familyId}/wheel-segments/spin`), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ userId }),
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      console.error("Failed to spin wheel", res.status, body);
+      throw new Error(body?.error || "Failed to spin wheel");
+    }
+
+    return await res.json();
+  },
 };

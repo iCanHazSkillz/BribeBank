@@ -19,7 +19,7 @@ export type SseEvent =
   | {
       type: "WALLET_UPDATE";
       familyId: string;
-      reason: "REWARD_ASSIGNED" | "REWARD_APPROVED" | "REWARD_REJECTED" | "TASK_ASSIGNED" | "TASK_VERIFIED" | "TASK_REJECTED" | "TASK_ACCEPTED";
+      reason: "REWARD_ASSIGNED" | "REWARD_APPROVED" | "REWARD_REJECTED" | "TASK_ASSIGNED" | "TASK_VERIFIED" | "TASK_REJECTED" | "TASK_ACCEPTED" | "EARNED_TICKETS" | "RECEIVED_TICKETS" | "WHEEL_UPDATED" | "WHEEL_RESET" | "WHEEL_SPIN";
       timestamp: number;
     }
   | {

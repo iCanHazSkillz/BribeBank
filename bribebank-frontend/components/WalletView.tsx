@@ -44,6 +44,14 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab 
   const [ticketBalance, setTicketBalance] = useState(currentUser.ticketBalance);
   const [toast, setToast] = useState<{message: string, type: 'info' | 'success' | 'error' } | null>(null);
 
+  // Wheel State
+  const [wheelSegments, setWheelSegments] = useState<Array<{label: string, color: string, prob: number}>>([]);
+  const [wheelSpinCost, setWheelSpinCost] = useState(1);
+  const [showWheel, setShowWheel] = useState(false);
+  const [isSpinning, setIsSpinning] = useState(false);
+  const [wheelRotation, setWheelRotation] = useState(0);
+  const [spinResult, setSpinResult] = useState<{won: boolean, prize?: string, emoji?: string} | null>(null);
+
   // UI State
   const [showNotifications, setShowNotifications] = useState(false);
   const [showAccountSettings, setShowAccountSettings] = useState(false);
@@ -88,6 +96,8 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab 
         historyFromApi,
         notificationsFromApi,
         storeItemsFromApi,
+        wheelSegmentsFromApi,
+        wheelConfigFromApi,
       ] = await Promise.all([
         storageService.getAssignments(familyId),          // prizes
         storageService.getTemplates(familyId),           // prize templates
@@ -97,6 +107,8 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab 
         storageService.getHistoryEvents(familyId, currentUser.id),
         storageService.getNotifications(currentUser.id),
         storageService.getStoreItems(familyId),          // store items
+        storageService.getWheelSegments(familyId),       // wheel segments
+        storageService.getWheelConfig(familyId),         // wheel config
       ]);
 
       setMyPrizes(
@@ -119,6 +131,8 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab 
         notificationsFromApi.filter((n) => !n.isRead)
       );
       setStoreItems(storeItemsFromApi);
+      setWheelSegments(wheelSegmentsFromApi);
+      setWheelSpinCost(wheelConfigFromApi.spinCost);
       
       // Update ticket balance from family users list
       const updatedCurrentUser = usersFromApi.find(u => u.id === currentUser.id);
@@ -375,6 +389,72 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab 
     }
   };
 
+  const handleSpinWheel = async () => {
+    if (isSpinning) return;
+    if (ticketBalance < wheelSpinCost) {
+      setToast({ message: `Need ${wheelSpinCost - ticketBalance} more tickets!`, type: 'error' });
+      return;
+    }
+
+    setIsSpinning(true);
+    setSpinResult(null);
+
+    try {
+      const result = await storageService.spinWheel(currentUser.familyId, currentUser.id);
+      
+      // Find winning segment index (case-insensitive match)
+      const winningLabel = result.prize || "Not this time";
+      const winIndex = wheelSegments.findIndex(s => 
+        s.label.toLowerCase() === winningLabel.toLowerCase()
+      );
+      
+      if (winIndex === -1) {
+        console.error('Could not find winning segment!');
+        setIsSpinning(false);
+        setToast({ message: 'Error: Could not find winning segment', type: 'error' });
+        return;
+      }
+      
+      // Calculate the center angle of the winning segment
+      const previousProb = wheelSegments.slice(0, winIndex).reduce((sum, s) => sum + s.prob, 0);
+      const winningSegmentProb = wheelSegments[winIndex].prob;
+      const segmentCenterAngle = (previousProb + winningSegmentProb / 2) * 360;
+      
+      // The pointer is at the top (0°). We want to rotate the wheel so the winning segment center aligns with 0°
+      // Since the SVG is rotated -90° initially, segment 0 starts at top
+      // To land segment center at top, rotate by: -segmentCenterAngle
+      const targetRotation = -segmentCenterAngle;
+      
+      // Add multiple spins for effect
+      const spinCount = 5;
+      const totalSpins = -(spinCount * 360);
+      
+      // Final rotation from current position
+      const finalRotation = wheelRotation + totalSpins + (targetRotation - (wheelRotation % 360));
+      
+      setWheelRotation(finalRotation);
+      
+      // Wait for animation to complete
+      setTimeout(() => {
+        setSpinResult({
+          won: result.won,
+          prize: result.prize,
+          emoji: result.emoji
+        });
+        setTicketBalance(result.newBalance);
+        setIsSpinning(false);
+        
+        if (result.won) {
+          refreshData(); // Refresh to show new prize in wallet
+        }
+      }, 4000); // Match CSS animation duration
+      
+    } catch (e: any) {
+      setToast({ message: e.message || "Spin failed", type: 'error' });
+      setIsSpinning(false);
+    }
+  };
+
   const handleOpenAccountSettings = () => {
     setSettingsName(currentUser.name);
     setSettingsUsername(currentUser.username);
@@ -596,6 +676,170 @@ const groupedPrizes: GroupedPrize[] = Object.values(
               ))
             )}
           </>
+        )}
+
+        {/* Wheel Spin Modal */}
+        {showWheel && (
+          <div className="fixed inset-0 bg-black/80 z-[70] flex items-center justify-center p-4" onClick={() => !isSpinning && setShowWheel(false)}>
+            <div className="bg-white rounded-3xl p-8 max-w-md w-full" onClick={e => e.stopPropagation()}>
+              <h3 className="text-2xl font-bold text-center mb-6 flex items-center justify-center gap-2">
+                <span className="text-3xl">🎡</span>
+                Prize Wheel
+              </h3>
+              
+              {/* Wheel Container */}
+              <div className="relative w-80 h-80 mx-auto mb-6">
+                {/* Pointer Triangle at Top */}
+                <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-3 z-20">
+                  <div className="w-0 h-0 border-l-[20px] border-l-transparent border-r-[20px] border-r-transparent border-t-[30px]" style={{ borderTopColor: '#e50078' }}></div>
+                </div>
+                
+                {/* Wheel SVG */}
+                <div 
+                  className="w-full h-full relative"
+                  style={{
+                    transform: `rotate(${wheelRotation}deg)`,
+                    transition: isSpinning ? 'transform 4s cubic-bezier(0.17, 0.67, 0.12, 0.99)' : 'none',
+                  }}
+                >
+                  <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90">
+                    {wheelSegments.map((segment, index) => {
+                      // Calculate segment angles based on probabilities
+                      const prevProb = wheelSegments.slice(0, index).reduce((sum, s) => sum + s.prob, 0);
+                      const startAngle = prevProb * 360;
+                      const endAngle = (prevProb + segment.prob) * 360;
+                      const angleSpan = endAngle - startAngle;
+                      
+                      // Convert to radians for path calculation
+                      const startRad = (startAngle * Math.PI) / 180;
+                      const endRad = (endAngle * Math.PI) / 180;
+                      
+                      // Calculate path for the segment
+                      const x1 = 50 + 50 * Math.cos(startRad);
+                      const y1 = 50 + 50 * Math.sin(startRad);
+                      const x2 = 50 + 50 * Math.cos(endRad);
+                      const y2 = 50 + 50 * Math.sin(endRad);
+                      
+                      const largeArc = angleSpan > 180 ? 1 : 0;
+                      
+                      return (
+                        <path
+                          key={index}
+                          d={`M 50 50 L ${x1} ${y1} A 50 50 0 ${largeArc} 1 ${x2} ${y2} Z`}
+                          fill={segment.color}
+                          stroke="#ffffff"
+                          strokeWidth="0.5"
+                        />
+                      );
+                    })}
+                    
+                    {/* Center circle */}
+                    <circle cx="50" cy="50" r="8" fill="#ae46ff" />
+                    <text x="50" y="52" textAnchor="middle" fill="white" fontSize="6" fontWeight="bold">Spin</text>
+                  </svg>
+                  
+                  {/* Text Labels */}
+                  {wheelSegments.map((segment, index) => {
+                    // Don't show labels for Try Again segments
+                    const isTryAgain = segment.label.toLowerCase().includes('try again');
+                    if (isTryAgain) return null;
+                    
+                    const prevProb = wheelSegments.slice(0, index).reduce((sum, s) => sum + s.prob, 0);
+                    const centerAngle = (prevProb + segment.prob / 2) * 360;
+                    
+                    // Position text along the segment
+                    const angleRad = ((centerAngle + 90) * Math.PI) / 180; // +90 to account for -rotate-90 on SVG
+                    const radius = 60; // Distance from center
+                    const x = 50 + radius * Math.cos(angleRad - Math.PI / 2);
+                    const y = 50 + radius * Math.sin(angleRad - Math.PI / 2);
+                    
+                    return (
+                      <div
+                        key={`label-${index}`}
+                        className="absolute pointer-events-none"
+                        style={{
+                          left: '50%',
+                          top: '50%',
+                          transform: `translate(-50%, -50%) rotate(${centerAngle}deg) translateY(-110px)`,
+                        }}
+                      >
+                        <div 
+                          className="text-center"
+                          style={{
+                            transform: 'rotate(90deg)',
+                            transformOrigin: 'center',
+                          }}
+                        >
+                          <span 
+                            className="text-xs font-bold inline-block px-1"
+                            style={{
+                              color: '#ffffff',
+                              textShadow: '0 0 4px rgba(0,0,0,0.9), 0 0 8px rgba(0,0,0,0.7), 1px 1px 3px rgba(0,0,0,1)',
+                              WebkitTextStroke: '0.5px rgba(0,0,0,0.8)',
+                              writingMode: 'horizontal-tb',
+                              maxWidth: '100px',
+                              wordBreak: 'break-word',
+                              lineHeight: '1.2',
+                            }}
+                          >
+                            {segment.label}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Result Display */}
+              {spinResult && (
+                <div className={`text-center mb-4 p-4 rounded-xl ${spinResult.won ? 'bg-green-50' : 'bg-yellow-50'}`}>
+                  <div className="text-4xl mb-2">{spinResult.won ? spinResult.emoji : '😕'}</div>
+                  <p className={`font-bold text-lg ${spinResult.won ? 'text-green-700' : 'text-yellow-700'}`}>
+                    {spinResult.won ? `You won: ${spinResult.prize}!` : spinResult.prize}
+                  </p>
+                  {spinResult.won ? (
+                    <p className="text-sm text-green-600 mt-1">Check your wallet!</p>
+                  ) : (
+                    <p className="text-sm text-yellow-600 mt-1">Better luck next time!</p>
+                  )}
+                </div>
+              )}
+
+              {/* Ticket Balance */}
+              <div className="text-center mb-4">
+                <div className="flex items-center justify-center gap-2 text-gray-600">
+                  <Ticket size={20} className="text-purple-500" />
+                  <span className="font-bold">{ticketBalance} tickets</span>
+                </div>
+                {ticketBalance < wheelSpinCost && (
+                  <p className="text-xs text-red-500 mt-1">Not enough tickets!</p>
+                )}
+              </div>
+
+              {/* Actions */}
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    setShowWheel(false);
+                    setSpinResult(null);
+                    setWheelRotation(0);
+                  }}
+                  disabled={isSpinning}
+                  className="flex-1 py-3 border border-gray-300 rounded-xl hover:bg-gray-50 transition-colors font-medium disabled:opacity-50"
+                >
+                  Close
+                </button>
+                <button
+                  onClick={handleSpinWheel}
+                  disabled={isSpinning || ticketBalance < wheelSpinCost}
+                  className="flex-[2] py-3 bg-gradient-to-r from-purple-500 to-pink-600 text-white rounded-xl font-bold hover:scale-[1.02] transition-transform disabled:opacity-50 disabled:hover:scale-100"
+                >
+                  {isSpinning ? 'Spinning...' : `Spin (${wheelSpinCost} 🎫)`}
+                </button>
+              </div>
+            </div>
+          </div>
         )}
 
         {confirmState && (
@@ -820,6 +1064,25 @@ const groupedPrizes: GroupedPrize[] = Object.values(
 
         {tab === 'store' && (
             <div className="space-y-4">
+                {/* Spin & Win Banner */}
+                {wheelSegments.length > 0 && (
+                  <button
+                    onClick={() => setShowWheel(true)}
+                    className="w-full bg-gradient-to-r from-purple-500 via-pink-500 to-orange-500 text-white p-6 rounded-2xl shadow-xl flex items-center justify-between hover:scale-[1.02] transition-transform"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="text-4xl">🎡</div>
+                      <div className="text-left">
+                        <h3 className="text-xl font-bold">Spin & Win!</h3>
+                        <p className="text-sm opacity-90">{wheelSpinCost} ticket{wheelSpinCost !== 1 ? 's' : ''} per spin</p>
+                      </div>
+                    </div>
+                    <div className="bg-white/20 px-4 py-2 rounded-xl font-bold">
+                      Try Your Luck!
+                    </div>
+                  </button>
+                )}
+                
                 {storeItems.length === 0 ? (
                     <div className="text-center py-16 opacity-60">
                         <ShoppingBag size={64} className="mx-auto mb-4 text-gray-300" />
@@ -914,8 +1177,8 @@ const groupedPrizes: GroupedPrize[] = Object.values(
                              <span className="block text-[10px] text-indigo-500">By {event.assignerName}</span>
                           </p>
                       </div>
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${event.action.includes('APPROVED') || event.action.includes('VERIFIED') || event.action.includes('EARNED') || event.action.includes('RECEIVED') || event.action.includes('ASSIGNED') || event.action.includes('ACCEPTED') || event.action.includes('COMPLETED') || event.action.includes('CLAIMED') ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-500'}`}>
-                          {event.action.includes('APPROVED') || event.action.includes('VERIFIED') || event.action.includes('ASSIGNED') || event.action.includes('ACCEPTED') || event.action.includes('EARNED') || event.action.includes('RECEIVED') || event.action.includes('COMPLETED') || event.action.includes('CLAIMED') ? <CheckCircle size={18}/> : <XCircle size={18}/>}
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${event.action.includes('APPROVED') || event.action.includes('VERIFIED') || event.action.includes('EARNED') || event.action.includes('SPIN_WON') || event.action.includes('RECEIVED') || event.action.includes('ASSIGNED') || event.action.includes('ACCEPTED') || event.action.includes('COMPLETED') || event.action.includes('CLAIMED') ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-500'}`}>
+                          {event.action.includes('APPROVED') || event.action.includes('VERIFIED') || event.action.includes('ASSIGNED') || event.action.includes('ACCEPTED') || event.action.includes('EARNED') || event.action.includes('SPIN_WON') || event.action.includes('RECEIVED') || event.action.includes('COMPLETED') || event.action.includes('CLAIMED') ? <CheckCircle size={18}/> : <XCircle size={18}/>}
                       </div>
                   </div>
                 ))}

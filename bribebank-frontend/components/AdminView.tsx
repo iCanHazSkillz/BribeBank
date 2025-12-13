@@ -82,6 +82,10 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, o
 
   // Wheel Edit State
   const [showWheelEdit, setShowWheelEdit] = useState(false);
+  const [wheelSpinCost, setWheelSpinCost] = useState(1);
+  const [winningChance, setWinningChance] = useState(75);
+  const [showAdvancedWinning, setShowAdvancedWinning] = useState(false);
+  const [editWheelSegments, setEditWheelSegments] = useState<Array<{ label: string; color: string; prob: number }>>([]);
 
   // User Management State
   const [userFormView, setUserFormView] = useState(false);
@@ -132,6 +136,8 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, o
         historyFromApi,
         notificationsFromApi,
         storeItemsFromApi,
+        wheelSegmentsFromApi,
+        wheelConfigFromApi,
       ] = await Promise.all([
         storageService.getTemplates(familyId),         // Reward templates
         storageService.getAssignments(familyId),       // Assigned rewards
@@ -141,6 +147,8 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, o
         storageService.getFamilyHistory(familyId),
         storageService.getNotifications(currentUser.id),
         storageService.getStoreItems(familyId),        // Store items
+        storageService.getWheelSegments(familyId),
+        storageService.getWheelConfig(familyId),
       ]);
 
       //----------------------------------------------------
@@ -163,6 +171,27 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, o
       // Store Items
       //----------------------------------------------------
       setStoreItems(storeItemsFromApi);
+
+      //----------------------------------------------------
+      // Wheel
+      //----------------------------------------------------
+      setWheelSegments(wheelSegmentsFromApi);
+      setWheelSpinCost(wheelConfigFromApi.spinCost);
+      
+      // Calculate winning chance from segments (exclude Try Again segments)
+      const prizeSegments = wheelSegmentsFromApi.filter((s: any) => !s.label.toLowerCase().includes('try again'));
+      const totalSegments = wheelSegmentsFromApi.length;
+      if (totalSegments > 0) {
+        const calculatedWinningChance = Math.round((prizeSegments.length / totalSegments) * 100);
+        setWinningChance(calculatedWinningChance);
+      }
+      
+      // Only show prize segments in edit modal (not Try Again)
+      setEditWheelSegments(prizeSegments.map((s: any) => ({
+        label: s.label,
+        color: s.color,
+        prob: s.prob
+      })));
 
       //----------------------------------------------------
       // History + notifications (from backend)
@@ -648,6 +677,131 @@ const handleBulkAssign = async () => {
     }
   };
 
+  // Wheel Management
+  const handleOpenWheelEdit = () => {
+    // Filter out Try Again and Not this time segments - only show actual prizes
+    const prizeSegments = wheelSegments.filter(s => 
+      !s.label.toLowerCase().includes('try again') && 
+      !s.label.toLowerCase().includes('not this time')
+    );
+    setEditWheelSegments(prizeSegments.map(s => ({ label: s.label, color: '', prob: 0 })));
+    setShowWheelEdit(true);
+  };
+
+  const handleSaveWheel = async () => {
+    try {
+      // Eye-catching alternating colors for teens
+      const WHEEL_COLORS = [
+        '#FF6B6B', // Coral Red
+        '#4ECDC4', // Turquoise
+        '#FFD93D', // Bright Yellow
+        '#6BCB77', // Mint Green
+        '#A78BFA', // Purple
+        '#FB923C', // Orange
+        '#F472B6', // Pink
+        '#60A5FA', // Sky Blue
+        '#FBBF24', // Amber
+        '#34D399', // Emerald
+      ];
+      
+      const TRY_AGAIN_COLOR = '#9CA3AF'; // Gray for Try Again
+      
+      // Calculate how many Try Again segments we need
+      const prizeCount = editWheelSegments.length;
+      const winningDecimal = winningChance / 100;
+      
+      // If winning chance is X%, then prize segments / total segments = X/100
+      // So: total segments = prize segments / (X/100)
+      const totalSegmentsNeeded = prizeCount / winningDecimal;
+      const tryAgainCount = Math.round(totalSegmentsNeeded - prizeCount);
+      const totalSegments = prizeCount + tryAgainCount;
+      const MAX_TOTAL_SEGMENTS = 50;
+      
+      // Validate total segments
+      if (totalSegments > MAX_TOTAL_SEGMENTS) {
+        showToast(`Too many segments (${totalSegments})! Reduce prizes or increase winning chance. Max: ${MAX_TOTAL_SEGMENTS}`, 'error');
+        return;
+      }
+      
+      // Build final segments list with alternating pattern
+      const finalSegments = [];
+      
+      // Interleave prizes and Try Again segments for better visual distribution
+      if (tryAgainCount === 0) {
+        // No Try Again segments, just add all prizes
+        editWheelSegments.forEach((seg, i) => {
+          finalSegments.push({
+            label: seg.label,
+            color: WHEEL_COLORS[i % WHEEL_COLORS.length],
+            prob: 0
+          });
+        });
+      } else if (prizeCount === 0) {
+        // Only Try Again segments
+        for (let i = 0; i < tryAgainCount; i++) {
+          finalSegments.push({
+            label: 'Try Again',
+            color: TRY_AGAIN_COLOR,
+            prob: 0
+          });
+        }
+      } else {
+        // Evenly space prizes with Try Again segments between them
+        // Example: 8 prizes + 32 Try Again = 1 prize, 4 Try Again, 1 prize, 4 Try Again, etc.
+        
+        // Calculate base number of Try Again per prize and remainder
+        const basePerPrize = Math.floor(tryAgainCount / prizeCount);
+        const remainder = tryAgainCount % prizeCount;
+        
+        for (let i = 0; i < prizeCount; i++) {
+          // Add prize
+          finalSegments.push({
+            label: editWheelSegments[i].label,
+            color: WHEEL_COLORS[i % WHEEL_COLORS.length],
+            prob: 0
+          });
+          
+          // Distribute remainder evenly across prizes
+          // First 'remainder' prizes get one extra Try Again segment
+          const tryAgainToAdd = basePerPrize + (i < remainder ? 1 : 0);
+          
+          // Add Try Again segments
+          for (let j = 0; j < tryAgainToAdd; j++) {
+            finalSegments.push({
+              label: 'Try Again',
+              color: TRY_AGAIN_COLOR,
+              prob: 0
+            });
+          }
+        }
+      }
+      
+      // Assign equal probabilities to all segments
+      const equalProb = 1.0 / finalSegments.length;
+      finalSegments.forEach(seg => seg.prob = equalProb);
+      
+      await storageService.updateWheelSegments(currentUser.familyId, finalSegments, wheelSpinCost);
+      await refreshData();
+      setShowWheelEdit(false);
+      showToast("Wheel updated!", 'success');
+    } catch (e: any) {
+      showToast(e.message, 'error');
+    }
+  };
+
+  const handleResetWheel = async () => {
+    if (window.confirm("Reset wheel to defaults?")) {
+      try {
+        await storageService.resetWheelSegments(currentUser.familyId);
+        await refreshData();
+        setShowWheelEdit(false);
+        showToast("Wheel reset!", 'success');
+      } catch (e: any) {
+        showToast(e.message, 'error');
+      }
+    }
+  };
+
   // Store Item Management
   const handleSaveStoreItem = async () => {
     try {
@@ -868,6 +1022,200 @@ const handleBulkAssign = async () => {
                 setEmojiPickerTarget(null);
               }}
             />
+          </div>
+        </div>
+      )}
+
+      {/* Wheel Edit Modal */}
+      {showWheelEdit && (
+        <div className="fixed inset-0 bg-black/60 z-[70] flex items-center justify-center p-4" onClick={() => setShowWheelEdit(false)}>
+          <div className="bg-white rounded-2xl p-6 max-w-2xl w-full max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <h3 className="text-2xl font-bold mb-4 flex items-center gap-2">
+              <RotateCcw size={28} className="text-purple-600" />
+              Manage Prize Wheel
+            </h3>
+            
+            {/* Spin Cost */}
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-700 mb-2">Spin Cost (Tickets)</label>
+              <input
+                type="number"
+                value={wheelSpinCost}
+                onChange={e => setWheelSpinCost(parseInt(e.target.value) || 1)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                min="0"
+              />
+            </div>
+
+            {/* Winning Chance */}
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-700 mb-2">Winning Chance</label>
+              
+              {/* Preset Buttons */}
+              <div className="grid grid-cols-3 gap-3 mb-3">
+                <button
+                  type="button"
+                  onClick={() => { setWinningChance(75); setShowAdvancedWinning(false); }}
+                  className={`py-3 px-4 rounded-lg border-2 transition-all ${
+                    winningChance === 75 && !showAdvancedWinning
+                      ? 'border-green-500 bg-green-50 text-green-700 font-bold'
+                      : 'border-gray-300 hover:border-green-400 text-gray-700'
+                  }`}
+                >
+                  <div className="text-2xl mb-1">🎉</div>
+                  <div className="text-sm font-medium">Easy</div>
+                  <div className="text-xs text-gray-500">75%</div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setWinningChance(50); setShowAdvancedWinning(false); }}
+                  className={`py-3 px-4 rounded-lg border-2 transition-all ${
+                    winningChance === 50 && !showAdvancedWinning
+                      ? 'border-yellow-500 bg-yellow-50 text-yellow-700 font-bold'
+                      : 'border-gray-300 hover:border-yellow-400 text-gray-700'
+                  }`}
+                >
+                  <div className="text-2xl mb-1">⚖️</div>
+                  <div className="text-sm font-medium">Balanced</div>
+                  <div className="text-xs text-gray-500">50%</div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setWinningChance(25); setShowAdvancedWinning(false); }}
+                  className={`py-3 px-4 rounded-lg border-2 transition-all ${
+                    winningChance === 25 && !showAdvancedWinning
+                      ? 'border-red-500 bg-red-50 text-red-700 font-bold'
+                      : 'border-gray-300 hover:border-red-400 text-gray-700'
+                  }`}
+                >
+                  <div className="text-2xl mb-1">🎲</div>
+                  <div className="text-sm font-medium">Hard</div>
+                  <div className="text-xs text-gray-500">25%</div>
+                </button>
+              </div>
+              
+              {/* Advanced Toggle */}
+              <button
+                type="button"
+                onClick={() => setShowAdvancedWinning(!showAdvancedWinning)}
+                className="text-sm text-purple-600 hover:text-purple-700 font-medium mb-2 flex items-center gap-1"
+              >
+                {showAdvancedWinning ? '▼' : '▶'} Advanced (Fine-tune percentage)
+              </button>
+              
+              {/* Advanced Slider */}
+              {showAdvancedWinning && (
+                <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                  <input
+                    type="range"
+                    value={winningChance}
+                    onChange={e => setWinningChance(parseInt(e.target.value))}
+                    className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-purple-600"
+                    min="1"
+                    max="100"
+                  />
+                  <input
+                    type="number"
+                    value={winningChance}
+                    onChange={e => {
+                      const val = parseInt(e.target.value) || 50;
+                      setWinningChance(Math.max(1, Math.min(100, val)));
+                    }}
+                    className="w-20 px-3 py-2 border border-gray-300 rounded-lg text-center font-bold text-purple-600"
+                    min="1"
+                    max="100"
+                  />
+                  <span className="text-sm text-gray-500">%</span>
+                </div>
+              )}
+              
+              <p className="text-xs text-purple-600 font-medium mt-1">
+                {(() => {
+                  const prizeCount = editWheelSegments.length;
+                  if (prizeCount === 0) return 'Add prize segments to see calculation';
+                  const winningDecimal = winningChance / 100;
+                  const totalSegmentsNeeded = prizeCount / winningDecimal;
+                  const tryAgainCount = Math.max(0, Math.round(totalSegmentsNeeded - prizeCount));
+                  const totalSegments = prizeCount + tryAgainCount;
+                  const maxSegments = 50;
+                  
+                  if (totalSegments > maxSegments) {
+                    return (
+                      <span className="text-red-600">
+                        ⚠️ Too many segments ({totalSegments})! Reduce prizes or increase winning chance. Max: {maxSegments}
+                      </span>
+                    );
+                  }
+                  
+                  const segmentText = `${tryAgainCount} "Try Again" segment${tryAgainCount !== 1 ? 's' : ''} will be added (${totalSegments} total segments)`;
+                  
+                  if (totalSegments > 40) {
+                    return <span className="text-orange-600">⚠️ {segmentText} - Consider reducing for better UX</span>;
+                  }
+                  
+                  return segmentText;
+                })()}
+              </p>
+            </div>
+
+            {/* Segments */}
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">Prize Segments</label>
+              <div className="text-xs text-gray-500 mb-3">
+                "Try Again" segments will be auto-added based on winning chance ({100 - winningChance}% chance)
+              </div>
+              <div className="space-y-2 mb-4">
+                {editWheelSegments.map((seg, i) => (
+                  <div key={i} className="flex gap-2 items-center bg-gray-50 p-2 rounded-lg">
+                    <span className="text-gray-500 font-mono text-sm w-8">{i + 1}.</span>
+                    <input
+                      type="text"
+                      value={seg.label}
+                      onChange={e => {
+                        const updated = [...editWheelSegments];
+                        updated[i].label = e.target.value;
+                        setEditWheelSegments(updated);
+                      }}
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg bg-white"
+                      placeholder="Prize name"
+                    />
+                    <button
+                      onClick={() => setEditWheelSegments(editWheelSegments.filter((_, idx) => idx !== i))}
+                      className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                      disabled={editWheelSegments.length <= 1}
+                      title="Remove segment"
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              <button
+                onClick={() => setEditWheelSegments([...editWheelSegments, { label: 'New Prize', color: '', prob: 0 }])}
+                disabled={editWheelSegments.length >= 12}
+                className={`w-full py-2 border-2 border-dashed rounded-lg flex items-center justify-center gap-2 font-medium transition-colors ${
+                  editWheelSegments.length >= 12
+                    ? 'border-gray-200 text-gray-400 cursor-not-allowed'
+                    : 'border-purple-300 text-purple-600 hover:bg-purple-50'
+                }`}
+              >
+                <Plus size={18} />
+                {editWheelSegments.length >= 12 ? 'Maximum 12 prizes' : 'Add Prize'}
+              </button>
+            </div>
+
+            <div className="flex gap-3 mt-6">
+              <button onClick={handleResetWheel} className="flex-1 py-3 border border-gray-300 rounded-xl hover:bg-gray-50 transition-colors font-medium">
+                Reset to Defaults
+              </button>
+              <button onClick={() => setShowWheelEdit(false)} className="flex-1 py-3 border border-gray-300 rounded-xl hover:bg-gray-50 transition-colors font-medium">
+                Cancel
+              </button>
+              <button onClick={handleSaveWheel} className="flex-1 py-3 bg-gradient-to-r from-purple-500 to-pink-600 text-white rounded-xl font-bold hover:scale-[1.02] transition-transform">
+                Save Wheel
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -1832,6 +2180,21 @@ const handleBulkAssign = async () => {
         {/* Store Tab */}
         {tab === 'store' && (
             <div className="space-y-6">
+                {/* Manage Prize Wheel Banner */}
+                <button
+                  onClick={handleOpenWheelEdit}
+                  className="w-full bg-gradient-to-r from-purple-500 to-pink-600 text-white p-6 rounded-2xl shadow-xl flex items-center justify-between hover:scale-[1.02] transition-transform"
+                >
+                  <div className="flex items-center gap-4">
+                    <RotateCcw size={32} />
+                    <div className="text-left">
+                      <h3 className="text-xl font-bold">Manage Prize Wheel</h3>
+                      <p className="text-sm opacity-90">Edit segments & spin cost ({wheelSpinCost} ticket{wheelSpinCost !== 1 ? 's' : ''})</p>
+                    </div>
+                  </div>
+                  <Settings size={24} />
+                </button>
+                
                 <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
                     <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
                         <ShoppingBag size={24} />
