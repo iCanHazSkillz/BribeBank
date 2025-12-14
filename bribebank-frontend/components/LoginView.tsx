@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { User } from "../types";
 import { storageService } from "../services/storageService";
 import { apiService } from "../services/apiService";
-import { Users, Lock, ArrowRight } from "lucide-react";
+import { Users, Lock, ArrowRight, Eye, EyeOff } from "lucide-react";
 import BribeBankLogo from "../src/assets/BribeBankLogo.webp";
 
 interface LoginViewProps {
@@ -12,6 +12,7 @@ interface LoginViewProps {
 export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
   const [isSignUp, setIsSignUp] = useState(false);
   const [error, setError] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
   // Shared auth fields
   const [username, setUsername] = useState("");
@@ -168,9 +169,9 @@ const handleSignUp = async (e: React.FormEvent) => {
               </label>
               <div className="relative">
                 <input
-                  type="password"
+                  type={showPassword ? "text" : "password"}
                   placeholder="•••••••"
-                  className="w-full p-3 pl-10 bg-white rounded-xl border border-gray-300 text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
+                  className="w-full p-3 pl-10 pr-10 bg-white rounded-xl border border-gray-300 text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                 />
@@ -178,6 +179,14 @@ const handleSignUp = async (e: React.FormEvent) => {
                   size={18}
                   className="absolute left-3 top-3.5 text-gray-400"
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-3.5 text-gray-400 hover:text-gray-600 transition-colors"
+                  tabIndex={-1}
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
               </div>
             </div>
 
