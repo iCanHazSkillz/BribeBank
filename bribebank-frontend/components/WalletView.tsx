@@ -3,7 +3,7 @@ import { AssignedPrize, PrizeStatus, PrizeTemplate, User, PrizeType, HistoryEven
 import { storageService } from '../services/storageService';
 import { API_BASE } from "../config";
 import { PrizeCard } from './PrizeCard';
-import { History, Ticket, Bell, X, CheckCircle, XCircle, ListTodo, Play, Trash2, ThumbsUp, ThumbsDown, gift, ShoppingBag, Link as LinkIcon, Image as ImageIcon, Settings, User as UserIcon, Search } from 'lucide-react';
+import { History, Ticket, Bell, X, CheckCircle, XCircle, ListTodo, Play, Trash2, ThumbsUp, ThumbsDown, gift, ShoppingBag, Link as LinkIcon, Image as ImageIcon, Settings, User as UserIcon, Search, ArrowUp } from 'lucide-react';
 import { SseEvent } from "../types/sseEvents";
 
 interface WalletViewProps {
@@ -58,6 +58,8 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab,
   const [showNotifications, setShowNotifications] = useState(false);
   const [showAccountSettings, setShowAccountSettings] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [showScrollTop, setShowScrollTop] = useState(false);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // Account Settings State
   const [settingsName, setSettingsName] = useState(currentUser.name);
@@ -219,6 +221,27 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab,
 
     return () => source.close();
   }, [currentUser?.familyId]);
+
+  // Scroll to top listener
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      // Show button after scrolling down 400px
+      setShowScrollTop(container.scrollTop > 400);
+    };
+
+    container.addEventListener('scroll', handleScroll);
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  const scrollToTop = () => {
+    scrollContainerRef.current?.scrollTo({
+      top: 0,
+      behavior: 'smooth'
+    });
+  };
 
   useEffect(() => {
     const handleVisibility = () => {
@@ -405,16 +428,13 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab,
     try {
       const result = await storageService.spinWheel(currentUser.familyId, currentUser.id);
       
-      // Find winning segment index (case-insensitive match)
-      const winningLabel = result.prize || "Not this time";
-      const winIndex = wheelSegments.findIndex(s => 
-        s.label.toLowerCase() === winningLabel.toLowerCase()
-      );
+      // Use the segment index from the backend response
+      const winIndex = result.segmentIndex ?? 0;
       
-      if (winIndex === -1) {
-        console.error('Could not find winning segment!');
+      if (winIndex < 0 || winIndex >= wheelSegments.length) {
+        console.error('Invalid segment index from backend!');
         setIsSpinning(false);
-        setToast({ message: 'Error: Could not find winning segment', type: 'error' });
+        setToast({ message: 'Error: Invalid segment index', type: 'error' });
         return;
       }
       
@@ -589,7 +609,7 @@ const groupedPrizes: GroupedPrize[] = Object.values(
     : storeItems;
 
   return (
-    <div className="pb-24 lg:pb-0 relative lg:flex lg:min-h-screen">
+    <div className="pb-24 lg:pb-0 relative lg:flex lg:min-h-screen" ref={scrollContainerRef}>
       {/* Desktop Sidebar */}
       <aside className="hidden lg:flex lg:flex-col lg:w-80 lg:fixed lg:top-16 lg:bottom-0 lg:bg-gradient-to-b lg:from-indigo-600 lg:to-purple-700">
         <div className="p-6 border-b border-white/20">
@@ -1358,6 +1378,17 @@ const groupedPrizes: GroupedPrize[] = Object.values(
         )}
       </div>
       </div>
+
+      {/* Scroll to Top Button */}
+      {showScrollTop && (
+        <button
+          onClick={scrollToTop}
+          className="fixed bottom-24 right-6 lg:bottom-8 lg:right-8 bg-indigo-600 hover:bg-indigo-700 text-white p-3 rounded-full shadow-lg transition-all duration-300 z-50 hover:scale-110"
+          aria-label="Scroll to top"
+        >
+          <ArrowUp size={24} />
+        </button>
+      )}
     </div>
   );
 };

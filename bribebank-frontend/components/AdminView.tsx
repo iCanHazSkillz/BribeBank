@@ -3,7 +3,7 @@ import { AssignedPrize, PrizeStatus, PrizeTemplate, User, PrizeType, UserRole, H
 import { storageService } from '../services/storageService';
 import { API_BASE } from "../config";
 import { PrizeCard } from './PrizeCard';
-import { Trash2, Check, X, Gift, Edit2, CheckCircle, AlertCircle, UserPlus, Shield, User as UserIcon, KeyRound, History, Plus, ListTodo, CircleDollarSign, Search, Zap, Bell, Settings, ShoppingBag, Link as Linkicon, Image as ImageIcon, Ticket, RotateCcw, Send } from 'lucide-react';
+import { Trash2, Check, X, Gift, Edit2, CheckCircle, AlertCircle, UserPlus, Shield, User as UserIcon, KeyRound, History, Plus, ListTodo, CircleDollarSign, Search, Zap, Bell, Settings, ShoppingBag, Link as Linkicon, Image as ImageIcon, Ticket, RotateCcw, Send, ArrowUp } from 'lucide-react';
 import { SseEvent } from "../types/sseEvents";
 import EmojiPicker from "emoji-picker-react";
 
@@ -106,6 +106,8 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, o
 
   // UI State
   const [toast, setToast] = useState<{message: string, type: 'success' | 'error'} | null>(null);
+  const [showScrollTop, setShowScrollTop] = useState(false);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   type ConfirmOptions = {
     title: string;
@@ -273,6 +275,27 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, o
 
     return () => source.close();
   }, [currentUser?.familyId]);
+
+  // Scroll to top listener
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      // Show button after scrolling down 400px
+      setShowScrollTop(container.scrollTop > 400);
+    };
+
+    container.addEventListener('scroll', handleScroll);
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  const scrollToTop = () => {
+    scrollContainerRef.current?.scrollTo({
+      top: 0,
+      behavior: 'smooth'
+    });
+  };
 
   useEffect(() => {
     const handleVisibility = () => {
@@ -1000,7 +1023,7 @@ const handleBulkAssign = async () => {
       : [];
 
   return (
-    <div className="pb-24 lg:pb-0 relative min-h-screen lg:flex">
+    <div className="pb-24 lg:pb-0 relative min-h-screen lg:flex" ref={scrollContainerRef}>
       {/* Desktop Sidebar */}
       <aside className="hidden lg:flex lg:flex-col lg:w-64 lg:fixed lg:top-16 lg:bottom-0 lg:bg-white lg:border-r lg:border-gray-200">
         <div className="p-6 border-b border-gray-200">
@@ -1695,9 +1718,17 @@ const handleBulkAssign = async () => {
                             placeholder="Search rewards..."
                             value={searchTerm}
                             onChange={e => setSearchTerm(e.target.value)}
-                            className="w-full pl-10 pr-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-all text-gray-900 placeholder-gray-400"
+                            className="w-full pl-10 pr-10 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-all text-gray-900 placeholder-gray-400"
                         />
                         <Search className="absolute left-3 top-3.5 text-gray-400" size={20}/>
+                        {searchTerm && (
+                            <button
+                                onClick={() => setSearchTerm('')}
+                                className="absolute right-3 top-3.5 text-gray-400 hover:text-gray-600 transition-colors"
+                            >
+                                <X size={20} />
+                            </button>
+                        )}
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pb-24">
                         {filteredTemplates.length === 0 && <div className="col-span-2 text-center py-8 text-gray-400">No rewards found.</div>}
@@ -1722,9 +1753,17 @@ const handleBulkAssign = async () => {
                             placeholder="Search tasks..."
                             value={searchTerm}
                             onChange={e => setSearchTerm(e.target.value)}
-                            className="w-full pl-10 pr-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-all text-gray-900 placeholder-gray-400"
+                            className="w-full pl-10 pr-10 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-all text-gray-900 placeholder-gray-400"
                         />
                         <Search className="absolute left-3 top-3.5 text-gray-400" size={20}/>
+                        {searchTerm && (
+                            <button
+                                onClick={() => setSearchTerm('')}
+                                className="absolute right-3 top-3.5 text-gray-400 hover:text-gray-600 transition-colors"
+                            >
+                                <X size={20} />
+                            </button>
+                        )}
                     </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pb-24">
                     {filteredBounties.length === 0 && <div className="col-span-2 text-center text-gray-400 py-8 italic">No task templates found.</div>}
@@ -2438,9 +2477,17 @@ const handleBulkAssign = async () => {
                             placeholder="Search store items..."
                             value={searchTerm}
                             onChange={e => setSearchTerm(e.target.value)}
-                            className="w-full pl-10 pr-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-all text-gray-900 placeholder-gray-400"
+                            className="w-full pl-10 pr-10 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-all text-gray-900 placeholder-gray-400"
                         />
                         <Search className="absolute left-3 top-3.5 text-gray-400" size={20}/>
+                        {searchTerm && (
+                            <button
+                                onClick={() => setSearchTerm('')}
+                                className="absolute right-3 top-3.5 text-gray-400 hover:text-gray-600 transition-colors"
+                            >
+                                <X size={20} />
+                            </button>
+                        )}
                     </div>
                     
                     {filteredStoreItems.length === 0 ? (
@@ -2610,6 +2657,17 @@ const handleBulkAssign = async () => {
         )}
       </div>
       </div>
+
+      {/* Scroll to Top Button */}
+      {showScrollTop && (
+        <button
+          onClick={scrollToTop}
+          className="fixed bottom-24 right-6 lg:bottom-8 lg:right-8 bg-indigo-600 hover:bg-indigo-700 text-white p-3 rounded-full shadow-lg transition-all duration-300 z-50 hover:scale-110"
+          aria-label="Scroll to top"
+        >
+          <ArrowUp size={24} />
+        </button>
+      )}
     </div>
   );
 };

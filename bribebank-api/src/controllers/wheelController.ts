@@ -280,11 +280,14 @@ export const spinWheel = async (req: Request, res: Response) => {
     const rand = Math.random();
     let cumulative = 0;
     let winner = segments[0];
+    let winnerIndex = 0;
 
-    for (const seg of segments) {
+    for (let i = 0; i < segments.length; i++) {
+      const seg = segments[i];
       cumulative += seg.prob;
       if (rand <= cumulative) {
         winner = seg;
+        winnerIndex = i;
         break;
       }
     }
@@ -365,6 +368,7 @@ export const spinWheel = async (req: Request, res: Response) => {
       prize: winner.label,
       emoji,
       newBalance: updatedUser?.ticketBalance || 0,
+      segmentIndex: winnerIndex,
     });
   } catch (err: any) {
     if (err && typeof err === "object" && "status" in err) {

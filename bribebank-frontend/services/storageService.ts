@@ -1485,7 +1485,7 @@ export const storageService = {
   spinWheel: async (
     familyId: string,
     userId: string
-  ): Promise<{ won: boolean; prize: string; emoji: string; newBalance: number }> => {
+  ): Promise<{ won: boolean; prize: string; emoji: string; newBalance: number; segmentIndex: number }> => {
     const token = getAuthToken();
     if (!token) throw new Error("Not authenticated");
 
