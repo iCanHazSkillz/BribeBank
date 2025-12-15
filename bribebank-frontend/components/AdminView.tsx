@@ -3,8 +3,9 @@ import { AssignedPrize, PrizeStatus, PrizeTemplate, User, PrizeType, UserRole, H
 import { storageService } from '../services/storageService';
 import { API_BASE } from "../config";
 import { PrizeCard } from './PrizeCard';
-import { Trash2, Check, X, Gift, Edit2, CheckCircle, AlertCircle, UserPlus, Shield, User as UserIcon, KeyRound, History, Plus, ListTodo, CircleDollarSign, Search, Zap, Bell, Settings, ShoppingBag, Link as Linkicon, Image as ImageIcon, Ticket, RotateCcw, Send, ArrowUp } from 'lucide-react';
+import { Trash2, Check, X, Gift, Edit2, CheckCircle, AlertCircle, UserPlus, Shield, User as UserIcon, KeyRound, History, Plus, ListTodo, CircleDollarSign, Search, Zap, Bell, Settings, ShoppingBag, Link as Linkicon, Image as ImageIcon, Ticket, RotateCcw, Send, ArrowUp, Sun, Moon } from 'lucide-react';
 import { SseEvent } from "../types/sseEvents";
+import { useTheme } from '../contexts/ThemeContext';
 import EmojiPicker from "emoji-picker-react";
 
 
@@ -28,7 +29,6 @@ const PASTEL_COLORS = [
     'bg-indigo-100 text-indigo-800 border-indigo-200',
     'bg-purple-100 text-purple-800 border-purple-200',
     'bg-pink-100 text-pink-800 border-pink-200',
-    'bg-gray-100 text-gray-800 border-gray-200',
 ];
 
 export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, onUserUpdate, desktopShowNotifications, onDesktopNotificationsToggle }) => {
@@ -108,6 +108,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, o
   const [toast, setToast] = useState<{message: string, type: 'success' | 'error'} | null>(null);
   const [showScrollTop, setShowScrollTop] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const { theme, toggleTheme } = useTheme();
 
   type ConfirmOptions = {
     title: string;
@@ -1023,12 +1024,12 @@ const handleBulkAssign = async () => {
       : [];
 
   return (
-    <div className="pb-24 lg:pb-0 relative min-h-screen lg:flex" ref={scrollContainerRef}>
+    <div className="pb-24 lg:pb-0 relative min-h-screen lg:flex dark:bg-gray-900" ref={scrollContainerRef}>
       {/* Desktop Sidebar */}
-      <aside className="hidden lg:flex lg:flex-col lg:w-64 lg:fixed lg:top-16 lg:bottom-0 lg:bg-white lg:border-r lg:border-gray-200">
-        <div className="p-6 border-b border-gray-200">
-          <h1 className="text-2xl font-bold text-gray-800">Admin</h1>
-          <p className="text-sm text-gray-500 mt-1">Dashboard</p>
+      <aside className="hidden lg:flex lg:flex-col lg:w-64 lg:fixed lg:top-16 lg:bottom-0 lg:bg-white dark:lg:bg-gray-800 lg:border-r lg:border-gray-200 dark:lg:border-gray-700">
+        <div className="p-6 border-b border-gray-200 dark:border-gray-700">
+          <h1 className="text-2xl font-bold text-gray-800 dark:text-white">Admin</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Dashboard</p>
         </div>
         
         <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
@@ -1042,7 +1043,7 @@ const handleBulkAssign = async () => {
             <button
               key={t.id}
               onClick={() => { setTab(t.id as any); resetForms(); }}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${tab === t.id ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-600 hover:bg-gray-100'}`}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${tab === t.id ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'}`}
             >
               <t.icon size={20} />
               <span className="font-semibold">{t.label}</span>
@@ -1074,17 +1075,17 @@ const handleBulkAssign = async () => {
           onClick={() => setEmojiPickerTarget(null)}
         >
           <div
-            className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-4"
+            className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-sm p-4"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-2">
-              <h4 className="text-sm font-semibold text-gray-700">
+              <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-200">
                 Choose an icon
               </h4>
               <button
                 type="button"
                 onClick={() => setEmojiPickerTarget(null)}
-                className="p-1 rounded-md hover:bg-gray-100"
+                className="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
               >
                 <X size={16} />
               </button>
@@ -1108,27 +1109,27 @@ const handleBulkAssign = async () => {
       {/* Wheel Edit Modal */}
       {showWheelEdit && (
         <div className="fixed inset-0 bg-black/60 z-[70] flex items-center justify-center p-4" onClick={() => setShowWheelEdit(false)}>
-          <div className="bg-white rounded-2xl p-6 max-w-2xl w-full max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-            <h3 className="text-2xl font-bold mb-4 flex items-center gap-2">
-              <RotateCcw size={28} className="text-purple-600" />
+          <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-2xl w-full max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <h3 className="text-2xl font-bold mb-4 flex items-center gap-2 text-gray-900 dark:text-white">
+              <RotateCcw size={28} className="text-purple-600 dark:text-purple-400" />
               Manage Prize Wheel
             </h3>
             
             {/* Spin Cost */}
             <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-700 mb-2">Spin Cost (Tickets)</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">Spin Cost (Tickets)</label>
               <input
                 type="number"
                 value={wheelSpinCost}
                 onChange={e => setWheelSpinCost(parseInt(e.target.value) || 1)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg focus:ring-2 focus:ring-purple-500"
                 min="0"
               />
             </div>
 
             {/* Winning Chance */}
             <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-700 mb-2">Winning Chance</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">Winning Chance</label>
               
               {/* Preset Buttons */}
               <div className="grid grid-cols-3 gap-3 mb-3">
@@ -1137,8 +1138,8 @@ const handleBulkAssign = async () => {
                   onClick={() => { setWinningChance(75); setShowAdvancedWinning(false); }}
                   className={`py-3 px-4 rounded-lg border-2 transition-all ${
                     winningChance === 75 && !showAdvancedWinning
-                      ? 'border-green-500 bg-green-50 text-green-700 font-bold'
-                      : 'border-gray-300 hover:border-green-400 text-gray-700'
+                      ? 'border-green-500 bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300 font-bold'
+                      : 'border-gray-300 dark:border-gray-600 hover:border-green-400 text-gray-700 dark:text-gray-300'
                   }`}
                 >
                   <div className="text-2xl mb-1">🎉</div>
@@ -1150,26 +1151,26 @@ const handleBulkAssign = async () => {
                   onClick={() => { setWinningChance(50); setShowAdvancedWinning(false); }}
                   className={`py-3 px-4 rounded-lg border-2 transition-all ${
                     winningChance === 50 && !showAdvancedWinning
-                      ? 'border-yellow-500 bg-yellow-50 text-yellow-700 font-bold'
-                      : 'border-gray-300 hover:border-yellow-400 text-gray-700'
+                      ? 'border-yellow-500 bg-yellow-50 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 font-bold'
+                      : 'border-gray-300 dark:border-gray-600 hover:border-yellow-400 text-gray-700 dark:text-gray-300'
                   }`}
                 >
                   <div className="text-2xl mb-1">⚖️</div>
                   <div className="text-sm font-medium">Balanced</div>
-                  <div className="text-xs text-gray-500">50%</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">50%</div>
                 </button>
                 <button
                   type="button"
                   onClick={() => { setWinningChance(25); setShowAdvancedWinning(false); }}
                   className={`py-3 px-4 rounded-lg border-2 transition-all ${
                     winningChance === 25 && !showAdvancedWinning
-                      ? 'border-red-500 bg-red-50 text-red-700 font-bold'
-                      : 'border-gray-300 hover:border-red-400 text-gray-700'
+                      ? 'border-red-500 bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 font-bold'
+                      : 'border-gray-300 dark:border-gray-600 hover:border-red-400 text-gray-700 dark:text-gray-300'
                   }`}
                 >
                   <div className="text-2xl mb-1">🎲</div>
                   <div className="text-sm font-medium">Hard</div>
-                  <div className="text-xs text-gray-500">25%</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">25%</div>
                 </button>
               </div>
               
@@ -1177,19 +1178,19 @@ const handleBulkAssign = async () => {
               <button
                 type="button"
                 onClick={() => setShowAdvancedWinning(!showAdvancedWinning)}
-                className="text-sm text-purple-600 hover:text-purple-700 font-medium mb-2 flex items-center gap-1"
+                className="text-sm text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300 font-medium mb-2 flex items-center gap-1"
               >
                 {showAdvancedWinning ? '▼' : '▶'} Advanced (Fine-tune percentage)
               </button>
               
               {/* Advanced Slider */}
               {showAdvancedWinning && (
-                <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                <div className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
                   <input
                     type="range"
                     value={winningChance}
                     onChange={e => setWinningChance(parseInt(e.target.value))}
-                    className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-purple-600"
+                    className="flex-1 h-2 bg-gray-200 dark:bg-gray-600 rounded-lg appearance-none cursor-pointer accent-purple-600 dark:accent-purple-400"
                     min="1"
                     max="100"
                   />
@@ -1200,11 +1201,11 @@ const handleBulkAssign = async () => {
                       const val = parseInt(e.target.value) || 50;
                       setWinningChance(Math.max(1, Math.min(100, val)));
                     }}
-                    className="w-20 px-3 py-2 border border-gray-300 rounded-lg text-center font-bold text-purple-600"
+                    className="w-20 px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg text-center font-bold text-purple-600 dark:text-purple-400"
                     min="1"
                     max="100"
                   />
-                  <span className="text-sm text-gray-500">%</span>
+                  <span className="text-sm text-gray-500 dark:text-gray-400">%</span>
                 </div>
               )}
               
@@ -1239,14 +1240,14 @@ const handleBulkAssign = async () => {
 
             {/* Segments */}
             <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">Prize Segments</label>
-              <div className="text-xs text-gray-500 mb-3">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">Prize Segments</label>
+              <div className="text-xs text-gray-500 dark:text-gray-400 mb-3">
                 "Try Again" segments will be auto-added based on winning chance ({100 - winningChance}% chance)
               </div>
               <div className="space-y-2 mb-4">
                 {editWheelSegments.map((seg, i) => (
-                  <div key={i} className="flex gap-2 items-center bg-gray-50 p-2 rounded-lg">
-                    <span className="text-gray-500 font-mono text-xs sm:text-sm w-6 sm:w-8 flex-shrink-0">{i + 1}.</span>
+                  <div key={i} className="flex gap-2 items-center bg-gray-50 dark:bg-gray-700 p-2 rounded-lg">
+                    <span className="text-gray-500 dark:text-gray-400 font-mono text-xs sm:text-sm w-6 sm:w-8 flex-shrink-0">{i + 1}.</span>
                     <input
                       type="text"
                       value={seg.label}
@@ -1255,12 +1256,12 @@ const handleBulkAssign = async () => {
                         updated[i].label = e.target.value;
                         setEditWheelSegments(updated);
                       }}
-                      className="flex-1 min-w-0 px-2 sm:px-3 py-2 border border-gray-300 rounded-lg bg-white text-sm"
+                      className="flex-1 min-w-0 px-2 sm:px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white rounded-lg text-sm"
                       placeholder="Prize name"
                     />
                     <button
                       onClick={() => setEditWheelSegments(editWheelSegments.filter((_, idx) => idx !== i))}
-                      className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors flex-shrink-0"
+                      className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors flex-shrink-0"
                       disabled={editWheelSegments.length <= 1}
                       title="Remove segment"
                     >
@@ -1275,8 +1276,8 @@ const handleBulkAssign = async () => {
                 disabled={editWheelSegments.length >= 12}
                 className={`w-full py-2 border-2 border-dashed rounded-lg flex items-center justify-center gap-2 font-medium transition-colors ${
                   editWheelSegments.length >= 12
-                    ? 'border-gray-200 text-gray-400 cursor-not-allowed'
-                    : 'border-purple-300 text-purple-600 hover:bg-purple-50'
+                    ? 'border-gray-200 dark:border-gray-700 text-gray-400 dark:text-gray-600 cursor-not-allowed'
+                    : 'border-purple-300 dark:border-purple-600 text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/30'
                 }`}
               >
                 <Plus size={18} />
@@ -1285,10 +1286,10 @@ const handleBulkAssign = async () => {
             </div>
 
             <div className="flex gap-3 mt-6">
-              <button onClick={handleResetWheel} className="flex-1 py-3 border border-gray-300 rounded-xl hover:bg-gray-50 transition-colors font-medium">
+              <button onClick={handleResetWheel} className="flex-1 py-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors font-medium">
                 Reset to Defaults
               </button>
-              <button onClick={() => setShowWheelEdit(false)} className="flex-1 py-3 border border-gray-300 rounded-xl hover:bg-gray-50 transition-colors font-medium">
+              <button onClick={() => setShowWheelEdit(false)} className="flex-1 py-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors font-medium">
                 Cancel
               </button>
               <button onClick={handleSaveWheel} className="flex-1 py-3 bg-gradient-to-r from-purple-500 to-pink-600 text-white rounded-xl font-bold hover:scale-[1.02] transition-transform">
@@ -1309,7 +1310,7 @@ const handleBulkAssign = async () => {
           }}
         >
           <div
-            className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+            className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 text-white p-6 rounded-t-2xl">
@@ -1325,18 +1326,18 @@ const handleBulkAssign = async () => {
 
             <div className="p-6 space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Item Title *</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">Item Title *</label>
                 <input
                   type="text"
                   value={storeItemTitle}
                   onChange={(e) => setStoreItemTitle(e.target.value)}
                   placeholder="e.g. LEGO Star Wars Set"
-                  className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none"
+                  className="w-full p-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-xl focus:ring-2 focus:ring-indigo-200 dark:focus:ring-indigo-500 focus:border-indigo-500 outline-none"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Ticket Cost *</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">Ticket Cost *</label>
                 <div className="relative">
                   <input
                     type="number"
@@ -1344,48 +1345,48 @@ const handleBulkAssign = async () => {
                     value={storeItemCost}
                     onChange={(e) => setStoreItemCost(e.target.value)}
                     placeholder="e.g. 50"
-                    className="w-full p-3 pl-10 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none"
+                    className="w-full p-3 pl-10 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-xl focus:ring-2 focus:ring-indigo-200 dark:focus:ring-indigo-500 focus:border-indigo-500 outline-none"
                   />
-                  <Ticket size={20} className="absolute left-3 top-3.5 text-purple-400" />
+                  <Ticket size={20} className="absolute left-3 top-3.5 text-purple-400 dark:text-purple-300" />
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">Description</label>
                 <textarea
                   value={storeItemDescription}
                   onChange={(e) => setStoreItemDescription(e.target.value)}
                   placeholder="Optional description for the item..."
                   rows={3}
-                  className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none resize-none"
+                  className="w-full p-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-xl focus:ring-2 focus:ring-indigo-200 dark:focus:ring-indigo-500 focus:border-indigo-500 outline-none resize-none"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Image URL</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">Image URL</label>
                 <div className="relative">
                   <input
                     type="url"
                     value={storeItemImage}
                     onChange={(e) => setStoreItemImage(e.target.value)}
                     placeholder="https://..."
-                    className="w-full p-3 pl-10 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none"
+                    className="w-full p-3 pl-10 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-xl focus:ring-2 focus:ring-indigo-200 dark:focus:ring-indigo-500 focus:border-indigo-500 outline-none"
                   />
-                  <ImageIcon size={20} className="absolute left-3 top-3.5 text-gray-400" />
+                  <ImageIcon size={20} className="absolute left-3 top-3.5 text-gray-400 dark:text-gray-500" />
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Product Link</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">Product Link</label>
                 <div className="relative">
                   <input
                     type="url"
                     value={storeItemLink}
                     onChange={(e) => setStoreItemLink(e.target.value)}
                     placeholder="https://..."
-                    className="w-full p-3 pl-10 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none"
+                    className="w-full p-3 pl-10 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-xl focus:ring-2 focus:ring-indigo-200 dark:focus:ring-indigo-500 focus:border-indigo-500 outline-none"
                   />
-                  <Linkicon size={20} className="absolute left-3 top-3.5 text-gray-400" />
+                  <Linkicon size={20} className="absolute left-3 top-3.5 text-gray-400 dark:text-gray-500" />
                 </div>
               </div>
 
@@ -1395,7 +1396,7 @@ const handleBulkAssign = async () => {
                     setShowStoreItemModal(false);
                     resetForms();
                   }}
-                  className="flex-1 py-3 border border-gray-300 rounded-xl hover:bg-gray-50 transition-colors font-medium"
+                  className="flex-1 py-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors font-medium"
                 >
                   Cancel
                 </button>
@@ -1552,11 +1553,11 @@ const handleBulkAssign = async () => {
           }
         }}>
           <div 
-            className="absolute right-4 top-20 lg:right-8 lg:top-24 w-80 bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden"
+            className="absolute right-4 top-20 lg:right-8 lg:top-24 w-80 bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-100 dark:border-gray-700 overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="p-3 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-              <h3 className="font-bold text-sm text-gray-700">Notifications</h3>
+            <div className="p-3 border-b border-gray-100 dark:border-gray-700 flex justify-between items-center bg-gray-50 dark:bg-gray-900">
+              <h3 className="font-bold text-sm text-gray-700 dark:text-gray-200">Notifications</h3>
               <div className="flex gap-2">
                 {notifications.length > 0 && (
                   <button onClick={handleClearAllNotifications} className="text-xs text-indigo-600 font-semibold hover:text-indigo-800">Clear All</button>
@@ -1572,12 +1573,12 @@ const handleBulkAssign = async () => {
             </div>
             <div className="max-h-64 overflow-y-auto p-2">
               {notifications.length === 0 ? (
-                <p className="text-center text-gray-400 text-sm py-4">No new notifications</p>
+                <p className="text-center text-gray-400 dark:text-gray-500 text-sm py-4">No new notifications</p>
               ) : (
                 notifications.map(note => (
-                  <div key={note.id} className="p-3 mb-1 bg-white hover:bg-gray-50 rounded-xl border border-gray-100 transition-colors relative group">
-                    <p className="text-sm text-gray-800 pr-6">{note.message}</p>
-                    <p className="text-xs text-gray-400 mt-1">{new Date(note.timestamp).toLocaleTimeString()}</p>
+                  <div key={note.id} className="p-3 mb-1 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 rounded-xl border border-gray-100 dark:border-gray-600 transition-colors relative group">
+                    <p className="text-sm text-gray-800 dark:text-gray-200 pr-6">{note.message}</p>
+                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">{new Date(note.timestamp).toLocaleTimeString()}</p>
                     <button onClick={(e) => { e.stopPropagation(); handleDismissNotification(note.id); }} className="absolute top-2 right-2 text-gray-300 hover:text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity"><X size={14}/></button>
                   </div>
                 ))
@@ -1587,14 +1588,22 @@ const handleBulkAssign = async () => {
         </div>
       )}
 
-      <header className="bg-white sticky top-0 z-50 shadow-sm px-6 py-4 flex justify-between items-center lg:hidden">
-        <h2 className="text-2xl font-bold text-gray-800">Admin Dashboard</h2>
+      <header className="bg-white dark:bg-gray-800 sticky top-0 z-50 shadow-sm px-6 py-4 flex justify-between items-center lg:hidden">
+        <h2 className="text-2xl font-bold text-gray-800 dark:text-white">Admin Dashboard</h2>
         <div className="flex items-center gap-3">
             {totalPending > 0 && (
-            <span className="bg-amber-100 text-amber-800 text-xs font-bold px-3 py-1 rounded-full animate-pulse">{totalPending} Pending</span>
+            <span className="bg-amber-100 dark:bg-amber-900 text-amber-800 dark:text-amber-200 text-xs font-bold px-3 py-1 rounded-full animate-pulse">{totalPending} Pending</span>
             )}
             
-            <button onClick={() => setShowNotifications(!showNotifications)} className="relative p-2 text-gray-600 hover:bg-gray-100 rounded-full transition-colors">
+            <button
+              onClick={toggleTheme}
+              className="p-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors"
+              aria-label="Toggle theme"
+            >
+              {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
+            </button>
+            
+            <button onClick={() => setShowNotifications(!showNotifications)} className="relative p-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors">
               <Bell size={24} />
               {notifications.length > 0 && <span className="absolute top-1 right-1 w-3 h-3 bg-red-500 rounded-full border-2 border-white"></span>}
             </button>
@@ -1602,7 +1611,7 @@ const handleBulkAssign = async () => {
       </header>
 
       {/* Mobile Tabs */}
-      <div className="flex p-4 gap-2 justify-around lg:hidden">
+      <div className="flex p-4 gap-2 justify-around lg:hidden bg-gray-50 dark:bg-gray-900">
         {[
             { id: 'assign', label: 'Assign', icon: Send },
             { id: 'approvals', label: `${totalPending}`, fullLabel: 'Approvals', icon: CheckCircle },
@@ -1613,7 +1622,7 @@ const handleBulkAssign = async () => {
             <button 
                 key={t.id}
                 onClick={() => { setTab(t.id as any); resetForms(); }}
-                className={`flex flex-col items-center gap-1 px-3 py-2 rounded-xl flex-1 transition-colors ${tab === t.id ? 'bg-indigo-600 text-white' : 'bg-white text-gray-600'}`}
+                className={`flex flex-col items-center gap-1 px-3 py-2 rounded-xl flex-1 transition-colors ${tab === t.id ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300'}`}
                 title={t.fullLabel || t.label}
             >
                 <div className="relative">
@@ -1630,17 +1639,17 @@ const handleBulkAssign = async () => {
       </div>
 
       {/* Desktop Header */}
-      <div className="hidden lg:block bg-white border-b border-gray-200 px-8 py-6">
+      <div className="hidden lg:block bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-8 py-6">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-2xl font-bold text-gray-800">
+            <h2 className="text-2xl font-bold text-gray-800 dark:text-white">
               {tab === 'assign' && 'Assign Rewards & Tasks'}
               {tab === 'approvals' && 'Pending Approvals'}
               {tab === 'create' && 'Create Templates'}
               {tab === 'store' && 'Store Management'}
               {tab === 'users' && 'Family Members'}
             </h2>
-            <p className="text-sm text-gray-500 mt-1">
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
               {tab === 'assign' && 'Distribute rewards, tasks, and tickets to family members'}
               {tab === 'approvals' && 'Review and approve pending requests'}
               {tab === 'create' && 'Build reward and task templates'}
@@ -1667,7 +1676,7 @@ const handleBulkAssign = async () => {
             </div>
 
             <div className="mb-6 overflow-x-auto no-scrollbar">
-              <label className="block text-sm font-medium text-gray-500 mb-2">
+              <label className="block text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">
                 Select Family Members
               </label>
               <div className="flex gap-3">
@@ -1686,8 +1695,8 @@ const handleBulkAssign = async () => {
                       }
                       className={`flex items-center gap-2 px-4 py-2 rounded-full border text-sm font-medium transition-all shadow-sm ${
                         isSelected
-                          ? "bg-indigo-50 ring-2 ring-indigo-200"
-                          : "border-gray-200 bg-white"
+                          ? "bg-indigo-50 dark:bg-indigo-900/30 ring-2 ring-indigo-200 dark:ring-indigo-700"
+                          : "border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800"
                       }`}
                     >
                       <div
@@ -1697,7 +1706,7 @@ const handleBulkAssign = async () => {
                       </div>
                       <span
                         className={`font-semibold ${
-                          isSelected ? "text-indigo-700" : "text-gray-700"
+                          isSelected ? "text-indigo-700 dark:text-indigo-300" : "text-gray-700 dark:text-gray-300"
                         }`}
                       >
                         {user.name}
@@ -1718,9 +1727,9 @@ const handleBulkAssign = async () => {
                             placeholder="Search rewards..."
                             value={searchTerm}
                             onChange={e => setSearchTerm(e.target.value)}
-                            className="w-full pl-10 pr-10 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-all text-gray-900 placeholder-gray-400"
+                            className="w-full pl-10 pr-10 py-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-all text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500"
                         />
-                        <Search className="absolute left-3 top-3.5 text-gray-400" size={20}/>
+                        <Search className="absolute left-3 top-3.5 text-gray-400 dark:text-gray-500" size={20}/>
                         {searchTerm && (
                             <button
                                 onClick={() => setSearchTerm('')}
@@ -1766,85 +1775,45 @@ const handleBulkAssign = async () => {
                         )}
                     </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pb-24">
-                    {filteredBounties.length === 0 && <div className="col-span-2 text-center text-gray-400 py-8 italic">No task templates found.</div>}
-                    {filteredBounties.map(b => {
-                      const selected = selectedBountyTemplateIds.includes(b.id);
-                      const baseColor =
-                        b.themeColor || "bg-white border-gray-200 text-gray-900";
-
-                      return (
-                        <div
-                          key={b.id}
-                          onClick={() =>
-                            setSelectedBountyTemplateIds(prev =>
-                              prev.includes(b.id)
-                                ? prev.filter(id => id !== b.id)
-                                : [...prev, b.id]
-                            )
-                          }
-                          className={`
-                            p-4 rounded-2xl cursor-pointer transition-all flex flex-col shadow-sm relative overflow-hidden
-                            ${baseColor}
-                            ${selected ? "ring-2 ring-indigo-500 scale-[1.01]" : ""}
-                          `}
-                        >
-                          <div className="flex justify-between items-start mb-2">
-                            <span className="text-4xl">{b.emoji}</span>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleEditBounty(b);
-                              }}
-                              className="p-2 bg-gray-100 rounded-full hover:bg-white"
-                            >
-                              <Edit2 size={14} />
-                            </button>
-                          </div>
-
-                          <div className="mb-1">
-                            <h3 className="font-bold text-gray-800">{b.title}</h3>
-                            {b.isFCFS && (
-                              <span className="text-[10px] font-bold bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded">
-                                First Come First Served
-                              </span>
-                            )}
-                          </div>
-
-                          <p className="text-sm text-gray-500 font-medium flex items-center gap-1 mt-1">
-                            {b.rewardType === 'TICKETS' ? (
-                              <Ticket size={14} className="text-amber-500" />
-                            ) : (
-                              <Gift size={14} />
-                            )}
-                            Reward: {b.rewardValue}{b.rewardType === 'TICKETS' ? ' Tickets' : ''}
-                          </p>
-
-                          {selected && (
-                            <div className="absolute top-2 right-10 bg-indigo-600 text-white p-1 rounded-full">
-                              <Check size={12} />
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
+                    {filteredBounties.length === 0 && <div className="col-span-2 text-center text-gray-400 dark:text-gray-500 py-8 italic">No task templates found.</div>}
+                    {filteredBounties.map(b => (
+                        <PrizeCard
+                            key={b.id}
+                            title={b.title}
+                            description={`Reward: ${b.rewardValue}${b.rewardType === 'TICKETS' ? ' Tickets' : ''}`}
+                            emoji={b.emoji}
+                            themeColor={b.themeColor || undefined}
+                            variant="bounty"
+                            isFCFS={b.isFCFS}
+                            highlight={selectedBountyTemplateIds.includes(b.id)}
+                            onClick={() =>
+                                setSelectedBountyTemplateIds(prev =>
+                                    prev.includes(b.id)
+                                        ? prev.filter(id => id !== b.id)
+                                        : [...prev, b.id]
+                                )
+                            }
+                            onEdit={() => handleEditBounty(b)}
+                        />
+                    ))}
                 </div>
                 </>
             ) : (
                 <>
                     {/* Tickets Section */}
                     <div className="flex flex-col items-center justify-center py-10 px-4">
-                        <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 w-full max-w-sm text-center">
+                        <div className="bg-white dark:bg-gray-800 p-8 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-700 w-full max-w-sm text-center">
                             <div className="w-16 h-16 bg-gradient-to-br from-purple-500 to-indigo-600 rounded-full flex items-center justify-center mx-auto mb-4">
                                 <Ticket size={32} className="text-white" />
                             </div>
-                            <h3 className="text-xl font-bold text-gray-800 mb-2">Give Tickets</h3>
-                            <p className="text-sm text-gray-500 mb-6">
+                            <h3 className="text-xl font-bold text-gray-800 dark:text-white mb-2">Give Tickets</h3>
+                            <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
                                 Children can use tickets to spin the prize wheel or purchase items from the store
                             </p>
 
                             <div className="space-y-4">
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-2 text-left">
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2 text-left">
                                         Number of Tickets
                                     </label>
                                     <input
@@ -1853,7 +1822,7 @@ const handleBulkAssign = async () => {
                                         value={ticketAmount}
                                         onChange={(e) => setTicketAmount(e.target.value)}
                                         placeholder="Enter amount..."
-                                        className="w-full p-3 border border-gray-300 rounded-xl text-center text-2xl font-bold text-indigo-600 focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none"
+                                        className="w-full p-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-xl text-center text-2xl font-bold text-indigo-600 dark:text-indigo-400 focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none"
                                     />
                                 </div>
 
@@ -1906,7 +1875,7 @@ const handleBulkAssign = async () => {
             {/* Pending Bounties */}
             {pendingBounties.length > 0 && (
                 <div>
-                    <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2"><ListTodo size={20}/> Tasks to Verify</h3>
+                    <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-4 flex items-center gap-2"><ListTodo size={20}/> Tasks to Verify</h3>
                     <div className="space-y-3">
                         {pendingBounties.map(b => {
                             const template = bountyTemplates.find(t => t.id === b.bountyTemplateId);
@@ -1916,18 +1885,18 @@ const handleBulkAssign = async () => {
                             if(!template || isSelfVerification) return null;
 
                             return (
-                                <div key={b.id} className="bg-white p-4 rounded-2xl shadow-sm border border-green-200">
+                                <div key={b.id} className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm border border-green-200 dark:border-green-700">
                                     <div className="flex justify-between items-start">
                                         <div className="flex items-center gap-3">
                                             <div className={`w-8 h-8 rounded-full ${user?.avatarColor} flex items-center justify-center text-white text-xs font-bold`}>{user?.name.charAt(0)}</div>
                                             <div>
-                                                <p className="font-bold text-gray-800">{template.title}</p>
-                                                <p className="text-xs text-gray-500">Marked complete by {user?.name}</p>
+                                                <p className="font-bold text-gray-800 dark:text-white">{template.title}</p>
+                                                <p className="text-xs text-gray-500 dark:text-gray-400">Marked complete by {user?.name}</p>
                                             </div>
                                         </div>
                                         <span className="text-2xl">{template.emoji}</span>
                                     </div>
-                                    <div className="mt-3 pt-3 border-t border-green-50 flex justify-end">
+                                    <div className="mt-3 pt-3 border-t border-green-50 dark:border-green-900 flex justify-end">
                                         <button onClick={() => handleVerifyBounty(b.id)} className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-xl font-bold text-sm shadow-md hover:bg-green-700">
                                             <CheckCircle size={16}/> Verify & Send Reward
                                         </button>
@@ -1960,13 +1929,13 @@ const handleBulkAssign = async () => {
                 return (
                     <div
                         key={assignment.id}
-                        className="bg-white p-4 rounded-2xl shadow-sm border border-amber-200"
+                        className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm border border-amber-200 dark:border-amber-700"
                     >
-                        <div className="flex items-center gap-2 mb-3 text-sm text-gray-500">
+                        <div className="flex items-center gap-2 mb-3 text-sm text-gray-500 dark:text-gray-400">
                             <div
                                 className={`w-6 h-6 rounded-full ${user?.avatarColor}`}
                             ></div>
-                            <span className="font-semibold text-gray-800">
+                            <span className="font-semibold text-gray-800 dark:text-white">
                                 {user?.name}
                             </span>{" "}
                             wants to claim:
@@ -2005,15 +1974,15 @@ const handleBulkAssign = async () => {
             })}
 
             
-            <div className="pt-6 border-t border-gray-200">
-                <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2"><History size={18} /> Recent History</h3>
+            <div className="pt-6 border-t border-gray-200 dark:border-gray-700">
+                <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-4 flex items-center gap-2"><History size={18} /> Recent History</h3>
                 <div className="space-y-2 opacity-70">
                     {history.slice(0, 5).map(event => (
-                        <div key={event.id} className="bg-white p-3 rounded-xl border border-gray-100 flex items-center gap-3">
+                        <div key={event.id} className="bg-white dark:bg-gray-800 p-3 rounded-xl border border-gray-100 dark:border-gray-700 flex items-center gap-3">
                             <span className="text-xl">{event.emoji}</span>
                             <div className="flex-1">
-                                <p className="text-sm font-semibold text-gray-800">{event.title}</p>
-                                <p className="text-xs text-gray-500">
+                                <p className="text-sm font-semibold text-gray-800 dark:text-white">{event.title}</p>
+                                <p className="text-xs text-gray-500 dark:text-gray-400">
                                     <span className="font-medium">{event.userName}</span> • {new Date(event.timestamp).toLocaleDateString()}
                                     <span className="block text-[10px] text-indigo-500">{event.action.replace('_', ' ')} by {event.assignerName}</span>
                                 </p>
@@ -2027,14 +1996,14 @@ const handleBulkAssign = async () => {
 
         {tab === "create" && (
           <div className="space-y-6">
-            <div className="flex bg-gray-100 p-1 rounded-xl mb-4">
+            <div className="flex bg-gray-100 dark:bg-gray-800 p-1 rounded-xl mb-4">
               <button
                 type="button"
                 onClick={() => setCreateMode("reward")}
                 className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${
                   createMode === "reward"
-                    ? "bg-white shadow-sm text-indigo-600"
-                    : "text-gray-500"
+                    ? "bg-white dark:bg-gray-700 shadow-sm text-indigo-600 dark:text-indigo-400"
+                    : "text-gray-500 dark:text-gray-400"
                 }`}
               >
                 Reward
@@ -2044,17 +2013,17 @@ const handleBulkAssign = async () => {
                 onClick={() => setCreateMode("bounty")}
                 className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${
                   createMode === "bounty"
-                    ? "bg-white shadow-sm text-indigo-600"
-                    : "text-gray-500"
+                    ? "bg-white dark:bg-gray-700 shadow-sm text-indigo-600 dark:text-indigo-400"
+                    : "text-gray-500 dark:text-gray-400"
                 }`}
               >
                 Task/Bounty
               </button>
             </div>
 
-            <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+            <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-700">
               <div className="flex items-center justify-between mb-6">
-                <h3 className="text-xl font-bold text-gray-800">
+                <h3 className="text-xl font-bold text-gray-800 dark:text-white">
                   {editingId ? "Edit" : "Create"}{" "}
                   {createMode === "reward" ? "Reward" : "Task"}
                 </h3>
@@ -2076,7 +2045,7 @@ const handleBulkAssign = async () => {
                 <div className="space-y-4">
                   {/* ---------------- Icon (Reward) ---------------- */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
                       Icon
                     </label>
 
@@ -2092,8 +2061,8 @@ const handleBulkAssign = async () => {
                             aria-pressed={isSelected}
                             className={`min-w-[3rem] aspect-square flex items-center justify-center text-xl rounded-xl border transition-all ${
                               isSelected
-                                ? "bg-indigo-100 border-indigo-500"
-                                : "bg-gray-50 border-gray-200 hover:bg-gray-100"
+                                ? "bg-indigo-100 dark:bg-indigo-900/30 border-indigo-500 dark:border-indigo-600"
+                                : "bg-gray-50 dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-600"
                             }`}
                             title={emoji}
                           >
@@ -2108,7 +2077,7 @@ const handleBulkAssign = async () => {
                           <button
                             type="button"
                             onClick={() => setShowPrizeEmojiPicker(true)}
-                            className="min-w-[3rem] aspect-square flex items-center justify-center text-xl rounded-xl border bg-indigo-50 border-indigo-200"
+                            className="min-w-[3rem] aspect-square flex items-center justify-center text-xl rounded-xl border bg-indigo-50 dark:bg-indigo-900/30 border-indigo-200 dark:border-indigo-600"
                             title="Current icon (click to change)"
                           >
                             {prizeEmoji}
@@ -2119,7 +2088,7 @@ const handleBulkAssign = async () => {
                       <button
                         type="button"
                         onClick={() => setShowPrizeEmojiPicker(true)}
-                        className="min-w-[3rem] aspect-square flex items-center justify-center text-lg rounded-xl border bg-white border-gray-200 hover:bg-gray-50 font-bold"
+                        className="min-w-[3rem] aspect-square flex items-center justify-center text-lg rounded-xl border bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 font-bold"
                         title="More icons"
                       >
                         +
@@ -2133,16 +2102,16 @@ const handleBulkAssign = async () => {
                         onClick={() => setShowPrizeEmojiPicker(false)}
                       >
                         <div
-                          className="bg-white rounded-2xl shadow-2xl p-3 max-w-[95vw]"
+                          className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-3 max-w-[95vw]"
                           onClick={(e) => e.stopPropagation()}
                         >
                           <div className="flex items-center justify-between mb-2 px-1">
-                            <span className="text-sm font-semibold text-gray-700">
+                            <span className="text-sm font-semibold text-gray-700 dark:text-gray-200">
                               Choose an icon
                             </span>
                             <button
                               type="button"
-                              className="text-gray-400 hover:text-gray-600"
+                              className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
                               onClick={() => setShowPrizeEmojiPicker(false)}
                             >
                               ✕
@@ -2154,6 +2123,7 @@ const handleBulkAssign = async () => {
                               setPrizeEmoji(emojiData.emoji);
                               setShowPrizeEmojiPicker(false);
                             }}
+                            theme={theme as 'light' | 'dark'}
                           />
                         </div>
                       </div>
@@ -2162,7 +2132,7 @@ const handleBulkAssign = async () => {
 
                   {/* ---------------- Title ---------------- */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
                       Title
                     </label>
                     <input
@@ -2170,13 +2140,13 @@ const handleBulkAssign = async () => {
                       value={prizeTitle}
                       onChange={(e) => setPrizeTitle(e.target.value)}
                       placeholder="e.g. Extra Screen Time"
-                      className="w-full p-3 rounded-xl border border-gray-300 focus:border-indigo-500 outline-none"
+                      className="w-full p-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:border-indigo-500 outline-none"
                     />
                   </div>
 
                   {/* ---------------- Description ---------------- */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
                       Description
                     </label>
                     <textarea
@@ -2184,28 +2154,43 @@ const handleBulkAssign = async () => {
                       onChange={(e) => setPrizeDesc(e.target.value)}
                       placeholder="Details..."
                       rows={2}
-                      className="w-full p-3 rounded-xl border border-gray-300 focus:border-indigo-500 outline-none resize-none"
+                      className="w-full p-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:border-indigo-500 outline-none resize-none"
                     />
                   </div>
 
                   {/* ---------------- Card Color ---------------- */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
                       Card Color
                     </label>
                     <div className="flex flex-wrap gap-2">
-                      {PASTEL_COLORS.map((c) => (
-                        <button
-                          key={c}
-                          type="button"
-                          onClick={() => setPrizeColor(c)}
-                          className={`w-8 h-8 rounded-full border-2 ${c.split(" ")[0]} ${
-                            prizeColor === c
-                              ? "border-gray-600 scale-110"
-                              : "border-transparent"
-                          }`}
-                        />
-                      ))}
+                      {PASTEL_COLORS.map((c, index) => {
+                        // Map pastel colors to darker swatch colors for visibility
+                        const swatchColors = [
+                          'bg-red-400',
+                          'bg-orange-400',
+                          'bg-amber-400',
+                          'bg-green-400',
+                          'bg-teal-400',
+                          'bg-blue-400',
+                          'bg-indigo-400',
+                          'bg-purple-400',
+                          'bg-pink-400',
+                          'bg-gray-400',
+                        ];
+                        return (
+                          <button
+                            key={c}
+                            type="button"
+                            onClick={() => setPrizeColor(c)}
+                            className={`w-8 h-8 rounded-full border-2 ${swatchColors[index]} ${
+                              prizeColor === c
+                                ? "border-gray-600 dark:border-gray-300 scale-110"
+                                : "border-transparent"
+                            }`}
+                          />
+                        );
+                      })}
                     </div>
                   </div>
                 </div>
@@ -2213,7 +2198,7 @@ const handleBulkAssign = async () => {
                 <div className="space-y-4">
                   {/* ---------------- Icon (Bounty) ---------------- */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
                       Icon
                     </label>
 
@@ -2229,8 +2214,8 @@ const handleBulkAssign = async () => {
                             aria-pressed={isSelected}
                             className={`min-w-[3rem] aspect-square flex items-center justify-center text-xl rounded-xl border transition-all ${
                               isSelected
-                                ? "bg-indigo-100 border-indigo-500"
-                                : "bg-gray-50 border-gray-200 hover:bg-gray-100"
+                                ? "bg-indigo-100 dark:bg-indigo-900/30 border-indigo-500 dark:border-indigo-600"
+                                : "bg-gray-50 dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-600"
                             }`}
                             title={emoji}
                           >
@@ -2245,7 +2230,7 @@ const handleBulkAssign = async () => {
                           <button
                             type="button"
                             onClick={() => setShowBountyEmojiPicker(true)}
-                            className="min-w-[3rem] aspect-square flex items-center justify-center text-xl rounded-xl border bg-indigo-50 border-indigo-200"
+                            className="min-w-[3rem] aspect-square flex items-center justify-center text-xl rounded-xl border bg-indigo-50 dark:bg-indigo-900/30 border-indigo-200 dark:border-indigo-600"
                             title="Current icon (click to change)"
                           >
                             {bountyEmoji}
@@ -2255,7 +2240,7 @@ const handleBulkAssign = async () => {
                       <button
                         type="button"
                         onClick={() => setShowBountyEmojiPicker(true)}
-                        className="min-w-[3rem] aspect-square flex items-center justify-center text-lg rounded-xl border bg-white border-gray-200 hover:bg-gray-50 font-bold"
+                        className="min-w-[3rem] aspect-square flex items-center justify-center text-lg rounded-xl border bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 font-bold"
                         title="More icons"
                       >
                         +
@@ -2268,16 +2253,16 @@ const handleBulkAssign = async () => {
                         onClick={() => setShowBountyEmojiPicker(false)}
                       >
                         <div
-                          className="bg-white rounded-2xl shadow-2xl p-3 max-w-[95vw]"
+                          className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-3 max-w-[95vw]"
                           onClick={(e) => e.stopPropagation()}
                         >
                           <div className="flex items-center justify-between mb-2 px-1">
-                            <span className="text-sm font-semibold text-gray-700">
+                            <span className="text-sm font-semibold text-gray-700 dark:text-gray-200">
                               Choose an icon
                             </span>
                             <button
                               type="button"
-                              className="text-gray-400 hover:text-gray-600"
+                              className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
                               onClick={() => setShowBountyEmojiPicker(false)}
                             >
                               ✕
@@ -2289,6 +2274,7 @@ const handleBulkAssign = async () => {
                               setBountyEmoji(emojiData.emoji);
                               setShowBountyEmojiPicker(false);
                             }}
+                            theme={theme as 'light' | 'dark'}
                           />
                         </div>
                       </div>
@@ -2297,7 +2283,7 @@ const handleBulkAssign = async () => {
 
                   {/* ---------------- Task Title ---------------- */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
                       Task Title
                     </label>
                     <input
@@ -2305,16 +2291,16 @@ const handleBulkAssign = async () => {
                       value={bountyTitle}
                       onChange={(e) => setBountyTitle(e.target.value)}
                       placeholder="e.g. Wash Dishes"
-                      className="w-full p-3 rounded-xl border border-gray-300 focus:border-indigo-500 outline-none"
+                      className="w-full p-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:border-indigo-500 outline-none"
                     />
                   </div>
 
                   {/* ---------------- Reward Type Toggle ---------------- */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
                       Reward Type
                     </label>
-                    <div className="flex bg-gray-50 p-1 rounded-lg border border-gray-200">
+                    <div className="flex bg-gray-50 dark:bg-gray-700 p-1 rounded-lg border border-gray-200 dark:border-gray-600">
                       <button 
                         type="button"
                         onClick={() => setBountyRewardType('CUSTOM')} 
@@ -2334,7 +2320,7 @@ const handleBulkAssign = async () => {
 
                   {/* ---------------- Reward Value ---------------- */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
                       {bountyRewardType === 'TICKETS' ? 'Ticket Amount' : 'Reward Value'}
                     </label>
                     <div className="relative">
@@ -2343,15 +2329,15 @@ const handleBulkAssign = async () => {
                         value={bountyRewardValue}
                         onChange={(e) => setBountyRewardValue(e.target.value)}
                         placeholder={bountyRewardType === 'TICKETS' ? "e.g. 5" : "e.g. $5 or 30 mins TV"}
-                        className="w-full p-3 pl-10 rounded-xl border border-gray-300 focus:border-indigo-500 outline-none"
+                        className="w-full p-3 pl-10 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:border-indigo-500 outline-none"
                         min={bountyRewardType === 'TICKETS' ? "1" : undefined}
                         step={bountyRewardType === 'TICKETS' ? "1" : undefined}
                       />
                       {bountyRewardType === 'TICKETS' ? (
-                        <Ticket className="absolute left-3 top-3.5 text-gray-400" size={18}/>
+                        <Ticket className="absolute left-3 top-3.5 text-gray-400 dark:text-gray-500" size={18}/>
                       ) : (
                         <CircleDollarSign
-                          className="absolute left-3 top-3.5 text-gray-400"
+                          className="absolute left-3 top-3.5 text-gray-400 dark:text-gray-500"
                           size={18}
                         />
                       )}
@@ -2360,44 +2346,59 @@ const handleBulkAssign = async () => {
 
                   {/* ---------------- Card Color ---------------- */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
                       Card Color
                     </label>
                     <div className="flex flex-wrap gap-2">
-                      {PASTEL_COLORS.map((c) => (
-                        <button
-                          key={c}
-                          type="button"
-                          onClick={() => setBountyColor(c)}
-                          className={`w-8 h-8 rounded-full border-2 ${c.split(" ")[0]} ${
-                            bountyColor === c
-                              ? "border-gray-600 scale-110"
-                              : "border-transparent"
-                          }`}
-                        />
-                      ))}
+                      {PASTEL_COLORS.map((c, index) => {
+                        // Map pastel colors to darker swatch colors for visibility
+                        const swatchColors = [
+                          'bg-red-400',
+                          'bg-orange-400',
+                          'bg-amber-400',
+                          'bg-green-400',
+                          'bg-teal-400',
+                          'bg-blue-400',
+                          'bg-indigo-400',
+                          'bg-purple-400',
+                          'bg-pink-400',
+                          'bg-gray-400',
+                        ];
+                        return (
+                          <button
+                            key={c}
+                            type="button"
+                            onClick={() => setBountyColor(c)}
+                            className={`w-8 h-8 rounded-full border-2 ${swatchColors[index]} ${
+                              bountyColor === c
+                                ? "border-gray-600 dark:border-gray-300 scale-110"
+                                : "border-transparent"
+                            }`}
+                          />
+                        );
+                      })}
                     </div>
                   </div>
 
                   {/* ---------------- FCFS Toggle ---------------- */}
                   <div
-                    className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl border border-gray-200 cursor-pointer"
+                    className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-700 rounded-xl border border-gray-200 dark:border-gray-600 cursor-pointer"
                     onClick={() => setBountyFCFS(!bountyFCFS)}
                   >
                     <div
                       className={`w-6 h-6 rounded-md flex items-center justify-center border transition-all ${
                         bountyFCFS
-                          ? "bg-indigo-600 border-indigo-600"
-                          : "bg-white border-gray-300"
+                          ? "bg-indigo-600 dark:bg-indigo-500 border-indigo-600 dark:border-indigo-500"
+                          : "bg-white dark:bg-gray-600 border-gray-300 dark:border-gray-500"
                       }`}
                     >
                       {bountyFCFS && <Check size={16} className="text-white" />}
                     </div>
                     <div>
-                      <p className="font-bold text-gray-800 text-sm">
+                      <p className="font-bold text-gray-800 dark:text-white text-sm">
                         First Come First Served
                       </p>
-                      <p className="text-xs text-gray-500">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
                         If one child claims this task, it disappears for others.
                       </p>
                     </div>
@@ -2408,7 +2409,7 @@ const handleBulkAssign = async () => {
               <button
                 type="button"
                 onClick={handleSaveTemplate}
-                className="w-full mt-6 bg-indigo-600 text-white font-bold py-3.5 rounded-xl hover:bg-indigo-700 shadow-lg shadow-indigo-200"
+                className="w-full mt-6 bg-indigo-600 dark:bg-indigo-500 text-white font-bold py-3.5 rounded-xl hover:bg-indigo-700 dark:hover:bg-indigo-600 shadow-lg shadow-indigo-200 dark:shadow-indigo-900/20"
               >
                 {editingId ? "Update" : "Save Template"}
               </button>
@@ -2417,7 +2418,7 @@ const handleBulkAssign = async () => {
                 <button
                   type="button"
                   onClick={() => handleDeleteTemplate(editingId, createMode === "bounty")}
-                  className="w-full mt-2 text-red-500 font-semibold py-2"
+                  className="w-full mt-2 text-red-500 dark:text-red-400 font-semibold py-2"
                 >
                   Delete Template
                 </button>
@@ -2465,7 +2466,7 @@ const handleBulkAssign = async () => {
                 </button>
 
                 <div>
-                    <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+                    <h3 className="text-lg font-bold text-gray-400 dark:text-gray-300 mb-4 flex items-center gap-2">
                         <ShoppingBag size={20}/>
                         Store Inventory ({storeItems.length} items)
                     </h3>
@@ -2477,13 +2478,13 @@ const handleBulkAssign = async () => {
                             placeholder="Search store items..."
                             value={searchTerm}
                             onChange={e => setSearchTerm(e.target.value)}
-                            className="w-full pl-10 pr-10 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-all text-gray-900 placeholder-gray-400"
+                            className="w-full pl-10 pr-10 py-3 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-indigo-200 dark:focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500"
                         />
-                        <Search className="absolute left-3 top-3.5 text-gray-400" size={20}/>
+                        <Search className="absolute left-3 top-3.5 text-gray-400 dark:text-gray-500" size={20}/>
                         {searchTerm && (
                             <button
                                 onClick={() => setSearchTerm('')}
-                                className="absolute right-3 top-3.5 text-gray-400 hover:text-gray-600 transition-colors"
+                                className="absolute right-3 top-3.5 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
                             >
                                 <X size={20} />
                             </button>
@@ -2491,7 +2492,7 @@ const handleBulkAssign = async () => {
                     </div>
                     
                     {filteredStoreItems.length === 0 ? (
-                        <div className="bg-white p-8 rounded-2xl text-center text-gray-400">
+                        <div className="bg-white dark:bg-gray-800 p-8 rounded-2xl text-center text-gray-400 dark:text-gray-500">
                             <ShoppingBag size={48} className="mx-auto mb-3 opacity-20" />
                             <p className="font-medium">{searchTerm ? 'No matching items found' : 'No items in store yet'}</p>
                             <p className="text-sm">{searchTerm ? 'Try a different search term' : 'Click "Add Store Item" above to get started'}</p>
@@ -2501,10 +2502,10 @@ const handleBulkAssign = async () => {
                             {filteredStoreItems.map((item) => (
                                 <div
                                     key={item.id}
-                                    className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow"
+                                    className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 hover:shadow-md transition-shadow"
                                 >
                                     {item.imageUrl && (
-                                        <div className="mb-3 rounded-xl overflow-hidden bg-gray-100 aspect-video">
+                                        <div className="mb-3 rounded-xl overflow-hidden bg-gray-100 dark:bg-gray-700 aspect-video">
                                             <img
                                                 src={item.imageUrl}
                                                 alt={item.title}
@@ -2517,25 +2518,25 @@ const handleBulkAssign = async () => {
                                     )}
                                     <div className="flex justify-between items-start mb-2">
                                         <div className="flex-1">
-                                            <h4 className="font-bold text-gray-800">{item.title}</h4>
+                                            <h4 className="font-bold text-gray-800 dark:text-white">{item.title}</h4>
                                             {item.description && (
-                                                <p className="text-xs text-gray-500 mt-1">{item.description}</p>
+                                                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{item.description}</p>
                                             )}
                                             <div className="flex items-center gap-1 mt-1">
-                                                <Ticket size={16} className="text-purple-500" />
-                                                <span className="text-lg font-bold text-purple-600">{item.cost}</span>
+                                                <Ticket size={16} className="text-purple-500 dark:text-purple-400" />
+                                                <span className="text-lg font-bold text-purple-600 dark:text-purple-400">{item.cost}</span>
                                             </div>
                                         </div>
                                         <div className="flex gap-1">
                                             <button
                                                 onClick={() => handleEditStoreItem(item)}
-                                                className="p-2 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 transition-colors"
+                                                className="p-2 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors"
                                             >
                                                 <Edit2 size={16} />
                                             </button>
                                             <button
                                                 onClick={() => handleDeleteStoreItem(item.id)}
-                                                className="p-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors"
+                                                className="p-2 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/50 transition-colors"
                                             >
                                                 <Trash2 size={16} />
                                             </button>
@@ -2546,7 +2547,7 @@ const handleBulkAssign = async () => {
                                             href={item.productUrl}
                                             target="_blank"
                                             rel="noopener noreferrer"
-                                            className="text-xs text-indigo-600 hover:text-indigo-700 flex items-center gap-1 mt-2"
+                                            className="text-xs text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 flex items-center gap-1 mt-2"
                                         >
                                             <Linkicon size={12} />
                                             View Product
@@ -2565,34 +2566,34 @@ const handleBulkAssign = async () => {
             <div className="space-y-6">
                 {!userFormView ? (
                     <>
-                        <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+                        <div className="bg-white dark:bg-gray-800 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-gray-700">
                             <div className="flex justify-between items-center mb-4">
-                                <h3 className="font-bold text-lg text-gray-800">Family Members</h3>
+                                <h3 className="font-bold text-lg text-gray-800 dark:text-white">Family Members</h3>
                                 <button onClick={() => handleOpenUserForm()} className="bg-indigo-600 text-white px-3 py-2 rounded-lg text-sm font-bold flex items-center gap-1"><UserPlus size={16}/> Add</button>
                             </div>
                             <div className="space-y-3">
                                 {users.map(u => (
-                                    <div key={u.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors cursor-pointer" onClick={() => handleOpenUserForm(u)}>
+                                    <div key={u.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors cursor-pointer" onClick={() => handleOpenUserForm(u)}>
                                         <div className="flex items-center gap-3">
                                             <div className={`w-10 h-10 rounded-full ${u.avatarColor} flex items-center justify-center text-white`}>
                                                 {u.role === UserRole.ADMIN ? <Shield size={18}/> : <UserIcon size={18}/>}
                                             </div>
                                             <div>
-                                                <p className="font-bold text-gray-800">{u.name}</p>
-                                                <p className="text-xs text-gray-500">@{u.username}</p>
+                                                <p className="font-bold text-gray-800 dark:text-white">{u.name}</p>
+                                                <p className="text-xs text-gray-500 dark:text-gray-400">@{u.username}</p>
                                             </div>
                                         </div>
                                         <div className="flex items-center gap-2">
                                             {u.role !== UserRole.ADMIN && (
                                                 <>
-                                                    <div className="flex items-center gap-1 px-2 py-1 bg-amber-50 rounded-lg">
-                                                        <Ticket size={16} className="text-amber-500" />
-                                                        <span className="text-sm font-semibold text-amber-600">{u.ticketBalance || 0}</span>
+                                                    <div className="flex items-center gap-1 px-2 py-1 bg-amber-50 dark:bg-amber-900/30 rounded-lg">
+                                                        <Ticket size={16} className="text-amber-500 dark:text-amber-400" />
+                                                        <span className="text-sm font-semibold text-amber-600 dark:text-amber-400">{u.ticketBalance || 0}</span>
                                                     </div>
-                                                    <button onClick={(e) => {e.stopPropagation(); setViewingRewardsForUser(u.id)}} className="text-indigo-500 p-2 hover:bg-indigo-100 rounded-lg"><Gift size={18}/></button>
+                                                    <button onClick={(e) => {e.stopPropagation(); setViewingRewardsForUser(u.id)}} className="text-indigo-500 dark:text-indigo-400 p-2 hover:bg-indigo-100 dark:hover:bg-indigo-900/30 rounded-lg"><Gift size={18}/></button>
                                                 </>
                                             )}
-                                            <button className="text-gray-400 p-2 rounded-lg"><Settings size={18}/></button>
+                                            <button className="text-gray-400 dark:text-gray-500 p-2 rounded-lg"><Settings size={18}/></button>
                                         </div>
                                     </div>
                                 ))}
@@ -2600,25 +2601,25 @@ const handleBulkAssign = async () => {
                         </div>
                     </>
                 ) : (
-                    <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+                    <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-700">
                         <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-xl font-bold">{editingUser ? 'Edit Member' : 'Add Member'}</h3>
-                            <button onClick={handleCloseUserView} className="text-gray-400 hover:text-gray-600"><X/></button>
+                            <h3 className="text-xl font-bold text-gray-800 dark:text-white">{editingUser ? 'Edit Member' : 'Add Member'}</h3>
+                            <button onClick={handleCloseUserView} className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"><X/></button>
                         </div>
                         <div className="space-y-4">
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
-                                <input type="text" value={newUserName} onChange={e => setNewUserName(e.target.value)} className="w-full p-3 rounded-xl border border-gray-300" placeholder="Display Name" />
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Name</label>
+                                <input type="text" value={newUserName} onChange={e => setNewUserName(e.target.value)} className="w-full p-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white" placeholder="Display Name" />
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
                                   Username
                                 </label>
                                 <input
                                   type="text"
                                   value={newUserUsername}
                                   onChange={e => setNewUserUsername(e.target.value)}
-                                  className="w-full p-3 rounded-xl border border-gray-300"
+                                  className="w-full p-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                                   placeholder="Username"
                                   autoCapitalize="none"
                                   autoCorrect="off"
@@ -2626,18 +2627,18 @@ const handleBulkAssign = async () => {
                                />
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Password {editingUser && <span className="text-xs font-normal text-gray-500">(Leave blank to keep current)</span>}</label>
-                                <input type="password" value={newUserPassword} onChange={e => setNewUserPassword(e.target.value)} className="w-full p-3 rounded-xl border border-gray-300" placeholder={editingUser ? "••••••" : "Password"} />
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Password {editingUser && <span className="text-xs font-normal text-gray-500 dark:text-gray-400">(Leave blank to keep current)</span>}</label>
+                                <input type="password" value={newUserPassword} onChange={e => setNewUserPassword(e.target.value)} className="w-full p-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white" placeholder={editingUser ? "••••••" : "Password"} />
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Role</label>
                                 <div className="flex gap-2">
-                                    <button onClick={() => setNewUserRole(UserRole.USER)} className={`flex-1 py-2 rounded-lg border transition-colors ${newUserRole === UserRole.USER ? 'bg-indigo-100 border-indigo-500 text-indigo-700' : 'border-gray-300 text-gray-700 bg-white'}`}>Child</button>
-                                    <button onClick={() => setNewUserRole(UserRole.ADMIN)} className={`flex-1 py-2 rounded-lg border transition-colors ${newUserRole === UserRole.ADMIN ? 'bg-indigo-100 border-indigo-500 text-indigo-700' : 'border-gray-300 text-gray-700 bg-white'}`}>Parent</button>
+                                    <button onClick={() => setNewUserRole(UserRole.USER)} className={`flex-1 py-2 rounded-lg border transition-colors ${newUserRole === UserRole.USER ? 'bg-indigo-100 dark:bg-indigo-900/30 border-indigo-500 dark:border-indigo-600 text-indigo-700 dark:text-indigo-300' : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700'}`}>Child</button>
+                                    <button onClick={() => setNewUserRole(UserRole.ADMIN)} className={`flex-1 py-2 rounded-lg border transition-colors ${newUserRole === UserRole.ADMIN ? 'bg-indigo-100 dark:bg-indigo-900/30 border-indigo-500 dark:border-indigo-600 text-indigo-700 dark:text-indigo-300' : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700'}`}>Parent</button>
                                 </div>
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">Avatar Color</label>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">Avatar Color</label>
                                 <div className="flex flex-wrap gap-2">{AVATAR_COLORS.map(c => (<button key={c} onClick={() => setNewUserColor(c)} className={`w-8 h-8 rounded-full ${c} ${newUserColor === c ? 'ring-2 ring-gray-400 scale-110' : ''}`} />))}</div>
                             </div>
                             

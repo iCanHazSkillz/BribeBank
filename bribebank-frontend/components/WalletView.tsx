@@ -3,8 +3,9 @@ import { AssignedPrize, PrizeStatus, PrizeTemplate, User, PrizeType, HistoryEven
 import { storageService } from '../services/storageService';
 import { API_BASE } from "../config";
 import { PrizeCard } from './PrizeCard';
-import { History, Ticket, Bell, X, CheckCircle, XCircle, ListTodo, Play, Trash2, ThumbsUp, ThumbsDown, gift, ShoppingBag, Link as LinkIcon, Image as ImageIcon, Settings, User as UserIcon, Search, ArrowUp } from 'lucide-react';
+import { History, Ticket, Bell, X, CheckCircle, XCircle, ListTodo, Play, Trash2, ThumbsUp, ThumbsDown, gift, ShoppingBag, Link as LinkIcon, Image as ImageIcon, Settings, User as UserIcon, Search, ArrowUp, Sun, Moon } from 'lucide-react';
 import { SseEvent } from "../types/sseEvents";
+import { useTheme } from '../contexts/ThemeContext';
 
 interface WalletViewProps {
   currentUser: User;
@@ -60,6 +61,7 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab,
   const [searchTerm, setSearchTerm] = useState('');
   const [showScrollTop, setShowScrollTop] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const { theme, toggleTheme } = useTheme();
 
   // Account Settings State
   const [settingsName, setSettingsName] = useState(currentUser.name);
@@ -668,7 +670,7 @@ const groupedPrizes: GroupedPrize[] = Object.values(
       </aside>
 
       {/* Main Content */}
-      <div className="lg:ml-80 flex-1 lg:bg-gray-50">
+      <div className="lg:ml-80 flex-1 lg:bg-gray-50 lg:dark:bg-gray-900">
         {/* Toast */}
         {toast && (
             <div className="fixed top-4 left-1/2 lg:left-[calc(50%+10rem)] transform -translate-x-1/2 z-[60] w-[90%] max-w-sm">
@@ -689,11 +691,11 @@ const groupedPrizes: GroupedPrize[] = Object.values(
           }
         }}>
           <div 
-            className="absolute right-4 top-20 lg:right-8 lg:top-24 w-80 bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden animate-fade-in"
+            className="absolute right-4 top-20 lg:right-8 lg:top-24 w-80 bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-100 dark:border-gray-700 overflow-hidden animate-fade-in"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="p-3 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-              <h3 className="font-bold text-sm text-gray-700">Notifications</h3>
+            <div className="p-3 border-b border-gray-100 dark:border-gray-700 flex justify-between items-center bg-gray-50 dark:bg-gray-900">
+              <h3 className="font-bold text-sm text-gray-700 dark:text-gray-200">Notifications</h3>
               <div className="flex gap-2">
                 {notifications.length > 0 && (
                   <button onClick={handleClearAllNotifications} className="text-xs text-indigo-600 font-semibold hover:text-indigo-800">Clear All</button>
@@ -709,15 +711,15 @@ const groupedPrizes: GroupedPrize[] = Object.values(
             </div>
             <div className="max-h-64 overflow-y-auto p-2">
               {notifications.length === 0 ? (
-                <div className="text-center py-8 text-gray-400">
+                <div className="text-center py-8 text-gray-400 dark:text-gray-500">
                   <Bell className="mx-auto mb-2 opacity-20" size={24} />
                   <p className="text-sm italic">No new alerts</p>
                 </div>
               ) : (
                 notifications.map(note => (
-                  <div key={note.id} className="p-3 mb-1 bg-white hover:bg-gray-50 rounded-xl border border-gray-100 transition-colors relative group">
-                    <p className="text-sm text-gray-800 pr-6">{note.message}</p>
-                    <p className="text-xs text-gray-400 mt-1">{new Date(note.timestamp).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}</p>
+                  <div key={note.id} className="p-3 mb-1 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 rounded-xl border border-gray-100 dark:border-gray-600 transition-colors relative group">
+                    <p className="text-sm text-gray-800 dark:text-gray-200 pr-6">{note.message}</p>
+                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">{new Date(note.timestamp).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}</p>
                     <button onClick={(e) => { e.stopPropagation(); handleDismissNotification(note.id); }} className="absolute top-2 right-2 text-gray-300 hover:text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity"><X size={14}/></button>
                   </div>
                 ))
@@ -727,7 +729,7 @@ const groupedPrizes: GroupedPrize[] = Object.values(
         </div>
       )}
 
-      <header className="bg-white sticky top-0 z-50 px-6 py-4 shadow-sm mb-4 lg:hidden">
+      <header className="bg-white dark:bg-gray-800 sticky top-0 z-50 px-6 py-4 shadow-sm mb-4 lg:hidden">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
              <div 
@@ -738,8 +740,8 @@ const groupedPrizes: GroupedPrize[] = Object.values(
                  {currentUser.name.charAt(0)}
              </div>
              <div>
-                <h1 className="text-lg font-extrabold text-gray-900 leading-tight">My Wallet</h1>
-                <p className="text-xs text-gray-500">Hi, {currentUser.name}!</p>
+                <h1 className="text-lg font-extrabold text-gray-900 dark:text-white leading-tight">My Wallet</h1>
+                <p className="text-xs text-gray-500 dark:text-gray-400">Hi, {currentUser.name}!</p>
              </div>
           </div>
           
@@ -750,9 +752,17 @@ const groupedPrizes: GroupedPrize[] = Object.values(
               <span className="text-white font-bold text-sm">{ticketBalance}</span>
             </div>
 
+            <button
+              onClick={toggleTheme}
+              className="p-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors"
+              aria-label="Toggle theme"
+            >
+              {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
+            </button>
+
             <button 
               onClick={() => setShowNotifications(!showNotifications)} 
-              className="relative p-2 text-gray-600 hover:bg-gray-100 rounded-full transition-colors"
+              className="relative p-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors"
             >
               <Bell size={24} />
               {notifications.length > 0 && (
@@ -766,24 +776,24 @@ const groupedPrizes: GroupedPrize[] = Object.values(
       </header>
 
       <div className="flex px-4 mb-6 gap-2 lg:hidden">
-        <button onClick={() => setTab('wallet')} className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-bold transition-colors ${tab === 'wallet' ? 'bg-gray-900 text-white' : 'bg-white text-gray-600'}`}><Ticket size={16} /> Rewards</button>
-        <button onClick={() => setTab('tasks')} className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-bold transition-colors relative ${tab === 'tasks' ? 'bg-gray-900 text-white' : 'bg-white text-gray-600'}`}>
+        <button onClick={() => setTab('wallet')} className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-bold transition-colors ${tab === 'wallet' ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300'}`}><Ticket size={16} /> Rewards</button>
+        <button onClick={() => setTab('tasks')} className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-bold transition-colors relative ${tab === 'tasks' ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300'}`}>
             <ListTodo size={16} /> Tasks
-            {activeBounties.length > 0 && <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full text-[10px] flex items-center justify-center text-white border border-white">{activeBounties.length}</span>}
+            {activeBounties.length > 0 && <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full text-[10px] flex items-center justify-center text-white border border-white dark:border-gray-800">{activeBounties.length}</span>}
         </button>
-        <button onClick={() => setTab('store')} className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-bold transition-colors ${tab === 'store' ? 'bg-gray-900 text-white' : 'bg-white text-gray-600'}`}><ShoppingBag size={16} /> Store</button>
-        <button onClick={() => setTab('history')} className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-bold transition-colors ${tab === 'history' ? 'bg-gray-900 text-white' : 'bg-white text-gray-600'}`}><History size={16} /> History</button>
+        <button onClick={() => setTab('store')} className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-bold transition-colors ${tab === 'store' ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300'}`}><ShoppingBag size={16} /> Store</button>
+        <button onClick={() => setTab('history')} className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-bold transition-colors ${tab === 'history' ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300'}`}><History size={16} /> History</button>
       </div>
 
       {/* Desktop Header */}
-      <div className="hidden lg:block bg-white border-b border-gray-200 px-8 py-6">
-        <h2 className="text-2xl font-bold text-gray-800">
+      <div className="hidden lg:block bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-8 py-6">
+        <h2 className="text-2xl font-bold text-gray-800 dark:text-white">
           {tab === 'wallet' && 'My Rewards'}
           {tab === 'tasks' && 'My Tasks'}
           {tab === 'store' && 'Store & Prizes'}
           {tab === 'history' && 'Activity History'}
         </h2>
-        <p className="text-sm text-gray-500 mt-1">
+        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
           {tab === 'wallet' && 'View and redeem your available rewards'}
           {tab === 'tasks' && 'Manage your assigned tasks and bounties'}
           {tab === 'store' && 'Shop for items and spin the prize wheel'}
@@ -825,7 +835,7 @@ const groupedPrizes: GroupedPrize[] = Object.values(
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder={tab === 'wallet' ? 'Search rewards...' : tab === 'tasks' ? 'Search tasks...' : 'Search store items...'}
-              className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
             />
             {searchTerm && (
               <button
@@ -845,8 +855,8 @@ const groupedPrizes: GroupedPrize[] = Object.values(
             {filteredGroupedPrizes.length === 0 ? (
               <div className="text-center py-16 opacity-60">
                 <span className="text-6xl mb-4 block">😕</span>
-                <h3 className="text-lg font-bold text-gray-800">{searchTerm ? 'No matching rewards' : 'No rewards yet'}</h3>
-                <p className="text-sm text-gray-500 mt-1">{searchTerm ? 'Try a different search term' : 'Ask for more tasks!'}</p>
+                <h3 className="text-lg font-bold text-gray-800 dark:text-white">{searchTerm ? 'No matching rewards' : 'No rewards yet'}</h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{searchTerm ? 'Try a different search term' : 'Ask for more tasks!'}</p>
               </div>
             ) : (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -856,12 +866,13 @@ const groupedPrizes: GroupedPrize[] = Object.values(
                       {...group.template}
                       status={group.status}
                       count={group.count}
+                      assignedBy={group.assignedBy}
                       actionLabel={group.status === PrizeStatus.AVAILABLE ? "Use Card" : "Waiting..."}
                       onClick={group.status === PrizeStatus.AVAILABLE ? () => handleClaim(group.ids[0]) : undefined}
                       disabled={group.status === PrizeStatus.PENDING_APPROVAL}
                       />
                       {group.status === PrizeStatus.AVAILABLE && (
-                          <div className="text-xs text-gray-400 text-center mt-1 mb-2">Assigned by {group.assignedBy}</div>
+                          <div className="text-xs text-gray-400 dark:text-gray-500 text-center mt-1 mb-2">Assigned by {group.assignedBy}</div>
                       )}
                   </div>
                 ))}
@@ -873,8 +884,8 @@ const groupedPrizes: GroupedPrize[] = Object.values(
         {/* Wheel Spin Modal */}
         {showWheel && (
           <div className="fixed inset-0 bg-black/80 z-[70] flex items-center justify-center p-4" onClick={() => !isSpinning && setShowWheel(false)}>
-            <div className="bg-white rounded-3xl p-8 max-w-md w-full" onClick={e => e.stopPropagation()}>
-              <h3 className="text-2xl font-bold text-center mb-6 flex items-center justify-center gap-2">
+            <div className="bg-white dark:bg-gray-800 rounded-3xl p-8 max-w-md w-full" onClick={e => e.stopPropagation()}>
+              <h3 className="text-2xl font-bold text-center mb-6 flex items-center justify-center gap-2 dark:text-white">
                 <span className="text-3xl">🎡</span>
                 Prize Wheel
               </h3>
@@ -1018,7 +1029,7 @@ const groupedPrizes: GroupedPrize[] = Object.values(
                     setWheelRotation(0);
                   }}
                   disabled={isSpinning}
-                  className="flex-1 py-3 border border-gray-300 rounded-xl hover:bg-gray-50 transition-colors font-medium disabled:opacity-50"
+                  className="flex-1 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors font-medium disabled:opacity-50"
                 >
                   Close
                 </button>
@@ -1044,20 +1055,20 @@ const groupedPrizes: GroupedPrize[] = Object.values(
             }}
           >
             <div
-              className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 mx-4"
+              className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-md p-6 mx-4"
               onClick={(e) => e.stopPropagation()}
             >
-              <h3 className="text-lg font-bold text-gray-900 mb-2">
+              <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">
                 {confirmState.title}
               </h3>
-              <p className="text-sm text-gray-600 mb-6">
+              <p className="text-sm text-gray-600 dark:text-gray-300 mb-6">
                 {confirmState.message}
               </p>
 
               <div className="flex justify-end gap-3">
                 <button
                   type="button"
-                  className="px-4 py-2 text-sm rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-50"
+                  className="px-4 py-2 text-sm rounded-xl border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700"
                   onClick={() => {
                     confirmResolveRef.current?.(false);
                     setConfirmState(null);
@@ -1093,12 +1104,12 @@ const groupedPrizes: GroupedPrize[] = Object.values(
             onClick={() => setShowAccountSettings(false)}
           >
             <div
-              className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 mx-4"
+              className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-md p-6 mx-4"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center gap-2 mb-4">
-                <Settings size={24} className="text-gray-700" />
-                <h3 className="text-lg font-bold text-gray-900">
+                <Settings size={24} className="text-gray-700 dark:text-gray-200" />
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white">
                   Account Settings
                 </h3>
               </div>
@@ -1106,49 +1117,49 @@ const groupedPrizes: GroupedPrize[] = Object.values(
               <div className="space-y-4">
                 {/* Name */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
                     Name
                   </label>
                   <input
                     type="text"
                     value={settingsName}
                     onChange={(e) => setSettingsName(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     placeholder="Your name"
                   />
                 </div>
 
                 {/* Username */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
                     Username
                   </label>
                   <input
                     type="text"
                     value={settingsUsername}
                     onChange={(e) => setSettingsUsername(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     placeholder="Your username"
                   />
                 </div>
 
                 {/* Password */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
                     Password
                   </label>
                   <input
                     type="password"
                     value={settingsPassword}
                     onChange={(e) => setSettingsPassword(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     placeholder="Leave blank to keep current"
                   />
                 </div>
 
                 {/* Avatar Color */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
                     Avatar Color
                   </label>
                   <div className="grid grid-cols-6 gap-2">
@@ -1171,7 +1182,7 @@ const groupedPrizes: GroupedPrize[] = Object.values(
               <div className="flex justify-end gap-3 mt-6">
                 <button
                   type="button"
-                  className="px-4 py-2 text-sm rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-50"
+                  className="px-4 py-2 text-sm rounded-xl border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700"
                   onClick={() => setShowAccountSettings(false)}
                 >
                   Cancel
@@ -1277,16 +1288,16 @@ const groupedPrizes: GroupedPrize[] = Object.values(
                 
                 {filteredStoreItems.length === 0 ? (
                     <div className="text-center py-16 opacity-60">
-                        <ShoppingBag size={64} className="mx-auto mb-4 text-gray-300" />
-                        <h3 className="text-lg font-bold text-gray-800">{searchTerm ? 'No matching items' : 'Store is Empty'}</h3>
-                        <p className="text-sm text-gray-500 mt-1">{searchTerm ? 'Try a different search term' : 'No items available yet'}</p>
+                        <ShoppingBag size={64} className="mx-auto mb-4 text-gray-300 dark:text-gray-600" />
+                        <h3 className="text-lg font-bold text-gray-800 dark:text-white">{searchTerm ? 'No matching items' : 'Store is Empty'}</h3>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{searchTerm ? 'Try a different search term' : 'No items available yet'}</p>
                     </div>
                 ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         {filteredStoreItems.map((item) => (
                             <div
                                 key={item.id}
-                                className="bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-100 hover:shadow-md transition-shadow"
+                                className="bg-white dark:bg-gray-800 rounded-2xl overflow-hidden shadow-sm border border-gray-100 dark:border-gray-700 hover:shadow-md transition-shadow"
                             >
                                 {item.imageUrl && (
                                     <div className="aspect-video bg-gray-100 overflow-hidden">
@@ -1301,7 +1312,7 @@ const groupedPrizes: GroupedPrize[] = Object.values(
                                     </div>
                                 )}
                                 <div className="p-4">
-                                    <h3 className="font-bold text-gray-800 mb-2">{item.title}</h3>
+                                    <h3 className="font-bold text-gray-800 dark:text-white mb-2">{item.title}</h3>
                                     
                                     <div className="flex items-center justify-between mb-3">
                                         <div className="flex items-center gap-1">
@@ -1320,7 +1331,7 @@ const groupedPrizes: GroupedPrize[] = Object.values(
                                     </div>
 
                                     {item.description && (
-                                        <p className="text-xs text-gray-500 mb-3">{item.description}</p>
+                                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">{item.description}</p>
                                     )}
 
                                     <div className="flex gap-2">
@@ -1360,11 +1371,11 @@ const groupedPrizes: GroupedPrize[] = Object.values(
             <div className="space-y-3">
                 {historyEvents.length === 0 && <p className="text-center text-gray-400 py-10">Nothing here yet.</p>}
                 {historyEvents.map(event => (
-                  <div key={event.id} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex items-center gap-4 opacity-80 grayscale-[0.2]">
+                  <div key={event.id} className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 flex items-center gap-4 opacity-80 grayscale-[0.2]">
                       <span className="text-3xl">{event.emoji}</span>
                       <div className="flex-1">
-                          <h4 className="font-bold text-gray-800">{event.title}</h4>
-                          <p className="text-xs text-gray-500">
+                          <h4 className="font-bold text-gray-800 dark:text-white">{event.title}</h4>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">
                              {new Date(event.timestamp).toLocaleDateString()} • {event.action.replace('_', ' ')}
                              <span className="block text-[10px] text-indigo-500">By {event.assignerName}</span>
                           </p>

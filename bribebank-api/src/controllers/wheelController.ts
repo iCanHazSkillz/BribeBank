@@ -344,7 +344,7 @@ export const spinWheel = async (req: Request, res: Response) => {
           emoji,
           description: `Won from Prize Wheel!`,
           type: PrizeType.PRIVILEGE,
-          themeColor: "bg-gradient-to-r from-purple-400 to-pink-600",
+          themeColor: "prize-wheel-gradient",
         },
       });
     }
