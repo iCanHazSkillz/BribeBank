@@ -4,6 +4,7 @@ import { storageService } from "./services/storageService";
 import { LoginView } from "./components/LoginView";
 import { WalletView } from "./components/WalletView";
 import { AdminView } from "./components/AdminView";
+import { PwaInstallPrompt } from "./components/PwaInstallPrompt";
 import { LogOut } from "lucide-react";
 
 type View = "wallet" | "admin" | "login";
@@ -187,6 +188,9 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen max-w-md mx-auto bg-gray-50 shadow-2xl overflow-hidden relative border-x border-gray-200">
+      {/* PWA Install Prompt */}
+      <PwaInstallPrompt />
+      
       {/* Content Area */}
       <main className="h-full overflow-y-auto no-scrollbar">
         {view === "admin" && currentUser.role === UserRole.ADMIN && (
