@@ -9,47 +9,21 @@ interface BeforeInstallPromptEvent extends Event {
 export const PwaInstallPrompt: React.FC = () => {
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [showPrompt, setShowPrompt] = useState(false);
-  const [showManualGuide, setShowManualGuide] = useState(false);
 
   useEffect(() => {
-    // Debug logging
-    console.log("[PWA] Component mounted, checking install eligibility...");
-    
     // Check if user has already dismissed the prompt
     const dismissed = localStorage.getItem("pwa_install_dismissed");
-    console.log("[PWA] Previously dismissed:", dismissed);
     
     // Check if app is already installed (running in standalone mode)
     const isStandalone = window.matchMedia("(display-mode: standalone)").matches ||
                          (window.navigator as any).standalone ||
                          document.referrer.includes("android-app://");
-    console.log("[PWA] Running in standalone:", isStandalone);
-    
-    // Check HTTPS
-    const isSecure = window.location.protocol === "https:" || window.location.hostname === "localhost";
-    console.log("[PWA] Secure context (HTTPS):", isSecure);
-    
-    // Check service worker
-    if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.ready.then((reg) => {
-        console.log("[PWA] Service worker ready:", reg.active?.state);
-      });
-    } else {
-      console.warn("[PWA] Service worker not supported");
-    }
 
     if (dismissed || isStandalone) {
-      console.log("[PWA] Not showing prompt - dismissed or standalone");
-      return;
-    }
-    
-    if (!isSecure) {
-      console.warn("[PWA] Not showing prompt - not HTTPS (required for install)");
       return;
     }
 
     const handler = (e: Event) => {
-      console.log("[PWA] beforeinstallprompt event fired!");
       // Prevent the mini-infobar from appearing on mobile
       e.preventDefault();
       // Save the event so it can be triggered later
@@ -57,27 +31,16 @@ export const PwaInstallPrompt: React.FC = () => {
       
       // Show our custom prompt after a short delay
       setTimeout(() => {
-        console.log("[PWA] Showing install prompt with native API");
         setShowPrompt(true);
       }, 2000);
     };
 
     window.addEventListener("beforeinstallprompt", handler);
-    console.log("[PWA] Listening for beforeinstallprompt event");
-
-    // Fallback: If event doesn't fire within 3 seconds, show manual guide
-    const fallbackTimer = setTimeout(() => {
-      if (!deferredPrompt && isSecure && !isStandalone) {
-        console.log("[PWA] beforeinstallprompt not fired, showing manual install guide");
-        setShowManualGuide(true);
-      }
-    }, 3000);
 
     return () => {
       window.removeEventListener("beforeinstallprompt", handler);
-      clearTimeout(fallbackTimer);
     };
-  }, [deferredPrompt]);
+  }, []);
 
   const handleInstall = async () => {
     if (!deferredPrompt) {
@@ -103,28 +66,18 @@ export const PwaInstallPrompt: React.FC = () => {
     // Remember that user dismissed the prompt
     localStorage.setItem("pwa_install_dismissed", "true");
     setShowPrompt(false);
-    setShowManualGuide(false);
   };
 
   const handleRemindLater = () => {
     // Just close, don't mark as permanently dismissed
     setShowPrompt(false);
-    setShowManualGuide(false);
   };
 
-  // Detect browser type for manual instructions
-  const getBrowserType = () => {
-    const ua = navigator.userAgent.toLowerCase();
-    if (ua.includes("firefox")) return "firefox";
-    if (ua.includes("chrome") || ua.includes("crios")) return "chrome";
-    if (ua.includes("safari") && !ua.includes("chrome")) return "safari";
-    return "chrome"; // default
-  };
+  if (!showPrompt || !deferredPrompt) {
+    return null;
+  }
 
-  const browserType = getBrowserType();
-
-  // Show native install prompt if event fired
-  if (showPrompt && deferredPrompt) {
+  return (
     return (
       <div className="fixed inset-0 bg-black/60 z-[100] flex items-end sm:items-center justify-center p-4 animate-in fade-in duration-300">
         <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in slide-in-from-bottom-4 sm:slide-in-from-bottom-0 duration-300">
@@ -214,86 +167,6 @@ export const PwaInstallPrompt: React.FC = () => {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/60 z-[100] flex items-end sm:items-center justify-center p-4 animate-in fade-in duration-300">
-      <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in slide-in-from-bottom-4 sm:slide-in-from-bottom-0 duration-300">
-        {/* Header */}
-        <div className="bg-gradient-to-r from-indigo-600 to-purple-600 p-6 text-white relative">
-          <button
-            onClick={handleRemindLater}
-            className="absolute top-4 right-4 p-1 hover:bg-white/20 rounded-full transition-colors"
-          >
-            <X size={20} />
-          </button>
-          <div className="flex items-center gap-4">
-            <div className="bg-white/20 p-3 rounded-2xl">
-              <Download size={32} />
-            </div>
-            <div>
-              <h3 className="text-2xl font-bold">Install BribeBank</h3>
-              <p className="text-indigo-100 text-sm mt-1">Add to home screen</p>
-            </div>
-          </div>
-        </div>
-
-        {/* Content */}
-        <div className="p-6">
-          <p className="text-gray-700 mb-4">
-            Get quick access to BribeBank from your home screen!
-          </p>
-
-          {/* Browser-specific instructions */}
-          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-indigo-200 rounded-xl p-4 mb-6">
-            <h4 className="font-semibold text-indigo-900 mb-3 text-sm">
-              {browserType === "firefox" ? "📱 Firefox Instructions:" : "📱 Chrome Instructions:"}
-            </h4>
-            
-            {browserType === "firefox" ? (
-              <ol className="text-sm text-indigo-800 space-y-2 list-decimal list-inside">
-                <li>Tap the <strong>three dots (⋮)</strong> menu</li>
-                <li>Tap <strong>"Install"</strong> or <strong>"Add to Home Screen"</strong></li>
-                <li>Confirm by tapping <strong>"Add"</strong></li>
-              </ol>
-            ) : (
-              <ol className="text-sm text-indigo-800 space-y-2 list-decimal list-inside">
-                <li>Tap the <strong>three dots (⋮)</strong> menu at the top-right</li>
-                <li>Look for <strong>"Add to Home screen"</strong> or <strong>"Install app"</strong></li>
-                <li>Tap <strong>"Add"</strong> or <strong>"Install"</strong></li>
-              </ol>
-            )}
-          </div>
-
-          {/* Benefits */}
-          <ul className="space-y-2 mb-6">
-            <li className="flex items-center gap-2 text-sm text-gray-600">
-              <span className="text-green-500">✓</span>
-              Instant access from home screen
-            </li>
-            <li className="flex items-center gap-2 text-sm text-gray-600">
-              <span className="text-blue-500">✓</span>
-              Works offline
-            </li>
-            <li className="flex items-center gap-2 text-sm text-gray-600">
-              <span className="text-purple-500">✓</span>
-              Fullscreen app experience
-            </li>
-          </ul>
-
-          {/* Actions */}
-          <div className="flex gap-3">
-            <button
-              onClick={handleDismiss}
-              className="flex-1 py-3 border-2 border-gray-300 rounded-xl font-medium text-gray-700 hover:bg-gray-50 transition-colors text-sm"
-            >
-              Not Now
-            </button>
-            <button
-              onClick={handleRemindLater}
-              className="flex-1 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl font-bold shadow-lg hover:shadow-xl transition-all text-sm"
-            >
-              Got It!
-            </button>
-          </div>
-        </div>
       </div>
     </div>
   );
