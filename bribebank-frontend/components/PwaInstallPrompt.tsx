@@ -11,19 +11,44 @@ export const PwaInstallPrompt: React.FC = () => {
   const [showPrompt, setShowPrompt] = useState(false);
 
   useEffect(() => {
+    // Debug logging
+    console.log("[PWA] Component mounted, checking install eligibility...");
+    
     // Check if user has already dismissed the prompt
     const dismissed = localStorage.getItem("pwa_install_dismissed");
+    console.log("[PWA] Previously dismissed:", dismissed);
     
     // Check if app is already installed (running in standalone mode)
     const isStandalone = window.matchMedia("(display-mode: standalone)").matches ||
                          (window.navigator as any).standalone ||
                          document.referrer.includes("android-app://");
+    console.log("[PWA] Running in standalone:", isStandalone);
+    
+    // Check HTTPS
+    const isSecure = window.location.protocol === "https:" || window.location.hostname === "localhost";
+    console.log("[PWA] Secure context (HTTPS):", isSecure);
+    
+    // Check service worker
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.ready.then((reg) => {
+        console.log("[PWA] Service worker ready:", reg.active?.state);
+      });
+    } else {
+      console.warn("[PWA] Service worker not supported");
+    }
 
     if (dismissed || isStandalone) {
+      console.log("[PWA] Not showing prompt - dismissed or standalone");
+      return;
+    }
+    
+    if (!isSecure) {
+      console.warn("[PWA] Not showing prompt - not HTTPS (required for install)");
       return;
     }
 
     const handler = (e: Event) => {
+      console.log("[PWA] beforeinstallprompt event fired!");
       // Prevent the mini-infobar from appearing on mobile
       e.preventDefault();
       // Save the event so it can be triggered later
@@ -31,11 +56,13 @@ export const PwaInstallPrompt: React.FC = () => {
       
       // Show our custom prompt after a short delay
       setTimeout(() => {
+        console.log("[PWA] Showing install prompt");
         setShowPrompt(true);
       }, 2000); // 2 second delay after page load
     };
 
     window.addEventListener("beforeinstallprompt", handler);
+    console.log("[PWA] Listening for beforeinstallprompt event");
 
     return () => {
       window.removeEventListener("beforeinstallprompt", handler);
