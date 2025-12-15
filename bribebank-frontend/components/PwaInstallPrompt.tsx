@@ -78,8 +78,7 @@ export const PwaInstallPrompt: React.FC = () => {
   }
 
   return (
-    return (
-      <div className="fixed inset-0 bg-black/60 z-[100] flex items-end sm:items-center justify-center p-4 animate-in fade-in duration-300">
+    <div className="fixed inset-0 bg-black/60 z-[100] flex items-end sm:items-center justify-center p-4 animate-in fade-in duration-300">
         <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in slide-in-from-bottom-4 sm:slide-in-from-bottom-0 duration-300">
           {/* Header */}
           <div className="bg-gradient-to-r from-indigo-600 to-purple-600 p-6 text-white relative">
@@ -159,15 +158,4 @@ export const PwaInstallPrompt: React.FC = () => {
         </div>
       </div>
     );
-  }
-
-  // Show manual install guide if event hasn't fired
-  if (!showManualGuide) {
-    return null;
-  }
-
-  return (
-      </div>
-    </div>
-  );
 };

@@ -3,12 +3,14 @@ import { AssignedPrize, PrizeStatus, PrizeTemplate, User, PrizeType, HistoryEven
 import { storageService } from '../services/storageService';
 import { API_BASE } from "../config";
 import { PrizeCard } from './PrizeCard';
-import { History, Ticket, Bell, X, CheckCircle, XCircle, ListTodo, Play, Trash2, ThumbsUp, ThumbsDown, gift, ShoppingBag, Link as LinkIcon, Image as ImageIcon, Settings, User as UserIcon } from 'lucide-react';
+import { History, Ticket, Bell, X, CheckCircle, XCircle, ListTodo, Play, Trash2, ThumbsUp, ThumbsDown, gift, ShoppingBag, Link as LinkIcon, Image as ImageIcon, Settings, User as UserIcon, Search } from 'lucide-react';
 import { SseEvent } from "../types/sseEvents";
 
 interface WalletViewProps {
   currentUser: User;
   initialTab?: "wallet" | "tasks" | "history";
+  desktopShowNotifications?: boolean;
+  onDesktopNotificationsToggle?: () => void;
 }
 
 type WalletTab = "wallet" | "tasks" | "store" | "history";
@@ -28,7 +30,7 @@ interface GroupedPrize {
     assignedBy: string;
 }
 
-export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab }) => {
+export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab, desktopShowNotifications, onDesktopNotificationsToggle }) => {
   const [tab, setTab] = useState<WalletTab>(() => {
     return initialTab ?? getWalletTabFromUrl() ?? "wallet";
   }); 
@@ -55,6 +57,7 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab 
   // UI State
   const [showNotifications, setShowNotifications] = useState(false);
   const [showAccountSettings, setShowAccountSettings] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
 
   // Account Settings State
   const [settingsName, setSettingsName] = useState(currentUser.name);
@@ -554,22 +557,157 @@ const groupedPrizes: GroupedPrize[] = Object.values(
   }, {} as Record<string, GroupedPrize>)
 );
 
+  // Filter rewards by search term
+  const filteredGroupedPrizes = searchTerm.trim()
+    ? groupedPrizes.filter(group => 
+        group.template.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        group.template.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        group.assignedBy.toLowerCase().includes(searchTerm.toLowerCase())
+      )
+    : groupedPrizes;
+
 
   // Active Bounties
   const activeBounties = myBounties.filter(b => b.status !== BountyStatus.VERIFIED);
 
+  // Filter tasks by search term
+  const filteredActiveBounties = searchTerm.trim()
+    ? activeBounties.filter(b => {
+        const template = bountyTemplates.find(t => t.id === b.bountyTemplateId);
+        if (!template) return false;
+        return template.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+               template.description?.toLowerCase().includes(searchTerm.toLowerCase());
+      })
+    : activeBounties;
+
+  // Filter store items by search term
+  const filteredStoreItems = searchTerm.trim()
+    ? storeItems.filter(item =>
+        item.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        item.description?.toLowerCase().includes(searchTerm.toLowerCase())
+      )
+    : storeItems;
+
   return (
-    <div className="pb-24 relative">
-      {toast && (
-          <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-[60] w-[90%] max-w-sm">
-              <div className="bg-gray-900 text-white px-4 py-3 rounded-xl shadow-xl flex items-center gap-3 animate-fade-in-down">
-                  <div className="bg-indigo-500 p-1 rounded-full"><CheckCircle size={16}/></div>
-                  <p className="text-sm font-medium">{toast.message}</p>
-              </div>
+    <div className="pb-24 lg:pb-0 relative lg:flex lg:min-h-screen">
+      {/* Desktop Sidebar */}
+      <aside className="hidden lg:flex lg:flex-col lg:w-80 lg:fixed lg:top-16 lg:bottom-0 lg:bg-gradient-to-b lg:from-indigo-600 lg:to-purple-700">
+        <div className="p-6 border-b border-white/20">
+          <div className="flex items-center gap-4 mb-6">
+            <div className={`w-16 h-16 rounded-full ${currentUser.avatarColor} shadow-lg border-4 border-white/30 flex items-center justify-center text-white text-2xl font-bold cursor-pointer hover:scale-110 transition-transform`}
+              onClick={handleOpenAccountSettings}
+              title="Account Settings"
+            >
+              {currentUser.name.charAt(0)}
+            </div>
+            <div>
+              <h1 className="text-xl font-bold text-white">Hi, {currentUser.name}!</h1>
+              <p className="text-indigo-100 text-sm">My Wallet</p>
+            </div>
           </div>
+          
+          {/* Ticket Balance */}
+          <div className="bg-white/20 backdrop-blur-sm px-4 py-3 rounded-2xl flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Ticket size={20} className="text-white" />
+              <span className="text-white font-medium">Tickets</span>
+            </div>
+            <span className="text-white text-2xl font-bold">{ticketBalance}</span>
+          </div>
+        </div>
+        
+        <nav className="flex-1 p-4 space-y-2">
+          {[
+            { id: 'wallet', label: 'Rewards', icon: Ticket },
+            { id: 'tasks', label: 'Tasks', icon: ListTodo, badge: activeBounties.length },
+            { id: 'store', label: 'Store', icon: ShoppingBag },
+            { id: 'history', label: 'History', icon: History }
+          ].map(t => (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id as WalletTab)}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${tab === t.id ? 'bg-white text-indigo-600 shadow-lg' : 'text-white hover:bg-white/10'}`}
+            >
+              <t.icon size={20} />
+              <span className="font-semibold">{t.label}</span>
+              {t.badge && t.badge > 0 && (
+                <span className={`ml-auto min-w-[24px] h-6 flex items-center justify-center text-xs font-bold rounded-full px-2 ${tab === t.id ? 'bg-indigo-600 text-white' : 'bg-white/20 text-white'}`}>
+                  {t.badge}
+                </span>
+              )}
+            </button>
+          ))}
+        </nav>
+        
+        <div className="p-4 border-t border-white/20">
+          <button onClick={handleOpenAccountSettings} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-white hover:bg-white/10 transition-colors">
+            <Settings size={20} />
+            <span className="font-semibold">Settings</span>
+          </button>
+        </div>
+      </aside>
+
+      {/* Main Content */}
+      <div className="lg:ml-80 flex-1 lg:bg-gray-50">
+        {/* Toast */}
+        {toast && (
+            <div className="fixed top-4 left-1/2 lg:left-[calc(50%+10rem)] transform -translate-x-1/2 z-[60] w-[90%] max-w-sm">
+                <div className="bg-gray-900 text-white px-4 py-3 rounded-xl shadow-xl flex items-center gap-3 animate-fade-in-down">
+                    <div className="bg-indigo-500 p-1 rounded-full"><CheckCircle size={16}/></div>
+                    <p className="text-sm font-medium">{toast.message}</p>
+                </div>
+            </div>
+        )}
+
+      {/* Notification Panel - Global */}
+      {(showNotifications || desktopShowNotifications) && (
+        <div className="fixed inset-0 bg-black/20 z-[60] lg:bg-transparent" onClick={() => {
+          if (window.innerWidth < 1024) {
+            setShowNotifications(false);
+          } else {
+            onDesktopNotificationsToggle?.();
+          }
+        }}>
+          <div 
+            className="absolute right-4 top-20 lg:right-8 lg:top-24 w-80 bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden animate-fade-in"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-3 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+              <h3 className="font-bold text-sm text-gray-700">Notifications</h3>
+              <div className="flex gap-2">
+                {notifications.length > 0 && (
+                  <button onClick={handleClearAllNotifications} className="text-xs text-indigo-600 font-semibold hover:text-indigo-800">Clear All</button>
+                )}
+                <button onClick={() => {
+                  if (window.innerWidth < 1024) {
+                    setShowNotifications(false);
+                  } else {
+                    onDesktopNotificationsToggle?.();
+                  }
+                }} className="text-gray-400 hover:text-gray-600"><X size={16}/></button>
+              </div>
+            </div>
+            <div className="max-h-64 overflow-y-auto p-2">
+              {notifications.length === 0 ? (
+                <div className="text-center py-8 text-gray-400">
+                  <Bell className="mx-auto mb-2 opacity-20" size={24} />
+                  <p className="text-sm italic">No new alerts</p>
+                </div>
+              ) : (
+                notifications.map(note => (
+                  <div key={note.id} className="p-3 mb-1 bg-white hover:bg-gray-50 rounded-xl border border-gray-100 transition-colors relative group">
+                    <p className="text-sm text-gray-800 pr-6">{note.message}</p>
+                    <p className="text-xs text-gray-400 mt-1">{new Date(note.timestamp).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}</p>
+                    <button onClick={(e) => { e.stopPropagation(); handleDismissNotification(note.id); }} className="absolute top-2 right-2 text-gray-300 hover:text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity"><X size={14}/></button>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
-      <header className="bg-white sticky top-0 z-50 px-6 py-4 shadow-sm mb-4">
+      <header className="bg-white sticky top-0 z-50 px-6 py-4 shadow-sm mb-4 lg:hidden">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
              <div 
@@ -592,54 +730,22 @@ const groupedPrizes: GroupedPrize[] = Object.values(
               <span className="text-white font-bold text-sm">{ticketBalance}</span>
             </div>
 
-            <div className="relative">
-                <button 
-                    onClick={() => setShowNotifications(!showNotifications)} 
-                    className="relative p-2 text-gray-600 hover:bg-gray-100 rounded-full transition-colors"
-                >
-                    <Bell size={24} />
-                    {notifications.length > 0 && (
-                        <span className="absolute top-1 right-1 w-3 h-3 bg-red-500 rounded-full border-2 border-white flex items-center justify-center">
-                           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                        </span>
-                    )}
-                </button>
-                
-                {showNotifications && (
-                    <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden z-50 animate-fade-in">
-                        <div className="p-3 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-                            <h3 className="font-bold text-sm text-gray-700">Notifications</h3>
-                            <div className="flex gap-2">
-                                {notifications.length > 0 && (
-                                    <button onClick={handleClearAllNotifications} className="text-xs text-indigo-600 font-semibold hover:text-indigo-800">Clear All</button>
-                                )}
-                                <button onClick={() => setShowNotifications(false)} className="text-gray-400 hover:text-gray-600"><X size={16}/></button>
-                            </div>
-                        </div>
-                        <div className="max-h-64 overflow-y-auto p-2">
-                            {notifications.length === 0 ? (
-                                <div className="text-center py-8 text-gray-400">
-                                    <Bell className="mx-auto mb-2 opacity-20" size={24} />
-                                    <p className="text-sm italic">No new alerts</p>
-                                </div>
-                            ) : (
-                                notifications.map(note => (
-                                    <div key={note.id} className="p-3 mb-1 bg-white hover:bg-gray-50 rounded-xl border border-gray-100 transition-colors relative group">
-                                        <p className="text-sm text-gray-800 pr-6">{note.message}</p>
-                                        <p className="text-xs text-gray-400 mt-1">{new Date(note.timestamp).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}</p>
-                                        <button onClick={(e) => { e.stopPropagation(); handleDismissNotification(note.id); }} className="absolute top-2 right-2 text-gray-300 hover:text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity"><X size={14}/></button>
-                                    </div>
-                                ))
-                            )}
-                        </div>
-                    </div>
-                )}
-            </div>
+            <button 
+              onClick={() => setShowNotifications(!showNotifications)} 
+              className="relative p-2 text-gray-600 hover:bg-gray-100 rounded-full transition-colors"
+            >
+              <Bell size={24} />
+              {notifications.length > 0 && (
+                <span className="absolute top-1 right-1 w-3 h-3 bg-red-500 rounded-full border-2 border-white flex items-center justify-center">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                </span>
+              )}
+            </button>
           </div>
         </div>
       </header>
 
-      <div className="flex px-4 mb-6 gap-2">
+      <div className="flex px-4 mb-6 gap-2 lg:hidden">
         <button onClick={() => setTab('wallet')} className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-bold transition-colors ${tab === 'wallet' ? 'bg-gray-900 text-white' : 'bg-white text-gray-600'}`}><Ticket size={16} /> Rewards</button>
         <button onClick={() => setTab('tasks')} className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-bold transition-colors relative ${tab === 'tasks' ? 'bg-gray-900 text-white' : 'bg-white text-gray-600'}`}>
             <ListTodo size={16} /> Tasks
@@ -649,31 +755,97 @@ const groupedPrizes: GroupedPrize[] = Object.values(
         <button onClick={() => setTab('history')} className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-bold transition-colors ${tab === 'history' ? 'bg-gray-900 text-white' : 'bg-white text-gray-600'}`}><History size={16} /> History</button>
       </div>
 
-      <div className="px-4 space-y-4">
+      {/* Desktop Header */}
+      <div className="hidden lg:block bg-white border-b border-gray-200 px-8 py-6">
+        <h2 className="text-2xl font-bold text-gray-800">
+          {tab === 'wallet' && 'My Rewards'}
+          {tab === 'tasks' && 'My Tasks'}
+          {tab === 'store' && 'Store & Prizes'}
+          {tab === 'history' && 'Activity History'}
+        </h2>
+        <p className="text-sm text-gray-500 mt-1">
+          {tab === 'wallet' && 'View and redeem your available rewards'}
+          {tab === 'tasks' && 'Manage your assigned tasks and bounties'}
+          {tab === 'store' && 'Shop for items and spin the prize wheel'}
+          {tab === 'history' && 'Review your past activities and rewards'}
+        </p>
+        
+        {/* Search Bar - Desktop - Show only on wallet, tasks, and store tabs */}
+        {(tab === 'wallet' || tab === 'tasks' || tab === 'store') && (
+          <div className="mt-4">
+            <div className="relative max-w-md">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder={tab === 'wallet' ? 'Search rewards...' : tab === 'tasks' ? 'Search tasks...' : 'Search store items...'}
+                className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              />
+              {searchTerm && (
+                <button
+                  onClick={() => setSearchTerm('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                >
+                  <X size={18} />
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Search Bar - Mobile - Show only on wallet, tasks, and store tabs */}
+      {(tab === 'wallet' || tab === 'tasks' || tab === 'store') && (
+        <div className="px-4 mb-4 lg:hidden">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder={tab === 'wallet' ? 'Search rewards...' : tab === 'tasks' ? 'Search tasks...' : 'Search store items...'}
+              className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+            />
+            {searchTerm && (
+              <button
+                onClick={() => setSearchTerm('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              >
+                <X size={18} />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="px-4 lg:px-8 lg:py-6 lg:max-w-6xl lg:mx-auto">
         {tab === 'wallet' && (
           <>
-            {groupedPrizes.length === 0 ? (
+            {filteredGroupedPrizes.length === 0 ? (
               <div className="text-center py-16 opacity-60">
                 <span className="text-6xl mb-4 block">😕</span>
-                <h3 className="text-lg font-bold text-gray-800">No rewards yet</h3>
-                <p className="text-sm text-gray-500 mt-1">Ask for more tasks!</p>
+                <h3 className="text-lg font-bold text-gray-800">{searchTerm ? 'No matching rewards' : 'No rewards yet'}</h3>
+                <p className="text-sm text-gray-500 mt-1">{searchTerm ? 'Try a different search term' : 'Ask for more tasks!'}</p>
               </div>
             ) : (
-              groupedPrizes.map(group => (
-                <div key={`${group.templateId}-${group.status}`} className="relative">
-                    <PrizeCard
-                    {...group.template}
-                    status={group.status}
-                    count={group.count}
-                    actionLabel={group.status === PrizeStatus.AVAILABLE ? "Use Card" : "Waiting..."}
-                    onClick={group.status === PrizeStatus.AVAILABLE ? () => handleClaim(group.ids[0]) : undefined}
-                    disabled={group.status === PrizeStatus.PENDING_APPROVAL}
-                    />
-                    {group.status === PrizeStatus.AVAILABLE && (
-                        <div className="text-xs text-gray-400 text-center mt-1 mb-2">Assigned by {group.assignedBy}</div>
-                    )}
-                </div>
-              ))
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {filteredGroupedPrizes.map(group => (
+                  <div key={`${group.templateId}-${group.status}`} className="relative">
+                      <PrizeCard
+                      {...group.template}
+                      status={group.status}
+                      count={group.count}
+                      actionLabel={group.status === PrizeStatus.AVAILABLE ? "Use Card" : "Waiting..."}
+                      onClick={group.status === PrizeStatus.AVAILABLE ? () => handleClaim(group.ids[0]) : undefined}
+                      disabled={group.status === PrizeStatus.PENDING_APPROVAL}
+                      />
+                      {group.status === PrizeStatus.AVAILABLE && (
+                          <div className="text-xs text-gray-400 text-center mt-1 mb-2">Assigned by {group.assignedBy}</div>
+                      )}
+                  </div>
+                ))}
+              </div>
             )}
           </>
         )}
@@ -998,9 +1170,9 @@ const groupedPrizes: GroupedPrize[] = Object.values(
         )}
 
         {tab === 'tasks' && (
-            <div className="space-y-4">
-                {activeBounties.length === 0 && <div className="text-center py-10 text-gray-400 italic">No active tasks. Good job!</div>}
-                {activeBounties.map(b => {
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {filteredActiveBounties.length === 0 && <div className="text-center py-10 text-gray-400 italic col-span-full">{searchTerm ? 'No matching tasks found' : 'No active tasks. Good job!'}</div>}
+                {filteredActiveBounties.map(b => {
                     const t = bountyTemplates.find(temp => temp.id === b.bountyTemplateId);
                     if(!t) return null;
                     
@@ -1083,15 +1255,15 @@ const groupedPrizes: GroupedPrize[] = Object.values(
                   </button>
                 )}
                 
-                {storeItems.length === 0 ? (
+                {filteredStoreItems.length === 0 ? (
                     <div className="text-center py-16 opacity-60">
                         <ShoppingBag size={64} className="mx-auto mb-4 text-gray-300" />
-                        <h3 className="text-lg font-bold text-gray-800">Store is Empty</h3>
-                        <p className="text-sm text-gray-500 mt-1">No items available yet</p>
+                        <h3 className="text-lg font-bold text-gray-800">{searchTerm ? 'No matching items' : 'Store is Empty'}</h3>
+                        <p className="text-sm text-gray-500 mt-1">{searchTerm ? 'Try a different search term' : 'No items available yet'}</p>
                     </div>
                 ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        {storeItems.map((item) => (
+                        {filteredStoreItems.map((item) => (
                             <div
                                 key={item.id}
                                 className="bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-100 hover:shadow-md transition-shadow"
@@ -1184,6 +1356,7 @@ const groupedPrizes: GroupedPrize[] = Object.values(
                 ))}
             </div>
         )}
+      </div>
       </div>
     </div>
   );

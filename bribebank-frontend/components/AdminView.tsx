@@ -12,6 +12,8 @@ interface AdminViewProps {
   currentUser: User;
   initialTab?: string;
   onUserUpdate?: () => void;
+  desktopShowNotifications?: boolean;
+  onDesktopNotificationsToggle?: () => void;
 }
 
 const QUICK_EMOJI_OPTIONS = ['🎁', '🧹', '🍕', '💵', '📱'];
@@ -29,7 +31,7 @@ const PASTEL_COLORS = [
     'bg-gray-100 text-gray-800 border-gray-200',
 ];
 
-export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, onUserUpdate }) => {
+export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, onUserUpdate, desktopShowNotifications, onDesktopNotificationsToggle }) => {
   const [tab, setTab] = useState<'assign' | 'approvals' | 'create' | 'users' | 'store'>('assign');
   const [assignSubTab, setAssignSubTab] = useState<'rewards' | 'bounties' | 'tickets'>('rewards');
 
@@ -56,7 +58,9 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, o
   const [storeItemCost, setStoreItemCost] = useState('');
   const [storeItemImage, setStoreItemImage] = useState('');
   const [storeItemLink, setStoreItemLink] = useState('');
+  const [storeItemDescription, setStoreItemDescription] = useState('');
   const [editingStoreItemId, setEditingStoreItemId] = useState<string | null>(null);
+  const [showStoreItemModal, setShowStoreItemModal] = useState(false);
   
   // Create Template State
   const [createMode, setCreateMode] = useState<'reward' | 'bounty'>('reward');
@@ -297,7 +301,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, o
   const resetForms = () => {
     setPrizeTitle(''); setPrizeDesc(''); setPrizeEmoji('🎁'); setPrizeColor(PASTEL_COLORS[6]);
     setBountyTitle(''); setBountyRewardType('CUSTOM'); setBountyRewardValue(''); setBountyEmoji('🧹'); setBountyFCFS(false); setBountyColor(PASTEL_COLORS[6]);
-    setStoreItemTitle(''); setStoreItemCost(''); setStoreItemImage(''); setStoreItemLink('');
+    setStoreItemTitle(''); setStoreItemCost(''); setStoreItemImage(''); setStoreItemLink(''); setStoreItemDescription('');
     setEditingId(null);
     setEditingStoreItemId(null);
     setTicketAmount('');
@@ -803,6 +807,22 @@ const handleBulkAssign = async () => {
   };
 
   // Store Item Management
+  const handleOpenStoreItemModal = (item?: StoreItem) => {
+    if (item) {
+      // Editing existing item
+      setEditingStoreItemId(item.id);
+      setStoreItemTitle(item.title);
+      setStoreItemCost(item.cost.toString());
+      setStoreItemImage(item.imageUrl || '');
+      setStoreItemLink(item.productUrl || '');
+      setStoreItemDescription(item.description || '');
+    } else {
+      // Adding new item
+      resetForms();
+    }
+    setShowStoreItemModal(true);
+  };
+
   const handleSaveStoreItem = async () => {
     try {
       if (!storeItemTitle || !storeItemCost) {
@@ -821,12 +841,14 @@ const handleBulkAssign = async () => {
         familyId: currentUser.familyId,
         title: storeItemTitle,
         cost,
+        description: storeItemDescription || undefined,
         imageUrl: storeItemImage || undefined,
         productUrl: storeItemLink || undefined,
       };
 
       await storageService.saveStoreItem(item);
       showToast("Store item saved!", "success");
+      setShowStoreItemModal(false);
       resetForms();
       await refreshData();
     } catch (err) {
@@ -836,11 +858,7 @@ const handleBulkAssign = async () => {
   };
 
   const handleEditStoreItem = (item: StoreItem) => {
-    setEditingStoreItemId(item.id);
-    setStoreItemTitle(item.title);
-    setStoreItemCost(item.cost.toString());
-    setStoreItemImage(item.imageUrl || '');
-    setStoreItemLink(item.productUrl || '');
+    handleOpenStoreItemModal(item);
   };
 
   const handleDeleteStoreItem = async (id: string) => {
@@ -929,6 +947,10 @@ const handleBulkAssign = async () => {
 
   const filteredTemplates = templates.filter(t => t.title.toLowerCase().includes(searchTerm.toLowerCase()));
   const filteredBounties = bountyTemplates.filter(b => b.title.toLowerCase().includes(searchTerm.toLowerCase()));
+  const filteredStoreItems = storeItems.filter(item => 
+    item.title.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    (item.description?.toLowerCase().includes(searchTerm.toLowerCase()) ?? false)
+  );
 
   // IconPicker helper
   const IconPicker: React.FC<{
@@ -978,16 +1000,50 @@ const handleBulkAssign = async () => {
       : [];
 
   return (
-    <div className="pb-24 relative min-h-screen">
-      {/* Toast */}
-      {toast && (
-          <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-[60] w-[90%] max-w-sm animate-bounce-in">
-              <div className={`px-4 py-3 rounded-xl shadow-xl flex items-center gap-3 text-white ${toast.type === 'success' ? 'bg-gray-900' : 'bg-red-500'}`}>
-                  {toast.type === 'success' ? <CheckCircle size={16} className="text-green-400"/> : <AlertCircle size={16}/>}
-                  <p className="text-sm font-bold">{toast.message}</p>
-              </div>
-          </div>
-      )}
+    <div className="pb-24 lg:pb-0 relative min-h-screen lg:flex">
+      {/* Desktop Sidebar */}
+      <aside className="hidden lg:flex lg:flex-col lg:w-64 lg:fixed lg:top-16 lg:bottom-0 lg:bg-white lg:border-r lg:border-gray-200">
+        <div className="p-6 border-b border-gray-200">
+          <h1 className="text-2xl font-bold text-gray-800">Admin</h1>
+          <p className="text-sm text-gray-500 mt-1">Dashboard</p>
+        </div>
+        
+        <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
+          {[
+            { id: 'assign', label: 'Assign', icon: Send },
+            { id: 'approvals', label: 'Approvals', icon: CheckCircle, badge: totalPending },
+            { id: 'create', label: 'Create', icon: Plus },
+            { id: 'store', label: 'Store', icon: ShoppingBag },
+            { id: 'users', label: 'Family', icon: UserIcon }
+          ].map(t => (
+            <button
+              key={t.id}
+              onClick={() => { setTab(t.id as any); resetForms(); }}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${tab === t.id ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-600 hover:bg-gray-100'}`}
+            >
+              <t.icon size={20} />
+              <span className="font-semibold">{t.label}</span>
+              {t.badge && t.badge > 0 && (
+                <span className={`ml-auto min-w-[24px] h-6 flex items-center justify-center text-xs font-bold rounded-full px-2 ${tab === t.id ? 'bg-white text-indigo-600' : 'bg-red-500 text-white'}`}>
+                  {t.badge}
+                </span>
+              )}
+            </button>
+          ))}
+        </nav>
+      </aside>
+
+      {/* Main Content */}
+      <div className="lg:ml-64 flex-1">
+        {/* Toast */}
+        {toast && (
+            <div className="fixed top-4 left-1/2 lg:left-[calc(50%+8rem)] transform -translate-x-1/2 z-[60] w-[90%] max-w-sm animate-bounce-in">
+                <div className={`px-4 py-3 rounded-xl shadow-xl flex items-center gap-3 text-white ${toast.type === 'success' ? 'bg-gray-900' : 'bg-red-500'}`}>
+                    {toast.type === 'success' ? <CheckCircle size={16} className="text-green-400"/> : <AlertCircle size={16}/>}
+                    <p className="text-sm font-bold">{toast.message}</p>
+                </div>
+            </div>
+        )}
 
       {emojiPickerTarget && (
         <div
@@ -1167,7 +1223,7 @@ const handleBulkAssign = async () => {
               <div className="space-y-2 mb-4">
                 {editWheelSegments.map((seg, i) => (
                   <div key={i} className="flex gap-2 items-center bg-gray-50 p-2 rounded-lg">
-                    <span className="text-gray-500 font-mono text-sm w-8">{i + 1}.</span>
+                    <span className="text-gray-500 font-mono text-xs sm:text-sm w-6 sm:w-8 flex-shrink-0">{i + 1}.</span>
                     <input
                       type="text"
                       value={seg.label}
@@ -1176,12 +1232,12 @@ const handleBulkAssign = async () => {
                         updated[i].label = e.target.value;
                         setEditWheelSegments(updated);
                       }}
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg bg-white"
+                      className="flex-1 min-w-0 px-2 sm:px-3 py-2 border border-gray-300 rounded-lg bg-white text-sm"
                       placeholder="Prize name"
                     />
                     <button
                       onClick={() => setEditWheelSegments(editWheelSegments.filter((_, idx) => idx !== i))}
-                      className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                      className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors flex-shrink-0"
                       disabled={editWheelSegments.length <= 1}
                       title="Remove segment"
                     >
@@ -1215,6 +1271,118 @@ const handleBulkAssign = async () => {
               <button onClick={handleSaveWheel} className="flex-1 py-3 bg-gradient-to-r from-purple-500 to-pink-600 text-white rounded-xl font-bold hover:scale-[1.02] transition-transform">
                 Save Wheel
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Store Item Modal */}
+      {showStoreItemModal && (
+        <div
+          className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4"
+          onClick={() => {
+            setShowStoreItemModal(false);
+            resetForms();
+          }}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 text-white p-6 rounded-t-2xl">
+              <div className="flex items-center gap-3">
+                <div className="bg-white/20 p-3 rounded-2xl">
+                  <ShoppingBag size={28} />
+                </div>
+                <h2 className="text-2xl font-bold">
+                  {editingStoreItemId ? 'Edit Store Item' : 'Add Store Item'}
+                </h2>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Item Title *</label>
+                <input
+                  type="text"
+                  value={storeItemTitle}
+                  onChange={(e) => setStoreItemTitle(e.target.value)}
+                  placeholder="e.g. LEGO Star Wars Set"
+                  className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Ticket Cost *</label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min="1"
+                    value={storeItemCost}
+                    onChange={(e) => setStoreItemCost(e.target.value)}
+                    placeholder="e.g. 50"
+                    className="w-full p-3 pl-10 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none"
+                  />
+                  <Ticket size={20} className="absolute left-3 top-3.5 text-purple-400" />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
+                <textarea
+                  value={storeItemDescription}
+                  onChange={(e) => setStoreItemDescription(e.target.value)}
+                  placeholder="Optional description for the item..."
+                  rows={3}
+                  className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none resize-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Image URL</label>
+                <div className="relative">
+                  <input
+                    type="url"
+                    value={storeItemImage}
+                    onChange={(e) => setStoreItemImage(e.target.value)}
+                    placeholder="https://..."
+                    className="w-full p-3 pl-10 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none"
+                  />
+                  <ImageIcon size={20} className="absolute left-3 top-3.5 text-gray-400" />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Product Link</label>
+                <div className="relative">
+                  <input
+                    type="url"
+                    value={storeItemLink}
+                    onChange={(e) => setStoreItemLink(e.target.value)}
+                    placeholder="https://..."
+                    className="w-full p-3 pl-10 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none"
+                  />
+                  <Linkicon size={20} className="absolute left-3 top-3.5 text-gray-400" />
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <button
+                  onClick={() => {
+                    setShowStoreItemModal(false);
+                    resetForms();
+                  }}
+                  className="flex-1 py-3 border border-gray-300 rounded-xl hover:bg-gray-50 transition-colors font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveStoreItem}
+                  className="flex-1 py-3 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 text-white rounded-xl font-bold hover:scale-[1.02] transition-transform shadow-lg"
+                >
+                  {editingStoreItemId ? 'Update Item' : 'Add to Store'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1351,51 +1519,67 @@ const handleBulkAssign = async () => {
         </div>
       )}
 
-      <header className="bg-white sticky top-0 z-50 shadow-sm px-6 py-4 flex justify-between items-center">
+      {/* Notification Panel - Global */}
+      {(showNotifications || desktopShowNotifications) && (
+        <div className="fixed inset-0 bg-black/20 z-[60] lg:bg-transparent" onClick={() => {
+          if (window.innerWidth < 1024) {
+            setShowNotifications(false);
+          } else {
+            onDesktopNotificationsToggle?.();
+          }
+        }}>
+          <div 
+            className="absolute right-4 top-20 lg:right-8 lg:top-24 w-80 bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-3 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+              <h3 className="font-bold text-sm text-gray-700">Notifications</h3>
+              <div className="flex gap-2">
+                {notifications.length > 0 && (
+                  <button onClick={handleClearAllNotifications} className="text-xs text-indigo-600 font-semibold hover:text-indigo-800">Clear All</button>
+                )}
+                <button onClick={() => {
+                  if (window.innerWidth < 1024) {
+                    setShowNotifications(false);
+                  } else {
+                    onDesktopNotificationsToggle?.();
+                  }
+                }} className="text-gray-400 hover:text-gray-600"><X size={16}/></button>
+              </div>
+            </div>
+            <div className="max-h-64 overflow-y-auto p-2">
+              {notifications.length === 0 ? (
+                <p className="text-center text-gray-400 text-sm py-4">No new notifications</p>
+              ) : (
+                notifications.map(note => (
+                  <div key={note.id} className="p-3 mb-1 bg-white hover:bg-gray-50 rounded-xl border border-gray-100 transition-colors relative group">
+                    <p className="text-sm text-gray-800 pr-6">{note.message}</p>
+                    <p className="text-xs text-gray-400 mt-1">{new Date(note.timestamp).toLocaleTimeString()}</p>
+                    <button onClick={(e) => { e.stopPropagation(); handleDismissNotification(note.id); }} className="absolute top-2 right-2 text-gray-300 hover:text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity"><X size={14}/></button>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <header className="bg-white sticky top-0 z-50 shadow-sm px-6 py-4 flex justify-between items-center lg:hidden">
         <h2 className="text-2xl font-bold text-gray-800">Admin Dashboard</h2>
         <div className="flex items-center gap-3">
             {totalPending > 0 && (
             <span className="bg-amber-100 text-amber-800 text-xs font-bold px-3 py-1 rounded-full animate-pulse">{totalPending} Pending</span>
             )}
             
-            <div className="relative">
-                <button onClick={() => setShowNotifications(!showNotifications)} className="relative p-2 text-gray-600 hover:bg-gray-100 rounded-full transition-colors">
-                    <Bell size={24} />
-                    {notifications.length > 0 && <span className="absolute top-1 right-1 w-3 h-3 bg-red-500 rounded-full border-2 border-white"></span>}
-                </button>
-                
-                {showNotifications && (
-                    <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden z-50">
-                        <div className="p-3 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-                            <h3 className="font-bold text-sm text-gray-700">Notifications</h3>
-                            <div className="flex gap-2">
-                                {notifications.length > 0 && (
-                                    <button onClick={handleClearAllNotifications} className="text-xs text-indigo-600 font-semibold hover:text-indigo-800">Clear All</button>
-                                )}
-                                <button onClick={() => setShowNotifications(false)} className="text-gray-400 hover:text-gray-600"><X size={16}/></button>
-                            </div>
-                        </div>
-                        <div className="max-h-64 overflow-y-auto p-2">
-                            {notifications.length === 0 ? (
-                                <p className="text-center text-gray-400 text-sm py-4">No new notifications</p>
-                            ) : (
-                                notifications.map(note => (
-                                    <div key={note.id} className="p-3 mb-1 bg-white hover:bg-gray-50 rounded-xl border border-gray-100 transition-colors relative group">
-                                        <p className="text-sm text-gray-800 pr-6">{note.message}</p>
-                                        <p className="text-xs text-gray-400 mt-1">{new Date(note.timestamp).toLocaleTimeString()}</p>
-                                        <button onClick={(e) => { e.stopPropagation(); handleDismissNotification(note.id); }} className="absolute top-2 right-2 text-gray-300 hover:text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity"><X size={14}/></button>
-                                    </div>
-                                ))
-                            )}
-                        </div>
-                    </div>
-                )}
-            </div>
+            <button onClick={() => setShowNotifications(!showNotifications)} className="relative p-2 text-gray-600 hover:bg-gray-100 rounded-full transition-colors">
+              <Bell size={24} />
+              {notifications.length > 0 && <span className="absolute top-1 right-1 w-3 h-3 bg-red-500 rounded-full border-2 border-white"></span>}
+            </button>
         </div>
       </header>
 
-      {/* Main Tabs */}
-      <div className="flex p-4 gap-2 justify-around">
+      {/* Mobile Tabs */}
+      <div className="flex p-4 gap-2 justify-around lg:hidden">
         {[
             { id: 'assign', label: 'Assign', icon: Send },
             { id: 'approvals', label: `${totalPending}`, fullLabel: 'Approvals', icon: CheckCircle },
@@ -1422,7 +1606,34 @@ const handleBulkAssign = async () => {
         ))}
       </div>
 
-      <div className="px-4">
+      {/* Desktop Header */}
+      <div className="hidden lg:block bg-white border-b border-gray-200 px-8 py-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-2xl font-bold text-gray-800">
+              {tab === 'assign' && 'Assign Rewards & Tasks'}
+              {tab === 'approvals' && 'Pending Approvals'}
+              {tab === 'create' && 'Create Templates'}
+              {tab === 'store' && 'Store Management'}
+              {tab === 'users' && 'Family Members'}
+            </h2>
+            <p className="text-sm text-gray-500 mt-1">
+              {tab === 'assign' && 'Distribute rewards, tasks, and tickets to family members'}
+              {tab === 'approvals' && 'Review and approve pending requests'}
+              {tab === 'create' && 'Build reward and task templates'}
+              {tab === 'store' && 'Manage store items and prize wheel'}
+              {tab === 'users' && 'Manage family members and settings'}
+            </p>
+          </div>
+          {totalPending > 0 && tab !== 'approvals' && (
+            <span className="bg-amber-100 text-amber-800 text-sm font-bold px-4 py-2 rounded-full">
+              {totalPending} Pending
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div className="px-4 lg:px-8 lg:py-6 lg:max-w-7xl lg:mx-auto">
         {tab === 'assign' && (
           <>
             {/* Sub Tabs */}
@@ -2195,99 +2406,52 @@ const handleBulkAssign = async () => {
                   <Settings size={24} />
                 </button>
                 
-                <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
-                    <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
-                        <ShoppingBag size={24} />
-                        {editingStoreItemId ? 'Edit' : 'Add'} Store Item
-                    </h3>
-                    <div className="space-y-4">
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">Item Title</label>
-                            <input
-                                type="text"
-                                value={storeItemTitle}
-                                onChange={(e) => setStoreItemTitle(e.target.value)}
-                                placeholder="e.g. LEGO Star Wars Set"
-                                className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none"
-                            />
-                        </div>
-
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">Ticket Cost</label>
-                            <div className="relative">
-                                <input
-                                    type="number"
-                                    min="1"
-                                    value={storeItemCost}
-                                    onChange={(e) => setStoreItemCost(e.target.value)}
-                                    placeholder="e.g. 50"
-                                    className="w-full p-3 pl-10 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none"
-                                />
-                                <Ticket size={20} className="absolute left-3 top-3.5 text-purple-400" />
-                            </div>
-                        </div>
-
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">Image URL (optional)</label>
-                            <div className="relative">
-                                <input
-                                    type="url"
-                                    value={storeItemImage}
-                                    onChange={(e) => setStoreItemImage(e.target.value)}
-                                    placeholder="https://..."
-                                    className="w-full p-3 pl-10 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none"
-                                />
-                                <ImageIcon size={20} className="absolute left-3 top-3.5 text-gray-400" />
-                            </div>
-                        </div>
-
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">Product Link (optional)</label>
-                            <div className="relative">
-                                <input
-                                    type="url"
-                                    value={storeItemLink}
-                                    onChange={(e) => setStoreItemLink(e.target.value)}
-                                    placeholder="https://..."
-                                    className="w-full p-3 pl-10 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none"
-                                />
-                                <Linkicon size={20} className="absolute left-3 top-3.5 text-gray-400" />
-                            </div>
-                        </div>
-
-                        <div className="flex gap-3 pt-2">
-                            <button
-                                onClick={handleSaveStoreItem}
-                                className="flex-1 py-3 bg-indigo-600 text-white font-bold rounded-xl shadow-lg hover:bg-indigo-700 transition-colors"
-                            >
-                                {editingStoreItemId ? 'Update Item' : 'Add to Store'}
-                            </button>
-                            {editingStoreItemId && (
-                                <button
-                                    onClick={resetForms}
-                                    className="px-6 py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors"
-                                >
-                                    Cancel
-                                </button>
-                            )}
-                        </div>
+                {/* Add Store Item Banner */}
+                <button
+                  onClick={() => handleOpenStoreItemModal()}
+                  className="w-full bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 text-white p-6 rounded-2xl shadow-xl flex items-center justify-between hover:scale-[1.02] transition-transform"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="bg-white/20 p-3 rounded-2xl">
+                      <ShoppingBag size={32} />
                     </div>
-                </div>
+                    <div className="text-left">
+                      <h3 className="text-xl font-bold">Add Store Item</h3>
+                      <p className="text-sm text-white/90">Create rewards kids can buy with tickets</p>
+                    </div>
+                  </div>
+                  <div className="bg-white/20 px-4 py-2 rounded-xl font-bold">
+                    <Plus size={20} className="inline" /> New Item
+                  </div>
+                </button>
 
                 <div>
                     <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
                         <ShoppingBag size={20}/>
                         Store Inventory ({storeItems.length} items)
                     </h3>
-                    {storeItems.length === 0 ? (
+                    
+                    {/* Search Bar */}
+                    <div className="mb-4 relative">
+                        <input 
+                            type="text" 
+                            placeholder="Search store items..."
+                            value={searchTerm}
+                            onChange={e => setSearchTerm(e.target.value)}
+                            className="w-full pl-10 pr-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-all text-gray-900 placeholder-gray-400"
+                        />
+                        <Search className="absolute left-3 top-3.5 text-gray-400" size={20}/>
+                    </div>
+                    
+                    {filteredStoreItems.length === 0 ? (
                         <div className="bg-white p-8 rounded-2xl text-center text-gray-400">
                             <ShoppingBag size={48} className="mx-auto mb-3 opacity-20" />
-                            <p className="font-medium">No items in store yet</p>
-                            <p className="text-sm">Add items above for children to purchase with tickets</p>
+                            <p className="font-medium">{searchTerm ? 'No matching items found' : 'No items in store yet'}</p>
+                            <p className="text-sm">{searchTerm ? 'Try a different search term' : 'Click "Add Store Item" above to get started'}</p>
                         </div>
                     ) : (
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            {storeItems.map((item) => (
+                            {filteredStoreItems.map((item) => (
                                 <div
                                     key={item.id}
                                     className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow"
@@ -2307,6 +2471,9 @@ const handleBulkAssign = async () => {
                                     <div className="flex justify-between items-start mb-2">
                                         <div className="flex-1">
                                             <h4 className="font-bold text-gray-800">{item.title}</h4>
+                                            {item.description && (
+                                                <p className="text-xs text-gray-500 mt-1">{item.description}</p>
+                                            )}
                                             <div className="flex items-center gap-1 mt-1">
                                                 <Ticket size={16} className="text-purple-500" />
                                                 <span className="text-lg font-bold text-purple-600">{item.cost}</span>
@@ -2441,6 +2608,7 @@ const handleBulkAssign = async () => {
                 )}
             </div>
         )}
+      </div>
       </div>
     </div>
   );

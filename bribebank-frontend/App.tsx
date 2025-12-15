@@ -5,8 +5,7 @@ import { LoginView } from "./components/LoginView";
 import { WalletView } from "./components/WalletView";
 import { AdminView } from "./components/AdminView";
 import { PwaInstallPrompt } from "./components/PwaInstallPrompt";
-import { PwaDebug } from "./components/PwaDebug";
-import { LogOut } from "lucide-react";
+import { LogOut, Wallet, Shield, ChevronDown, Bell } from "lucide-react";
 
 type View = "wallet" | "admin" | "login";
 type WalletTab = "wallet" | "tasks" | "history";
@@ -17,6 +16,8 @@ const isWalletTab = (v: string | null): v is WalletTab =>
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [view, setView] = useState<View>("login");
+  const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
 
   // allow AdminView to open a specific tab via deep-link
   const [initialAdminTab, setInitialAdminTab] = useState<string | undefined>(
@@ -151,11 +152,23 @@ const App: React.FC = () => {
       }
     };
 
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (showUserMenu && !target.closest('.user-menu-container')) {
+        setShowUserMenu(false);
+      }
+      if (showNotifications && !target.closest('.notifications-container')) {
+        setShowNotifications(false);
+      }
+    };
+
     document.addEventListener("visibilitychange", handleVisibility);
+    document.addEventListener("mousedown", handleClickOutside);
     return () => {
       document.removeEventListener("visibilitychange", handleVisibility);
+      document.removeEventListener("mousedown", handleClickOutside);
     };
-  }, [currentUser?.id]);
+  }, [currentUser?.id, showUserMenu, showNotifications]);
 
   const handleLogin = async (user: User) => {
     setCurrentUser(user);
@@ -188,20 +201,97 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen max-w-md mx-auto bg-gray-50 shadow-2xl overflow-hidden relative border-x border-gray-200">
+    <div className="min-h-screen max-w-md lg:max-w-none mx-auto bg-gray-50 shadow-2xl lg:shadow-none overflow-hidden relative border-x lg:border-x-0 border-gray-200">
       {/* PWA Install Prompt */}
       <PwaInstallPrompt />
-      
-      {/* PWA Debug Tool */}
-      <PwaDebug />
+
+      {/* Desktop Top Navigation */}
+      <header className="hidden lg:flex lg:fixed lg:top-0 lg:right-0 lg:left-0 lg:z-50 lg:bg-white lg:border-b lg:border-gray-200 lg:px-6 lg:py-3">
+        <div className="flex items-center justify-between w-full">
+          <div className="flex items-center gap-3">
+            <div className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-4 py-2 rounded-xl font-bold text-lg">
+              BribeBank
+            </div>
+          </div>
+          
+          <div className="flex items-center gap-4">
+            {currentUser.role === UserRole.ADMIN && (
+              <div className="flex items-center gap-2 bg-gray-100 rounded-xl p-1">
+                <button
+                  onClick={() => setView("wallet")}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+                    view === "wallet" ? "bg-white shadow-sm text-indigo-600" : "text-gray-600 hover:text-gray-900"
+                  }`}
+                >
+                  <Wallet size={18} />
+                  <span className="font-medium">My Wallet</span>
+                </button>
+                <button
+                  onClick={() => setView("admin")}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+                    view === "admin" ? "bg-white shadow-sm text-indigo-600" : "text-gray-600 hover:text-gray-900"
+                  }`}
+                >
+                  <Shield size={18} />
+                  <span className="font-medium">Admin</span>
+                </button>
+              </div>
+            )}
+            
+            <div className="relative notifications-container">
+              <button
+                onClick={() => setShowNotifications(!showNotifications)}
+                className="relative p-2 text-gray-600 hover:bg-gray-100 rounded-full transition-colors"
+              >
+                <Bell size={24} />
+              </button>
+            </div>
+            
+            <div className="relative user-menu-container">
+              <button
+                onClick={() => setShowUserMenu(!showUserMenu)}
+                className="flex items-center gap-3 px-4 py-2 rounded-xl hover:bg-gray-100 transition-colors"
+              >
+                <div className={`w-10 h-10 rounded-full ${currentUser.avatarColor} flex items-center justify-center text-white font-bold`}>
+                  {currentUser.name.charAt(0)}
+                </div>
+                <div className="text-left">
+                  <p className="text-sm font-bold text-gray-900">{currentUser.name}</p>
+                  <p className="text-xs text-gray-500">{currentUser.role === UserRole.ADMIN ? 'Admin' : 'Member'}</p>
+                </div>
+                <ChevronDown size={16} className="text-gray-400" />
+              </button>
+              
+              {showUserMenu && (
+                <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden z-50">
+                  <div className="p-2">
+                    <button
+                      onClick={() => {
+                        handleLogout();
+                        setShowUserMenu(false);
+                      }}
+                      className="w-full flex items-center gap-3 px-4 py-2 rounded-lg text-red-600 hover:bg-red-50 transition-colors"
+                    >
+                      <LogOut size={18} />
+                      <span className="font-medium">Log Out</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </header>
       
       {/* Content Area */}
-      <main className="h-full overflow-y-auto no-scrollbar">
+      <main className="h-full overflow-y-auto no-scrollbar lg:pt-16">
         {view === "admin" && currentUser.role === UserRole.ADMIN && (
           <AdminView 
             currentUser={currentUser} 
             initialTab={initialAdminTab}
             onUserUpdate={handleUserUpdate}
+            desktopShowNotifications={showNotifications}
+            onDesktopNotificationsToggle={() => setShowNotifications(!showNotifications)}
           />
         )}
 
@@ -209,12 +299,14 @@ const App: React.FC = () => {
           <WalletView
             currentUser={currentUser}
             initialTab={initialWalletTab}
+            desktopShowNotifications={showNotifications}
+            onDesktopNotificationsToggle={() => setShowNotifications(!showNotifications)}
           />
         )}
       </main>
 
       {/* Bottom Navigation Bar */}
-      <nav className="fixed bottom-0 max-w-md w-full bg-white border-t border-gray-200 flex justify-around items-center py-3 pb-5 z-20 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
+      <nav className="fixed bottom-0 max-w-md lg:max-w-none w-full bg-white border-t border-gray-200 flex justify-around lg:justify-center lg:gap-8 items-center py-3 pb-5 z-20 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] lg:hidden">
         {currentUser.role === UserRole.ADMIN && (
           <>
             <button
