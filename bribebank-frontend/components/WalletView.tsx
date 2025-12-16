@@ -12,6 +12,7 @@ interface WalletViewProps {
   initialTab?: "wallet" | "tasks" | "history";
   desktopShowNotifications?: boolean;
   onDesktopNotificationsToggle?: () => void;
+  onUserUpdate?: () => Promise<void>;
 }
 
 type WalletTab = "wallet" | "tasks" | "store" | "history";
@@ -31,7 +32,7 @@ interface GroupedPrize {
     assignedBy: string;
 }
 
-export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab, desktopShowNotifications, onDesktopNotificationsToggle }) => {
+export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab, desktopShowNotifications, onDesktopNotificationsToggle, onUserUpdate }) => {
   const [tab, setTab] = useState<WalletTab>(() => {
     return initialTab ?? getWalletTabFromUrl() ?? "wallet";
   }); 
@@ -68,6 +69,15 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab,
   const [settingsUsername, setSettingsUsername] = useState(currentUser.username);
   const [settingsPassword, setSettingsPassword] = useState('');
   const [settingsAvatarColor, setSettingsAvatarColor] = useState(currentUser.avatarColor);
+  const [settingsAvatarUrl, setSettingsAvatarUrl] = useState(currentUser.avatarUrl || '');
+  
+  // Image cropping state
+  const [showImageCropper, setShowImageCropper] = useState(false);
+  const [originalImage, setOriginalImage] = useState('');
+  const [cropZoom, setCropZoom] = useState(1);
+  const [cropX, setCropX] = useState(0);
+  const [cropY, setCropY] = useState(0);
+  const cropCanvasRef = useRef<HTMLCanvasElement>(null);
 
   const AVATAR_COLORS = ['bg-pink-400', 'bg-teal-400', 'bg-blue-500', 'bg-purple-500', 'bg-orange-400', 'bg-green-500', 'bg-red-400', 'bg-indigo-500'];
 
@@ -485,6 +495,7 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab,
     setSettingsUsername(currentUser.username);
     setSettingsPassword('');
     setSettingsAvatarColor(currentUser.avatarColor);
+    setSettingsAvatarUrl(currentUser.avatarUrl || '');
     setShowAccountSettings(true);
   };
 
@@ -495,23 +506,152 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab,
         return;
       }
 
-      await storageService.updateUser(currentUser.id, currentUser.id, {
+      // Log original size before sending
+      if (settingsAvatarUrl && settingsAvatarUrl.startsWith('data:image/')) {
+        const originalSize = new Blob([settingsAvatarUrl]).size;
+        console.log(`📸 Avatar Upload - Original size: ${(originalSize / 1024).toFixed(2)} KB (${(originalSize / (1024 * 1024)).toFixed(2)} MB)`);
+      }
+
+      const updateResult = await storageService.updateUser(currentUser.id, currentUser.id, {
         name: settingsName,
         username: settingsUsername,
         avatarColor: settingsAvatarColor,
+        avatarUrl: settingsAvatarUrl || null,
         ...(settingsPassword ? { password: settingsPassword } : {}),
       } as any);
+
+      // Log compressed size if avatar was updated
+      if (updateResult?.avatarSizeBytes && settingsAvatarUrl) {
+        const originalSize = new Blob([settingsAvatarUrl]).size;
+        const savedSize = updateResult.avatarSizeBytes;
+        const reduction = ((1 - savedSize / originalSize) * 100).toFixed(1);
+        console.log(`✅ Avatar Saved - Compressed size: ${updateResult.avatarSizeKB} KB (${updateResult.avatarSizeMB} MB)`);
+        console.log(`💾 Space saved: ${reduction}% reduction`);
+      }
 
       setToast({ message: "Account updated successfully!", type: "success" });
       setShowAccountSettings(false);
       
-      // Refresh session to get updated user data
-      const freshUser = await storageService.refreshSession();
-      window.location.reload(); // Reload to update currentUser prop
+      // Refresh session and update parent component
+      if (onUserUpdate) {
+        await onUserUpdate();
+      } else {
+        // Fallback if no callback provided
+        await storageService.refreshSession();
+        window.location.reload();
+      }
     } catch (err: any) {
       console.error("Failed to update account", err);
       setToast({ message: err.message || "Failed to update account", type: "error" });
     }
+  };
+
+  // Image cropper functions
+  const handleImageSelect = (file: File) => {
+    if (file.size > 10 * 1024 * 1024) {
+      setToast({ message: "Image must be less than 10MB", type: "error" });
+      return;
+    }
+    
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setOriginalImage(reader.result as string);
+      setCropZoom(1);
+      setCropX(0);
+      setCropY(0);
+      setShowImageCropper(true);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const applyCrop = () => {
+    const canvas = cropCanvasRef.current;
+    if (!canvas || !originalImage) return;
+
+    const img = new Image();
+    img.onload = () => {
+      const outputSize = 200;
+      canvas.width = outputSize;
+      canvas.height = outputSize;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      // The preview container is 400x400px
+      const previewContainerSize = 400;
+      const cropCircleRadius = 100; // The circle radius in pixels
+      
+      // Calculate how the image is displayed (object-contain behavior)
+      const imgAspect = img.width / img.height;
+      let renderedWidth, renderedHeight;
+      
+      if (imgAspect > 1) {
+        // Wide image - constrained by width
+        renderedWidth = previewContainerSize;
+        renderedHeight = previewContainerSize / imgAspect;
+      } else {
+        // Tall image - constrained by height
+        renderedHeight = previewContainerSize;
+        renderedWidth = previewContainerSize * imgAspect;
+      }
+      
+      // The image is centered in the container before transforms
+      const imageLeft = (previewContainerSize - renderedWidth) / 2;
+      const imageTop = (previewContainerSize - renderedHeight) / 2;
+      
+      // With transform: translate(X,Y) scale(Z):
+      // 1. Image moves by cropX, cropY
+      // 2. Image scales from its own center (after translation)
+      const translatedLeft = imageLeft + cropX;
+      const translatedTop = imageTop + cropY;
+      
+      // Calculate the zoomed (scaled) dimensions
+      const zoomedWidth = renderedWidth * cropZoom;
+      const zoomedHeight = renderedHeight * cropZoom;
+      
+      // When scaling from center, the top-left corner shifts
+      // The center stays at: translatedLeft + renderedWidth/2, translatedTop + renderedHeight/2
+      // After scaling, the top-left is: center - (zoomedWidth/2, zoomedHeight/2)
+      const centerX = translatedLeft + renderedWidth / 2;
+      const centerY = translatedTop + renderedHeight / 2;
+      const finalLeft = centerX - zoomedWidth / 2;
+      const finalTop = centerY - zoomedHeight / 2;
+      
+      // The crop circle is centered at (200, 200) in the container
+      const circleCenterX = previewContainerSize / 2;
+      const circleCenterY = previewContainerSize / 2;
+      
+      // Calculate what part of the source image corresponds to the crop circle
+      const scale = img.width / zoomedWidth; // ratio of source to displayed
+      
+      // Map the circle bounds to source image coordinates
+      const sourceCircleLeft = (circleCenterX - cropCircleRadius - finalLeft) * scale;
+      const sourceCircleTop = (circleCenterY - cropCircleRadius - finalTop) * scale;
+      const sourceCircleSize = (cropCircleRadius * 2) * scale;
+
+      // Draw the cropped portion
+      ctx.clearRect(0, 0, outputSize, outputSize);
+      ctx.save();
+      
+      // Create circular clipping path
+      ctx.beginPath();
+      ctx.arc(outputSize / 2, outputSize / 2, outputSize / 2, 0, Math.PI * 2);
+      ctx.closePath();
+      ctx.clip();
+      
+      ctx.drawImage(
+        img,
+        sourceCircleLeft, sourceCircleTop, sourceCircleSize, sourceCircleSize,
+        0, 0, outputSize, outputSize
+      );
+      
+      ctx.restore();
+
+      // Convert to base64
+      const croppedDataUrl = canvas.toDataURL('image/jpeg', 0.9);
+      setSettingsAvatarUrl(croppedDataUrl);
+      setShowImageCropper(false);
+    };
+    img.src = originalImage;
   };
 
 // --------- Grouped Prizes (fixed snapshot stacking) ---------
@@ -616,12 +756,22 @@ const groupedPrizes: GroupedPrize[] = Object.values(
       <aside className="hidden lg:flex lg:flex-col lg:w-80 lg:fixed lg:top-16 lg:bottom-0 lg:bg-gradient-to-b lg:from-indigo-600 lg:to-purple-700">
         <div className="p-6 border-b border-white/20">
           <div className="flex items-center gap-4 mb-6">
-            <div className={`w-16 h-16 rounded-full ${currentUser.avatarColor} shadow-lg border-4 border-white/30 flex items-center justify-center text-white text-2xl font-bold cursor-pointer hover:scale-110 transition-transform`}
-              onClick={handleOpenAccountSettings}
-              title="Account Settings"
-            >
-              {currentUser.name.charAt(0)}
-            </div>
+            {currentUser.avatarUrl ? (
+              <img 
+                src={currentUser.avatarUrl} 
+                alt={currentUser.name}
+                className="w-16 h-16 rounded-full shadow-lg border-4 border-white/30 object-cover cursor-pointer hover:scale-110 transition-transform"
+                onClick={handleOpenAccountSettings}
+                title="Account Settings"
+              />
+            ) : (
+              <div className={`w-16 h-16 rounded-full ${currentUser.avatarColor} shadow-lg border-4 border-white/30 flex items-center justify-center text-white text-2xl font-bold cursor-pointer hover:scale-110 transition-transform`}
+                onClick={handleOpenAccountSettings}
+                title="Account Settings"
+              >
+                {currentUser.name.charAt(0)}
+              </div>
+            )}
             <div>
               <h1 className="text-xl font-bold text-white">Hi, {currentUser.name}!</h1>
               <p className="text-indigo-100 text-sm">My Wallet</p>
@@ -732,13 +882,23 @@ const groupedPrizes: GroupedPrize[] = Object.values(
       <header className="bg-white dark:bg-gray-800 sticky top-0 z-50 px-6 py-4 shadow-sm mb-4 lg:hidden">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-             <div 
-               className={`w-10 h-10 rounded-full ${currentUser.avatarColor} shadow-md border-2 border-white flex items-center justify-center text-white font-bold cursor-pointer hover:scale-110 transition-transform`}
-               onClick={handleOpenAccountSettings}
-               title="Account Settings"
-             >
-                 {currentUser.name.charAt(0)}
-             </div>
+             {currentUser.avatarUrl ? (
+               <img 
+                 src={currentUser.avatarUrl} 
+                 alt={currentUser.name}
+                 className="w-10 h-10 rounded-full shadow-md border-2 border-white dark:border-gray-700 object-cover cursor-pointer hover:scale-110 transition-transform"
+                 onClick={handleOpenAccountSettings}
+                 title="Account Settings"
+               />
+             ) : (
+               <div 
+                 className={`w-10 h-10 rounded-full ${currentUser.avatarColor} shadow-md border-2 border-white flex items-center justify-center text-white font-bold cursor-pointer hover:scale-110 transition-transform`}
+                 onClick={handleOpenAccountSettings}
+                 title="Account Settings"
+               >
+                   {currentUser.name.charAt(0)}
+               </div>
+             )}
              <div>
                 <h1 className="text-lg font-extrabold text-gray-900 dark:text-white leading-tight">My Wallet</h1>
                 <p className="text-xs text-gray-500 dark:text-gray-400">Hi, {currentUser.name}!</p>
@@ -1115,6 +1275,88 @@ const groupedPrizes: GroupedPrize[] = Object.values(
               </div>
 
               <div className="space-y-4">
+                {/* Profile Picture */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
+                    Profile Picture
+                  </label>
+                  <div className="flex items-center gap-4">
+                    {/* Avatar Preview */}
+                    <div className="relative">
+                      {settingsAvatarUrl ? (
+                        <img 
+                          src={settingsAvatarUrl} 
+                          alt="Avatar" 
+                          className="w-16 h-16 rounded-full object-cover border-2 border-gray-200 dark:border-gray-600"
+                        />
+                      ) : (
+                        <div className={`w-16 h-16 rounded-full ${settingsAvatarColor} flex items-center justify-center text-white text-2xl font-bold border-2 border-gray-200 dark:border-gray-600`}>
+                          {settingsName.charAt(0).toUpperCase()}
+                        </div>
+                      )}
+                    </div>
+                    
+                    {/* Upload Button */}
+                    <div className="flex-1">
+                      <input
+                        type="file"
+                        id="avatar-upload"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            handleImageSelect(file);
+                            e.target.value = ''; // Reset input
+                          }
+                        }}
+                      />
+                      <label
+                        htmlFor="avatar-upload"
+                        className="inline-flex items-center gap-2 px-4 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-600 cursor-pointer transition-colors"
+                      >
+                        <ImageIcon size={16} />
+                        Upload Photo
+                      </label>
+                      {settingsAvatarUrl && (
+                        <button
+                          type="button"
+                          onClick={() => setSettingsAvatarUrl('')}
+                          className="ml-2 px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                        >
+                          Remove
+                        </button>
+                      )}
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                        {settingsAvatarUrl ? 'Using custom photo' : 'Using color avatar - upload a photo to customize'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Avatar Color - Only show if no custom image */}
+                {!settingsAvatarUrl && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
+                      Avatar Color
+                    </label>
+                    <div className="grid grid-cols-6 gap-2">
+                      {AVATAR_COLORS.map((color) => (
+                        <button
+                          key={color}
+                          type="button"
+                          onClick={() => setSettingsAvatarColor(color)}
+                          className={`w-10 h-10 rounded-full ${color} ${
+                            settingsAvatarColor === color
+                              ? 'ring-4 ring-blue-500 ring-offset-2'
+                              : 'hover:scale-110'
+                          } transition-all`}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* Name */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
@@ -1155,27 +1397,6 @@ const groupedPrizes: GroupedPrize[] = Object.values(
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     placeholder="Leave blank to keep current"
                   />
-                </div>
-
-                {/* Avatar Color */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
-                    Avatar Color
-                  </label>
-                  <div className="grid grid-cols-6 gap-2">
-                    {AVATAR_COLORS.map((color) => (
-                      <button
-                        key={color}
-                        type="button"
-                        onClick={() => setSettingsAvatarColor(color)}
-                        className={`w-10 h-10 rounded-full ${color} ${
-                          settingsAvatarColor === color
-                            ? 'ring-4 ring-blue-500 ring-offset-2'
-                            : 'hover:scale-110'
-                        } transition-all`}
-                      />
-                    ))}
-                  </div>
                 </div>
               </div>
 
@@ -1399,6 +1620,121 @@ const groupedPrizes: GroupedPrize[] = Object.values(
         >
           <ArrowUp size={24} />
         </button>
+      )}
+
+      {/* Image Cropper Modal */}
+      {showImageCropper && (
+        <div
+          className="fixed inset-0 bg-black/80 z-[90] flex items-center justify-center p-4"
+          onClick={() => setShowImageCropper(false)}
+        >
+          <div
+            className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Adjust Your Photo</h3>
+            
+            {/* Preview Canvas */}
+            <div className="relative bg-gray-100 dark:bg-gray-700 rounded-xl overflow-hidden mb-4" style={{ height: '400px' }}>
+              {originalImage && (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <img
+                    src={originalImage}
+                    alt="Crop preview"
+                    className="max-w-full max-h-full object-contain"
+                    style={{
+                      transform: `translate(${cropX}px, ${cropY}px) scale(${cropZoom})`,
+                      transition: 'transform 0.1s ease-out'
+                    }}
+                  />
+                  {/* Circular crop overlay */}
+                  <div className="absolute inset-0 pointer-events-none">
+                    <svg width="100%" height="100%" className="absolute inset-0">
+                      <defs>
+                        <mask id="circleMask">
+                          <rect width="100%" height="100%" fill="white" opacity="0.5"/>
+                          <circle cx="50%" cy="50%" r="100" fill="black"/>
+                        </mask>
+                      </defs>
+                      <rect width="100%" height="100%" fill="black" opacity="0.5" mask="url(#circleMask)"/>
+                      <circle cx="50%" cy="50%" r="100" fill="none" stroke="white" strokeWidth="2" strokeDasharray="5,5"/>
+                    </svg>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Controls */}
+            <div className="space-y-4">
+              {/* Zoom Control */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Zoom: {cropZoom.toFixed(1)}x
+                </label>
+                <input
+                  type="range"
+                  min="1"
+                  max="3"
+                  step="0.1"
+                  value={cropZoom}
+                  onChange={(e) => setCropZoom(parseFloat(e.target.value))}
+                  className="w-full h-2 bg-gray-200 dark:bg-gray-600 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                />
+              </div>
+
+              {/* Position Controls */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Horizontal
+                  </label>
+                  <input
+                    type="range"
+                    min="-100"
+                    max="100"
+                    step="1"
+                    value={cropX}
+                    onChange={(e) => setCropX(parseFloat(e.target.value))}
+                    className="w-full h-2 bg-gray-200 dark:bg-gray-600 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Vertical
+                  </label>
+                  <input
+                    type="range"
+                    min="-100"
+                    max="100"
+                    step="1"
+                    value={cropY}
+                    onChange={(e) => setCropY(parseFloat(e.target.value))}
+                    className="w-full h-2 bg-gray-200 dark:bg-gray-600 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                  />
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={() => setShowImageCropper(false)}
+                  className="flex-1 px-4 py-3 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl font-medium hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={applyCrop}
+                  className="flex-1 px-4 py-3 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 transition-colors"
+                >
+                  Apply
+                </button>
+              </div>
+            </div>
+
+            {/* Hidden canvas for cropping */}
+            <canvas ref={cropCanvasRef} className="hidden" />
+          </div>
+        </div>
       )}
     </div>
   );

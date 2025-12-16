@@ -311,6 +311,7 @@ const App: React.FC = () => {
             initialTab={initialWalletTab}
             desktopShowNotifications={showNotifications}
             onDesktopNotificationsToggle={() => setShowNotifications(!showNotifications)}
+            onUserUpdate={handleUserUpdate}
           />
         )}
       </main>

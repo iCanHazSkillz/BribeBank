@@ -99,6 +99,15 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, o
   const [newUserPassword, setNewUserPassword] = useState('');
   const [newUserRole, setNewUserRole] = useState<UserRole>(UserRole.USER);
   const [newUserColor, setNewUserColor] = useState(AVATAR_COLORS[0]);
+  const [newUserAvatarUrl, setNewUserAvatarUrl] = useState('');
+
+  // Image cropping state
+  const [showImageCropper, setShowImageCropper] = useState(false);
+  const [originalImage, setOriginalImage] = useState('');
+  const [cropZoom, setCropZoom] = useState(1);
+  const [cropX, setCropX] = useState(0);
+  const [cropY, setCropY] = useState(0);
+  const cropCanvasRef = useRef<HTMLCanvasElement>(null);
 
   // View Rewards State
   const [viewingRewardsForUser, setViewingRewardsForUser] = useState<string | null>(null);
@@ -613,6 +622,7 @@ const handleBulkAssign = async () => {
           setNewUserUsername(user.username);
           setNewUserRole(user.role);
           setNewUserColor(user.avatarColor);
+          setNewUserAvatarUrl(user.avatarUrl || '');
           setNewUserPassword(''); // Don't show old password
       } else {
           setEditingUser(null);
@@ -621,6 +631,7 @@ const handleBulkAssign = async () => {
           setNewUserPassword('');
           setNewUserRole(UserRole.USER);
           setNewUserColor(AVATAR_COLORS[0]);
+          setNewUserAvatarUrl('');
       }
       setUserFormView(true);
   };
@@ -633,6 +644,113 @@ const handleBulkAssign = async () => {
       setNewUserPassword('');
       setNewUserRole(UserRole.USER);
       setNewUserColor(AVATAR_COLORS[0]);
+      setNewUserAvatarUrl('');
+  };
+
+  // Image cropper functions
+  const handleImageSelect = (file: File) => {
+    if (file.size > 10 * 1024 * 1024) {
+      showToast("Image must be less than 10MB", "error");
+      return;
+    }
+    
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setOriginalImage(reader.result as string);
+      setCropZoom(1);
+      setCropX(0);
+      setCropY(0);
+      setShowImageCropper(true);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const applyCrop = () => {
+    const canvas = cropCanvasRef.current;
+    if (!canvas || !originalImage) return;
+
+    const img = new Image();
+    img.onload = () => {
+      const outputSize = 200;
+      canvas.width = outputSize;
+      canvas.height = outputSize;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      // The preview container is 400x400px
+      const previewContainerSize = 400;
+      const cropCircleRadius = 100;
+      
+      // Calculate how the image is displayed (object-contain behavior)
+      const imgAspect = img.width / img.height;
+      let renderedWidth, renderedHeight;
+      
+      if (imgAspect > 1) {
+        renderedWidth = previewContainerSize;
+        renderedHeight = previewContainerSize / imgAspect;
+      } else {
+        renderedHeight = previewContainerSize;
+        renderedWidth = previewContainerSize * imgAspect;
+      }
+      
+      // The image is centered in the container before transforms
+      const imageLeft = (previewContainerSize - renderedWidth) / 2;
+      const imageTop = (previewContainerSize - renderedHeight) / 2;
+      
+      // With transform: translate(X,Y) scale(Z):
+      // 1. Image moves by cropX, cropY
+      // 2. Image scales from its own center (after translation)
+      const translatedLeft = imageLeft + cropX;
+      const translatedTop = imageTop + cropY;
+      
+      // Calculate the zoomed (scaled) dimensions
+      const zoomedWidth = renderedWidth * cropZoom;
+      const zoomedHeight = renderedHeight * cropZoom;
+      
+      // When scaling from center, the top-left corner shifts
+      // The center stays at: translatedLeft + renderedWidth/2, translatedTop + renderedHeight/2
+      // After scaling, the top-left is: center - (zoomedWidth/2, zoomedHeight/2)
+      const centerX = translatedLeft + renderedWidth / 2;
+      const centerY = translatedTop + renderedHeight / 2;
+      const finalLeft = centerX - zoomedWidth / 2;
+      const finalTop = centerY - zoomedHeight / 2;
+      
+      // The crop circle is centered at (200, 200) in the container
+      const circleCenterX = previewContainerSize / 2;
+      const circleCenterY = previewContainerSize / 2;
+      
+      // Calculate what part of the source image corresponds to the crop circle
+      const scale = img.width / zoomedWidth;
+      
+      // Map the circle bounds to source image coordinates
+      const sourceCircleLeft = (circleCenterX - cropCircleRadius - finalLeft) * scale;
+      const sourceCircleTop = (circleCenterY - cropCircleRadius - finalTop) * scale;
+      const sourceCircleSize = (cropCircleRadius * 2) * scale;
+
+      // Draw the cropped portion
+      ctx.clearRect(0, 0, outputSize, outputSize);
+      ctx.save();
+      
+      // Create circular clipping path
+      ctx.beginPath();
+      ctx.arc(outputSize / 2, outputSize / 2, outputSize / 2, 0, Math.PI * 2);
+      ctx.closePath();
+      ctx.clip();
+      
+      ctx.drawImage(
+        img,
+        sourceCircleLeft, sourceCircleTop, sourceCircleSize, sourceCircleSize,
+        0, 0, outputSize, outputSize
+      );
+      
+      ctx.restore();
+
+      // Convert to base64
+      const croppedDataUrl = canvas.toDataURL('image/jpeg', 0.9);
+      setNewUserAvatarUrl(croppedDataUrl);
+      setShowImageCropper(false);
+    };
+    img.src = originalImage;
   };
 
   const handleSaveUser = async () => {
@@ -648,6 +766,7 @@ const handleBulkAssign = async () => {
           username: newUserUsername,
           role: newUserRole,
           avatarColor: newUserColor,
+          avatarUrl: newUserAvatarUrl || null,
           ...(newUserPassword ? { password: newUserPassword } : {}),
         } as any);
         showToast("User updated successfully", "success");
@@ -667,7 +786,8 @@ const handleBulkAssign = async () => {
           newUserUsername,
           newUserPassword,
           newUserRole,
-          newUserColor
+          newUserColor,
+          newUserAvatarUrl || undefined
         );
         showToast("User created successfully", "success");
       }
@@ -1363,17 +1483,65 @@ const handleBulkAssign = async () => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">Image URL</label>
-                <div className="relative">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">Item Image</label>
+                
+                {storeItemImage && (
+                  <div className="mb-3 relative">
+                    <img 
+                      src={storeItemImage} 
+                      alt="Preview" 
+                      className="w-32 h-32 object-cover rounded-xl border-2 border-gray-200 dark:border-gray-600"
+                    />
+                    <button
+                      onClick={() => setStoreItemImage('')}
+                      className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1.5 hover:bg-red-600 transition-colors"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                )}
+                
+                <div className="flex gap-2">
                   <input
-                    type="url"
-                    value={storeItemImage}
-                    onChange={(e) => setStoreItemImage(e.target.value)}
-                    placeholder="https://..."
-                    className="w-full p-3 pl-10 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-xl focus:ring-2 focus:ring-indigo-200 dark:focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                    type="file"
+                    id="store-item-upload"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        if (file.size > 10 * 1024 * 1024) {
+                          showToast("Image must be less than 10MB", "error");
+                          return;
+                        }
+                        const reader = new FileReader();
+                        reader.onloadend = () => {
+                          setStoreItemImage(reader.result as string);
+                        };
+                        reader.readAsDataURL(file);
+                      }
+                    }}
                   />
-                  <ImageIcon size={20} className="absolute left-3 top-3.5 text-gray-400 dark:text-gray-500" />
+                  <label
+                    htmlFor="store-item-upload"
+                    className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-600 cursor-pointer transition-colors"
+                  >
+                    <ImageIcon size={16} />
+                    Upload Image
+                  </label>
+                  
+                  <div className="flex-1 relative">
+                    <input
+                      type="url"
+                      value={storeItemImage.startsWith('data:') ? '' : storeItemImage}
+                      onChange={(e) => setStoreItemImage(e.target.value)}
+                      placeholder="Or paste image URL..."
+                      className="w-full p-2 pl-9 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg focus:ring-2 focus:ring-indigo-200 dark:focus:ring-indigo-500 focus:border-indigo-500 outline-none text-sm"
+                    />
+                    <Linkicon size={16} className="absolute left-2.5 top-2.5 text-gray-400 dark:text-gray-500" />
+                  </div>
                 </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Upload an image or provide a URL</p>
               </div>
 
               <div>
@@ -1699,11 +1867,26 @@ const handleBulkAssign = async () => {
                           : "border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800"
                       }`}
                     >
-                      <div
-                        className={`w-8 h-8 rounded-full ${user.avatarColor} flex items-center justify-center`}
-                      >
-                        {isSelected && <Check size={16} className="text-white" />}
-                      </div>
+                      {user.avatarUrl ? (
+                        <div className="relative w-8 h-8">
+                          <img 
+                            src={user.avatarUrl} 
+                            alt={user.name}
+                            className="w-8 h-8 rounded-full object-cover"
+                          />
+                          {isSelected && (
+                            <div className="absolute inset-0 bg-indigo-600/80 rounded-full flex items-center justify-center">
+                              <Check size={16} className="text-white" />
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div
+                          className={`w-8 h-8 rounded-full ${user.avatarColor} flex items-center justify-center`}
+                        >
+                          {isSelected && <Check size={16} className="text-white" />}
+                        </div>
+                      )}
                       <span
                         className={`font-semibold ${
                           isSelected ? "text-indigo-700 dark:text-indigo-300" : "text-gray-700 dark:text-gray-300"
@@ -1888,7 +2071,15 @@ const handleBulkAssign = async () => {
                                 <div key={b.id} className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm border border-green-200 dark:border-green-700">
                                     <div className="flex justify-between items-start">
                                         <div className="flex items-center gap-3">
-                                            <div className={`w-8 h-8 rounded-full ${user?.avatarColor} flex items-center justify-center text-white text-xs font-bold`}>{user?.name.charAt(0)}</div>
+                                            {user?.avatarUrl ? (
+                                                <img 
+                                                    src={user.avatarUrl} 
+                                                    alt={user.name}
+                                                    className="w-8 h-8 rounded-full object-cover border-2 border-white dark:border-gray-700"
+                                                />
+                                            ) : (
+                                                <div className={`w-8 h-8 rounded-full ${user?.avatarColor} flex items-center justify-center text-white text-xs font-bold`}>{user?.name.charAt(0)}</div>
+                                            )}
                                             <div>
                                                 <p className="font-bold text-gray-800 dark:text-white">{template.title}</p>
                                                 <p className="text-xs text-gray-500 dark:text-gray-400">Marked complete by {user?.name}</p>
@@ -1932,9 +2123,17 @@ const handleBulkAssign = async () => {
                         className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm border border-amber-200 dark:border-amber-700"
                     >
                         <div className="flex items-center gap-2 mb-3 text-sm text-gray-500 dark:text-gray-400">
-                            <div
-                                className={`w-6 h-6 rounded-full ${user?.avatarColor}`}
-                            ></div>
+                            {user?.avatarUrl ? (
+                                <img 
+                                    src={user.avatarUrl} 
+                                    alt={user.name}
+                                    className="w-6 h-6 rounded-full object-cover"
+                                />
+                            ) : (
+                                <div
+                                    className={`w-6 h-6 rounded-full ${user?.avatarColor}`}
+                                ></div>
+                            )}
                             <span className="font-semibold text-gray-800 dark:text-white">
                                 {user?.name}
                             </span>{" "}
@@ -2575,9 +2774,17 @@ const handleBulkAssign = async () => {
                                 {users.map(u => (
                                     <div key={u.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors cursor-pointer" onClick={() => handleOpenUserForm(u)}>
                                         <div className="flex items-center gap-3">
-                                            <div className={`w-10 h-10 rounded-full ${u.avatarColor} flex items-center justify-center text-white`}>
-                                                {u.role === UserRole.ADMIN ? <Shield size={18}/> : <UserIcon size={18}/>}
-                                            </div>
+                                            {u.avatarUrl ? (
+                                                <img 
+                                                    src={u.avatarUrl} 
+                                                    alt={u.name}
+                                                    className="w-10 h-10 rounded-full object-cover border-2 border-white dark:border-gray-600"
+                                                />
+                                            ) : (
+                                                <div className={`w-10 h-10 rounded-full ${u.avatarColor} flex items-center justify-center text-white`}>
+                                                    {u.role === UserRole.ADMIN ? <Shield size={18}/> : <UserIcon size={18}/>}
+                                                </div>
+                                            )}
                                             <div>
                                                 <p className="font-bold text-gray-800 dark:text-white">{u.name}</p>
                                                 <p className="text-xs text-gray-500 dark:text-gray-400">@{u.username}</p>
@@ -2607,6 +2814,84 @@ const handleBulkAssign = async () => {
                             <button onClick={handleCloseUserView} className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"><X/></button>
                         </div>
                         <div className="space-y-4">
+                            {/* Profile Picture */}
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">Profile Picture</label>
+                                <div className="flex items-center gap-4">
+                                    {/* Avatar Preview */}
+                                    <div className="relative">
+                                        {newUserAvatarUrl ? (
+                                            <img 
+                                                src={newUserAvatarUrl} 
+                                                alt="Avatar" 
+                                                className="w-16 h-16 rounded-full object-cover border-2 border-gray-200 dark:border-gray-600"
+                                            />
+                                        ) : (
+                                            <div className={`w-16 h-16 rounded-full ${newUserColor} flex items-center justify-center text-white text-2xl font-bold border-2 border-gray-200 dark:border-gray-600`}>
+                                                {newUserName ? newUserName.charAt(0).toUpperCase() : '?'}
+                                            </div>
+                                        )}
+                                    </div>
+                                    
+                                    {/* Upload Button */}
+                                    <div className="flex-1">
+                                        <input
+                                            type="file"
+                                            id="admin-avatar-upload"
+                                            accept="image/*"
+                                            className="hidden"
+                                            onChange={(e) => {
+                                                const file = e.target.files?.[0];
+                                                if (file) {
+                                                    handleImageSelect(file);
+                                                    e.target.value = ''; // Reset input
+                                                }
+                                            }}
+                                        />
+                                        <label
+                                            htmlFor="admin-avatar-upload"
+                                            className="inline-flex items-center gap-2 px-4 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-600 cursor-pointer transition-colors"
+                                        >
+                                            <ImageIcon size={16} />
+                                            Upload Photo
+                                        </label>
+                                        {newUserAvatarUrl && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setNewUserAvatarUrl('')}
+                                                className="ml-2 px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                                            >
+                                                Remove
+                                            </button>
+                                        )}
+                                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                            {newUserAvatarUrl ? 'Using custom photo' : 'Using color avatar - upload a photo to customize'}
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Avatar Color - Only show if no custom image */}
+                            {!newUserAvatarUrl && (
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">Avatar Color</label>
+                                    <div className="grid grid-cols-6 gap-2">
+                                        {AVATAR_COLORS.map((c) => (
+                                            <button
+                                                key={c}
+                                                type="button"
+                                                onClick={() => setNewUserColor(c)}
+                                                className={`w-10 h-10 rounded-full ${c} ${
+                                                    newUserColor === c
+                                                        ? 'ring-4 ring-blue-500 ring-offset-2'
+                                                        : 'hover:scale-110'
+                                                } transition-all`}
+                                            />
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Name</label>
                                 <input type="text" value={newUserName} onChange={e => setNewUserName(e.target.value)} className="w-full p-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white" placeholder="Display Name" />
@@ -2637,10 +2922,6 @@ const handleBulkAssign = async () => {
                                     <button onClick={() => setNewUserRole(UserRole.ADMIN)} className={`flex-1 py-2 rounded-lg border transition-colors ${newUserRole === UserRole.ADMIN ? 'bg-indigo-100 dark:bg-indigo-900/30 border-indigo-500 dark:border-indigo-600 text-indigo-700 dark:text-indigo-300' : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700'}`}>Parent</button>
                                 </div>
                             </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">Avatar Color</label>
-                                <div className="flex flex-wrap gap-2">{AVATAR_COLORS.map(c => (<button key={c} onClick={() => setNewUserColor(c)} className={`w-8 h-8 rounded-full ${c} ${newUserColor === c ? 'ring-2 ring-gray-400 scale-110' : ''}`} />))}</div>
-                            </div>
                             
                             <button onClick={handleSaveUser} className="w-full bg-indigo-600 text-white font-bold py-3 rounded-xl mt-4 shadow-lg hover:bg-indigo-700 transition-colors">
                                 {editingUser ? 'Update Member' : 'Create Member'}
@@ -2668,6 +2949,121 @@ const handleBulkAssign = async () => {
         >
           <ArrowUp size={24} />
         </button>
+      )}
+
+      {/* Image Cropper Modal */}
+      {showImageCropper && (
+        <div
+          className="fixed inset-0 bg-black/80 z-[90] flex items-center justify-center p-4"
+          onClick={() => setShowImageCropper(false)}
+        >
+          <div
+            className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Adjust Photo</h3>
+            
+            {/* Preview Canvas */}
+            <div className="relative bg-gray-100 dark:bg-gray-700 rounded-xl overflow-hidden mb-4" style={{ height: '400px' }}>
+              {originalImage && (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <img
+                    src={originalImage}
+                    alt="Crop preview"
+                    className="max-w-full max-h-full object-contain"
+                    style={{
+                      transform: `translate(${cropX}px, ${cropY}px) scale(${cropZoom})`,
+                      transition: 'transform 0.1s ease-out'
+                    }}
+                  />
+                  {/* Circular crop overlay */}
+                  <div className="absolute inset-0 pointer-events-none">
+                    <svg width="100%" height="100%" className="absolute inset-0">
+                      <defs>
+                        <mask id="circleMask">
+                          <rect width="100%" height="100%" fill="white" opacity="0.5"/>
+                          <circle cx="50%" cy="50%" r="100" fill="black"/>
+                        </mask>
+                      </defs>
+                      <rect width="100%" height="100%" fill="black" opacity="0.5" mask="url(#circleMask)"/>
+                      <circle cx="50%" cy="50%" r="100" fill="none" stroke="white" strokeWidth="2" strokeDasharray="5,5"/>
+                    </svg>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Controls */}
+            <div className="space-y-4">
+              {/* Zoom Control */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Zoom: {cropZoom.toFixed(1)}x
+                </label>
+                <input
+                  type="range"
+                  min="1"
+                  max="3"
+                  step="0.1"
+                  value={cropZoom}
+                  onChange={(e) => setCropZoom(parseFloat(e.target.value))}
+                  className="w-full h-2 bg-gray-200 dark:bg-gray-600 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                />
+              </div>
+
+              {/* Position Controls */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Horizontal
+                  </label>
+                  <input
+                    type="range"
+                    min="-100"
+                    max="100"
+                    step="1"
+                    value={cropX}
+                    onChange={(e) => setCropX(parseFloat(e.target.value))}
+                    className="w-full h-2 bg-gray-200 dark:bg-gray-600 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Vertical
+                  </label>
+                  <input
+                    type="range"
+                    min="-100"
+                    max="100"
+                    step="1"
+                    value={cropY}
+                    onChange={(e) => setCropY(parseFloat(e.target.value))}
+                    className="w-full h-2 bg-gray-200 dark:bg-gray-600 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                  />
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={() => setShowImageCropper(false)}
+                  className="flex-1 px-4 py-3 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl font-medium hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={applyCrop}
+                  className="flex-1 px-4 py-3 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 transition-colors"
+                >
+                  Apply
+                </button>
+              </div>
+            </div>
+
+            {/* Hidden canvas for cropping */}
+            <canvas ref={cropCanvasRef} className="hidden" />
+          </div>
+        </div>
       )}
     </div>
   );

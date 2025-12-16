@@ -81,8 +81,53 @@ const handleSignUp = async (e: React.FormEvent) => {
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-gradient-to-br from-indigo-600 to-purple-700">
-      <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden">
+    <div className="min-h-screen flex flex-col items-center justify-center p-6 relative overflow-hidden">
+      {/* Animated gradient background */}
+      <div className="absolute inset-0 bg-gradient-to-br from-indigo-600 via-purple-600 to-pink-600 animate-gradient-shift"></div>
+      
+      {/* Vault illustration background */}
+      <div 
+        className="absolute inset-0 bg-center bg-no-repeat bg-contain opacity-20"
+        style={{
+          backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1200 800'%3E%3Cg opacity='0.3'%3E%3Ccircle cx='300' cy='400' r='250' fill='%23fff' opacity='0.1'/%3E%3Ccircle cx='300' cy='400' r='200' fill='none' stroke='%23fff' stroke-width='20' opacity='0.2'/%3E%3Ccircle cx='300' cy='400' r='80' fill='%23fff' opacity='0.15'/%3E%3Cpath d='M300 320 L350 370 L300 420 L250 370 Z' fill='%23fff' opacity='0.2'/%3E%3Crect x='700' y='200' width='400' height='400' rx='20' fill='%23fff' opacity='0.05'/%3E%3C/g%3E%3C/svg%3E")`
+        }}
+      ></div>
+      
+      {/* Floating coins/tickets animation */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        {/* Top left cluster */}
+        <div className="absolute top-20 left-10 w-16 h-16 bg-yellow-400/20 rounded-full animate-float-slow"></div>
+        <div className="absolute top-32 left-24 w-10 h-10 bg-yellow-300/15 rounded-full animate-float-medium"></div>
+        
+        {/* Top right cluster */}
+        <div className="absolute top-40 right-20 w-12 h-12 bg-blue-400/20 rounded-full animate-float-medium"></div>
+        <div className="absolute top-16 right-32 w-14 h-14 bg-cyan-400/15 rounded-full animate-float-slow"></div>
+        <div className="absolute top-28 right-12 w-8 h-8 bg-indigo-300/20 rounded-full animate-float-fast"></div>
+        
+        {/* Left side mid */}
+        <div className="absolute top-1/2 left-16 w-12 h-12 bg-purple-400/15 rounded-full animate-float-medium" style={{ animationDelay: '1s' }}></div>
+        <div className="absolute top-1/3 left-8 w-18 h-18 bg-pink-300/20 rounded-full animate-float-slow" style={{ animationDelay: '0.5s' }}></div>
+        
+        {/* Right side mid */}
+        <div className="absolute top-1/2 right-24 w-16 h-16 bg-teal-400/15 rounded-full animate-float-fast" style={{ animationDelay: '1.5s' }}></div>
+        <div className="absolute top-2/3 right-16 w-10 h-10 bg-emerald-300/20 rounded-full animate-float-medium" style={{ animationDelay: '2s' }}></div>
+        
+        {/* Bottom left cluster */}
+        <div className="absolute bottom-32 left-1/4 w-20 h-20 bg-pink-400/20 rounded-full animate-float-fast"></div>
+        <div className="absolute bottom-44 left-1/3 w-12 h-12 bg-rose-300/15 rounded-full animate-float-slow" style={{ animationDelay: '0.8s' }}></div>
+        <div className="absolute bottom-24 left-12 w-14 h-14 bg-fuchsia-400/20 rounded-full animate-float-medium" style={{ animationDelay: '1.2s' }}></div>
+        
+        {/* Bottom right cluster */}
+        <div className="absolute bottom-20 right-1/3 w-14 h-14 bg-purple-400/20 rounded-full animate-float-slow"></div>
+        <div className="absolute bottom-36 right-1/4 w-16 h-16 bg-violet-300/15 rounded-full animate-float-fast" style={{ animationDelay: '1.8s' }}></div>
+        <div className="absolute bottom-12 right-20 w-10 h-10 bg-indigo-400/20 rounded-full animate-float-medium" style={{ animationDelay: '2.5s' }}></div>
+        
+        {/* Center accents */}
+        <div className="absolute top-1/4 left-1/2 w-8 h-8 bg-amber-300/15 rounded-full animate-float-slow" style={{ animationDelay: '3s' }}></div>
+        <div className="absolute bottom-1/4 left-2/3 w-12 h-12 bg-orange-400/20 rounded-full animate-float-medium" style={{ animationDelay: '2.2s' }}></div>
+      </div>
+      
+      <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden relative z-10">
         {/* Header */}
         <div className="bg-indigo-50 p-8 text-center border-b border-indigo-100">
           <div className="flex justify-center mb-4">
@@ -219,7 +264,7 @@ const handleSignUp = async (e: React.FormEvent) => {
         </div>
       </div>
 
-      <p className="mt-8 text-indigo-200 text-xs text-center max-w-xs opacity-80">
+      <p className="mt-8 text-white/90 text-xs text-center max-w-xs drop-shadow-md relative z-10">
         Made with ♥ by Dad
       </p>
     </div>

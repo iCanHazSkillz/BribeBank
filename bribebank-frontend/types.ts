@@ -41,6 +41,7 @@ export interface User {
   //displayName: string;
   role: UserRole;
   avatarColor: string;
+  avatarUrl?: string; // Optional profile picture URL (base64 data URL)
   password?: string;
   ticketBalance: number;
 }

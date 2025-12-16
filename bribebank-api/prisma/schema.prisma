@@ -49,6 +49,7 @@ model User {
   displayName String
   role        Role       @default(CHILD) // PARENT or CHILD
   avatarColor String?    @default("bg-blue-500")
+  avatarUrl   String?    @db.Text // Optional profile picture URL (base64 data URL) - needs Text for large images
   ticketBalance Int      @default(0)
 
   createdAt   DateTime   @default(now())
@@ -286,7 +287,7 @@ model StoreItem {
 
   title       String
   cost        Int
-  imageUrl    String?
+  imageUrl    String?  @db.Text  // Support both external URLs and base64 images
   productUrl  String?
   description String?
 

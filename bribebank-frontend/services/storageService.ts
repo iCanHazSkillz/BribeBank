@@ -250,6 +250,7 @@ export const storageService = {
           ? UserRole.ADMIN
           : UserRole.USER,
       avatarColor: backendUser.avatarColor || "bg-blue-500",
+      avatarUrl: backendUser.avatarUrl || undefined,
       ticketBalance: backendUser.ticketBalance || 0,
     };
 
@@ -298,6 +299,7 @@ export const storageService = {
           ? UserRole.ADMIN
           : UserRole.USER,
       avatarColor: backendUser.avatarColor ?? "bg-blue-500",
+      avatarUrl: backendUser.avatarUrl || undefined,
       ticketBalance: backendUser.ticketBalance || 0,
     };
 
@@ -330,6 +332,7 @@ export const storageService = {
       name: u.displayName,
       role: u.role === "PARENT" ? UserRole.ADMIN : UserRole.USER,
       avatarColor: u.avatarColor || "bg-blue-500",
+      avatarUrl: u.avatarUrl || undefined,
       ticketBalance: u.ticketBalance || 0,
     };
   },
@@ -356,6 +359,7 @@ export const storageService = {
       //displayName: u.displayName,   // <- for consistency
       role: u.role === "PARENT" ? UserRole.ADMIN : UserRole.USER,
       avatarColor: u.avatarColor || "bg-blue-500",
+      avatarUrl: u.avatarUrl || undefined,
       ticketBalance: u.ticketBalance || 0,
     }));
   },
@@ -367,7 +371,8 @@ export const storageService = {
     username: string,
     password: string,
     role: UserRole,
-    avatarColor: string
+    avatarColor: string,
+    avatarUrl?: string
   ): Promise<void> => {
     const token = getAuthToken();
     if (!token) throw new Error("Not authenticated");
@@ -384,7 +389,8 @@ export const storageService = {
         password,
         displayName: name,
         role: role === UserRole.ADMIN ? "PARENT" : "CHILD",
-        avatarColor, // ignored by backend for now
+        avatarColor,
+        avatarUrl: avatarUrl || null,
       }),
     });
 
@@ -419,6 +425,10 @@ export const storageService = {
       payload.avatarColor = updates.avatarColor;
     }
 
+    if (updates.avatarUrl !== undefined) {
+      payload.avatarUrl = updates.avatarUrl;
+    }
+
     if (Object.keys(payload).length > 0) {
       const res = await fetch(apiUrl(`/users/${userId}`), {
         method: "PATCH",
@@ -434,6 +444,10 @@ export const storageService = {
         console.error("updateUser failed", res.status, body);
         throw new Error(body?.error || "Failed to update user");
       }
+
+      // Return the response data which includes avatar size info
+      const data = await res.json();
+      return data;
     }
 
     // Password change handled separately

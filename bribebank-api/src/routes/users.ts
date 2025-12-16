@@ -6,12 +6,14 @@ import {
   updateUser,
   updateUserPassword,
   deleteUser,
+  getAvatarInfo,
 } from "../controllers/userController.js";
 
 const router = Router();
 
 router.get("/families/:familyId/users", authMiddleware, getFamilyUsers);
 router.post("/families/:familyId/users", authMiddleware, createUser);
+router.get("/users/:id/avatar-info", authMiddleware, getAvatarInfo);
 router.patch("/users/:id", authMiddleware, updateUser);
 router.patch("/users/:id/password", authMiddleware, updateUserPassword);
 router.delete("/users/:id", authMiddleware, deleteUser);

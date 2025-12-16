@@ -3,6 +3,7 @@ import { Role } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { assertFamilyMember, assertParent, getRequestUser } from "../lib/authHelpers.js";
 import bcrypt from "bcryptjs";
+import { processAvatar } from "../lib/imageProcessor.js";
 
 const AVATAR_COLORS = [
   "bg-indigo-500",
@@ -40,6 +41,7 @@ export const getFamilyUsers = async (req: Request, res: Response) => {
         role: true,
         createdAt: true,
         avatarColor: true,
+        avatarUrl: true,
         ticketBalance: true,
       },
     });
@@ -58,7 +60,7 @@ export const getFamilyUsers = async (req: Request, res: Response) => {
 
 export const createUser = async (req: Request, res: Response) => {
   const { familyId } = req.params;
-  const { username, password, displayName, role } = req.body;
+  let { username, password, displayName, role, avatarUrl } = req.body;
 
   if (!familyId) {
     return res.status(400).json({ error: "MISSING_FAMILY_ID" });
@@ -68,6 +70,11 @@ export const createUser = async (req: Request, res: Response) => {
   }
 
   try {
+    // Process avatar image if provided
+    if (avatarUrl && avatarUrl.startsWith('data:image/')) {
+      avatarUrl = await processAvatar(avatarUrl);
+    }
+
     const requester = await assertFamilyMember(req, familyId);
     assertParent(requester);
 
@@ -93,6 +100,7 @@ export const createUser = async (req: Request, res: Response) => {
         displayName,
         role: dbRole,
         avatarColor: pickAvatarColor(),
+        avatarUrl: avatarUrl || null,
       },
     });
 
@@ -116,13 +124,18 @@ export const createUser = async (req: Request, res: Response) => {
 
 export const updateUser = async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { username, displayName, role, avatarColor } = req.body;
+  let { username, displayName, role, avatarColor, avatarUrl } = req.body;
 
   if (!id) {
     return res.status(400).json({ error: "MISSING_USER_ID" });
   }
 
   try {
+    // Process avatar image if provided
+    if (avatarUrl && avatarUrl.startsWith('data:image/')) {
+      avatarUrl = await processAvatar(avatarUrl);
+    }
+
     const target = await prisma.user.findUnique({ where: { id } });
     if (!target) {
       return res.status(404).json({ error: "NOT_FOUND" });
@@ -196,17 +209,33 @@ export const updateUser = async (req: Request, res: Response) => {
         ...(newAvatarColor !== undefined && {
           avatarColor: newAvatarColor,
         }),
+        // Handle avatarUrl: if explicitly set to null, clear it; if provided, update it
+        ...(avatarUrl !== undefined && {
+          avatarUrl: avatarUrl || null,
+        }),
       },
     });
 
-    return res.json({
+    // Include avatar size info in response for debugging
+    const response: any = {
       id: updated.id,
       familyId: updated.familyId,
       username: updated.username,
       displayName: updated.displayName,
       role: updated.role,
       avatarColor: updated.avatarColor,
-    });
+      avatarUrl: updated.avatarUrl,
+    };
+
+    // Add size metadata if avatar exists
+    if (updated.avatarUrl) {
+      const sizeInBytes = Buffer.byteLength(updated.avatarUrl, 'utf8');
+      response.avatarSizeBytes = sizeInBytes;
+      response.avatarSizeKB = (sizeInBytes / 1024).toFixed(2);
+      response.avatarSizeMB = (sizeInBytes / (1024 * 1024)).toFixed(2);
+    }
+
+    return res.json(response);
   } catch (err: any) {
     console.error("updateUser error:", err);
     return res
@@ -318,6 +347,50 @@ export const deleteUser = async (req: Request, res: Response) => {
     }
 
     console.error("deleteUser error:", err);
+    return res.status(500).json({ error: "INTERNAL_SERVER_ERROR" });
+  }
+};
+
+// ---- GET /users/:id/avatar-info ---------------------------------------
+// Debug endpoint to check avatar size
+
+export const getAvatarInfo = async (req: Request, res: Response) => {
+  const { id } = req.params;
+
+  if (!id) {
+    return res.status(400).json({ error: "MISSING_USER_ID" });
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id },
+      select: { avatarUrl: true },
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: "USER_NOT_FOUND" });
+    }
+
+    if (!user.avatarUrl) {
+      return res.json({
+        hasAvatar: false,
+        message: "No avatar uploaded",
+      });
+    }
+
+    const sizeInBytes = Buffer.byteLength(user.avatarUrl, 'utf8');
+    const sizeInKB = (sizeInBytes / 1024).toFixed(2);
+    const sizeInMB = (sizeInBytes / (1024 * 1024)).toFixed(2);
+
+    return res.json({
+      hasAvatar: true,
+      sizeInBytes,
+      sizeInKB: `${sizeInKB} KB`,
+      sizeInMB: `${sizeInMB} MB`,
+      format: user.avatarUrl.substring(0, 30) + '...',
+    });
+  } catch (err: any) {
+    console.error("getAvatarInfo error:", err);
     return res.status(500).json({ error: "INTERNAL_SERVER_ERROR" });
   }
 };

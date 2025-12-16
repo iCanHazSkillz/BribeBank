@@ -6,6 +6,7 @@ import { broadcastToFamily } from "../realtime/eventBus.js";
 import { SseEvent } from "../types/sseEvents.js";
 import { addNotification } from "../services/notificationService.js";
 import { sendPushToUser } from "../services/pushService.js";
+import { processAvatar } from "../lib/imageProcessor.js";
 
 /**
  * GET /families/:familyId/store-items
@@ -43,7 +44,7 @@ export const getFamilyStoreItems = async (req: Request, res: Response) => {
  */
 export const createStoreItem = async (req: Request, res: Response) => {
   const { familyId } = req.params;
-  const { title, cost, imageUrl, productUrl, description } = req.body;
+  let { title, cost, imageUrl, productUrl, description } = req.body;
 
   if (!familyId) {
     return res.status(400).json({ error: "MISSING_FAMILY_ID" });
@@ -53,6 +54,11 @@ export const createStoreItem = async (req: Request, res: Response) => {
   }
 
   try {
+    // Process image if it's a base64 upload
+    if (imageUrl && imageUrl.startsWith('data:image/')) {
+      imageUrl = await processAvatar(imageUrl);
+    }
+
     const user = await assertFamilyMember(req, familyId);
     assertParent(user);
 
@@ -92,7 +98,7 @@ export const createStoreItem = async (req: Request, res: Response) => {
  */
 export const updateStoreItem = async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { title, cost, imageUrl, productUrl, description } = req.body;
+  let { title, cost, imageUrl, productUrl, description } = req.body;
 
   if (!id) {
     return res.status(400).json({ error: "MISSING_ITEM_ID" });
@@ -110,6 +116,11 @@ export const updateStoreItem = async (req: Request, res: Response) => {
 
     const user = await assertFamilyMember(req, existingItem.familyId);
     assertParent(user);
+
+    // Process image if it's a base64 upload
+    if (imageUrl && imageUrl.startsWith('data:image/')) {
+      imageUrl = await processAvatar(imageUrl);
+    }
 
     const updatedItem = await prisma.storeItem.update({
       where: { id },

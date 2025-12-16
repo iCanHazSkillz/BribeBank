@@ -245,10 +245,12 @@ export const getMe = async (req: Request, res: Response) => {
             where: { id: req.userId },
             select: {
                 id: true,
+                familyId: true,
                 username: true,
                 displayName: true,
                 role: true,
                 avatarColor: true,
+                avatarUrl: true,
                 ticketBalance: true,
                 family: {
                     select: { id: true, name: true, joinCode: true, joinCodeExpiry: true },
