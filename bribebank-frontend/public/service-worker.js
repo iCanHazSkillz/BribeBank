@@ -1,7 +1,8 @@
 // public/service-worker.js
 
-// Simple versioned cache name
-const CACHE_NAME = "bribebank-static-v6";
+// Dynamic versioned cache name - replaced at build time with timestamp
+// Format: bribebank-static-TIMESTAMP
+const CACHE_NAME = "bribebank-static-{{BUILD_TIMESTAMP}}";
 
 // Which files (at minimum) to cache on install.
 // You can expand this (CSS, fonts, etc.) later or let Workbox handle it.
@@ -19,16 +20,29 @@ self.addEventListener("install", (event) => {
   self.skipWaiting();
 });
 
-// Activate: cleanup old caches
+// Activate: cleanup old caches and claim all clients
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
       Promise.all(
         keys
           .filter((key) => key !== CACHE_NAME)
-          .map((key) => caches.delete(key))
+          .map((key) => {
+            console.log("[SW] Deleting old cache:", key);
+            return caches.delete(key);
+          })
       )
-    )
+    ).then(() => {
+      // Notify all clients that a new version is available
+      return self.clients.matchAll({ type: 'window' }).then((clients) => {
+        clients.forEach((client) => {
+          client.postMessage({
+            type: 'SW_UPDATE_AVAILABLE',
+            message: 'A new version of the app is available. Please refresh.'
+          });
+        });
+      });
+    })
   );
   self.clients.claim();
 });

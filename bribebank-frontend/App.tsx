@@ -164,9 +164,22 @@ const App: React.FC = () => {
       }
     };
 
+    // Listen for service worker updates
+    const handleSWMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'SW_UPDATE_AVAILABLE') {
+        console.log('[App] Service worker update available:', event.data.message);
+        // Show a subtle notification bar or banner here if desired
+        // For now, the user will see it on next refresh
+        // You can also auto-reload: window.location.reload();
+      }
+    };
+
+    navigator.serviceWorker?.addEventListener('message', handleSWMessage);
+
     document.addEventListener("visibilitychange", handleVisibility);
     document.addEventListener("mousedown", handleClickOutside);
     return () => {
+      navigator.serviceWorker?.removeEventListener('message', handleSWMessage);
       document.removeEventListener("visibilitychange", handleVisibility);
       document.removeEventListener("mousedown", handleClickOutside);
     };
