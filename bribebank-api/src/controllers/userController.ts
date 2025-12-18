@@ -174,6 +174,23 @@ export const updateUser = async (req: Request, res: Response) => {
         role === "PARENT" || role === Role.PARENT
           ? Role.PARENT
           : Role.CHILD;
+
+      // Safeguard: prevent converting the only parent to child
+      if (dbRole === Role.CHILD && target.role === Role.PARENT) {
+        const parentCount = await prisma.user.count({
+          where: {
+            familyId: target.familyId,
+            role: Role.PARENT,
+          },
+        });
+
+        if (parentCount === 1) {
+          return res.status(400).json({
+            error: "CANNOT_DEMOTE_ONLY_PARENT",
+            message: "Cannot convert the only parent/admin to a child. Families must have at least one parent account.",
+          });
+        }
+      }
     }
 
     // (Optional but recommended) validate avatarColor against your palette

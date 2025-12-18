@@ -19,5 +19,5 @@ WORKDIR /usr/share/nginx/html
 # Copy Vite build output
 COPY --from=builder /app/dist ./
 
-# Simple default nginx config
-# (NPM will sit in front, so we don't need anything fancy here)
+# Copy custom nginx config with cache headers
+COPY nginx.conf /etc/nginx/conf.d/default.conf

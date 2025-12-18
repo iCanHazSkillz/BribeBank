@@ -1520,4 +1520,88 @@ export const storageService = {
 
     return await res.json();
   },
+
+  // ========== Template Export/Import ==========
+
+  /**
+   * Export rewards or bounties as a JSON template file
+   */
+  exportTemplate: async (type: 'rewards' | 'bounties'): Promise<Blob> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const res = await fetch(apiUrl(`/templates/export?type=${type}`), {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      console.error("Failed to export template", res.status, body);
+      throw new Error(body?.error || "Failed to export template");
+    }
+
+    const data = await res.json();
+    
+    // Convert to JSON blob for download
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    return blob;
+  },
+
+  /**
+   * Import rewards or bounties from a JSON template file
+   */
+  importTemplate: async (fileContent: any): Promise<{ 
+    success: boolean; 
+    imported: number; 
+    errors?: string[]; 
+    message: string;
+  }> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const res = await fetch(apiUrl(`/templates/import`), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(fileContent),
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      console.error("Failed to import template", res.status, body);
+      throw new Error(body?.error || "Failed to import template");
+    }
+
+    return await res.json();
+  },
+
+  /**
+   * Update ticket conversion rate for a family
+   */
+  updateTicketConversionRate: async (familyId: string, conversionRate: number): Promise<{ conversionRate: number }> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const res = await fetch(apiUrl(`/families/${familyId}/ticket-conversion-rate`), {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ conversionRate }),
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      console.error("Failed to update conversion rate", res.status, body);
+      throw new Error(body?.error || "Failed to update conversion rate");
+    }
+
+    return await res.json();
+  },
 };

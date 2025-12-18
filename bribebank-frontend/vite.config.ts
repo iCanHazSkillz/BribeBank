@@ -11,13 +11,17 @@ export default defineConfig(({ mode }) => {
     const swTimestampPlugin = {
       name: 'sw-timestamp',
       apply: 'build',
-      closeBundle() {
-        const swPath = 'dist/service-worker.js';
-        const timestamp = Date.now();
-        let swContent = readFileSync(swPath, 'utf-8');
-        swContent = swContent.replace('{{BUILD_TIMESTAMP}}', timestamp.toString());
-        writeFileSync(swPath, swContent);
-        console.log(`✓ Service Worker cache busted with timestamp: ${timestamp}`);
+      writeBundle() {
+        try {
+          const swPath = 'dist/service-worker.js';
+          const timestamp = Date.now();
+          let swContent = readFileSync(swPath, 'utf-8');
+          swContent = swContent.replace('{{BUILD_TIMESTAMP}}', timestamp.toString());
+          writeFileSync(swPath, swContent);
+          console.log(`✓ Service Worker cache busted with timestamp: ${timestamp}`);
+        } catch (error: any) {
+          console.warn(`⚠ Could not update service worker timestamp:`, error.message);
+        }
       }
     };
     

@@ -53,14 +53,14 @@ export const getWheelConfig = async (req: Request, res: Response) => {
 
     const family = await prisma.family.findUnique({
       where: { id: familyId },
-      select: { wheelSpinCost: true },
+      select: { wheelSpinCost: true, ticketConversionRate: true },
     });
 
     if (!family) {
       return res.status(404).json({ error: "FAMILY_NOT_FOUND" });
     }
 
-    return res.json({ spinCost: family.wheelSpinCost });
+    return res.json({ spinCost: family.wheelSpinCost, ticketConversionRate: family.ticketConversionRate });
   } catch (err: any) {
     if (err && typeof err === "object" && "status" in err) {
       return res.status(err.status).json({ error: err.error });
@@ -376,6 +376,52 @@ export const spinWheel = async (req: Request, res: Response) => {
     }
 
     console.error("spinWheel error:", err);
+    return res.status(500).json({ error: "INTERNAL_SERVER_ERROR" });
+  }
+};
+
+/**
+ * PUT /families/:familyId/ticket-conversion-rate
+ * Update the ticket to dollar conversion rate (parent only)
+ */
+export const updateTicketConversionRate = async (req: Request, res: Response) => {
+  const { familyId } = req.params;
+  const { conversionRate } = req.body;
+
+  if (!familyId) {
+    return res.status(400).json({ error: "MISSING_FAMILY_ID" });
+  }
+
+  if (typeof conversionRate !== "number" || conversionRate < 1) {
+    return res.status(400).json({ error: "Invalid conversion rate. Must be a number >= 1" });
+  }
+
+  try {
+    const user = await assertFamilyMember(req, familyId);
+    assertParent(user);
+
+    const updated = await prisma.family.update({
+      where: { id: familyId },
+      data: { ticketConversionRate: conversionRate },
+      select: { ticketConversionRate: true },
+    });
+
+    // Broadcast update
+    const event: SseEvent = {
+      type: "WALLET_UPDATE",
+      familyId,
+      reason: "CONVERSION_RATE_UPDATED",
+      timestamp: Date.now(),
+    };
+    broadcastToFamily(familyId, event);
+
+    return res.json({ conversionRate: updated.ticketConversionRate });
+  } catch (err: any) {
+    if (err && typeof err === "object" && "status" in err) {
+      return res.status(err.status).json({ error: err.error });
+    }
+
+    console.error("updateTicketConversionRate error:", err);
     return res.status(500).json({ error: "INTERNAL_SERVER_ERROR" });
   }
 };

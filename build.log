@@ -1,0 +1,165 @@
+#1 [internal] load local bake definitions
+#1 reading from stdin 1.20kB done
+#1 DONE 0.0s
+
+#2 [bribebank-api internal] load build definition from Dockerfile
+#2 transferring dockerfile: 956B 0.0s done
+#2 DONE 0.2s
+
+#3 [bribebank-frontend internal] load build definition from Dockerfile
+#3 transferring dockerfile: 476B 0.0s done
+#3 DONE 0.3s
+
+#4 [bribebank-api internal] load metadata for docker.io/library/node:20-alpine
+#4 ...
+
+#5 [auth] library/nginx:pull token for registry-1.docker.io
+#5 DONE 0.0s
+
+#6 [bribebank-frontend internal] load metadata for docker.io/library/nginx:alpine
+#6 ...
+
+#4 [bribebank-api internal] load metadata for docker.io/library/node:20-alpine
+#4 DONE 0.8s
+
+#7 [bribebank-api internal] load .dockerignore
+#7 transferring context:
+#7 transferring context: 2B 0.0s done
+#7 DONE 0.5s
+
+#6 [bribebank-frontend internal] load metadata for docker.io/library/nginx:alpine
+#6 ...
+
+#8 [bribebank-api internal] load build context
+#8 DONE 0.0s
+
+#9 [bribebank-api builder 1/9] FROM docker.io/library/node:20-alpine@sha256:643e7036aa985317ebfee460005e322aa550c6b6883000d01daefb58689a58e2
+#9 resolve docker.io/library/node:20-alpine@sha256:643e7036aa985317ebfee460005e322aa550c6b6883000d01daefb58689a58e2
+#9 resolve docker.io/library/node:20-alpine@sha256:643e7036aa985317ebfee460005e322aa550c6b6883000d01daefb58689a58e2 0.3s done
+#9 DONE 0.3s
+
+#8 [bribebank-api internal] load build context
+#8 transferring context: 14.39kB 0.0s done
+#8 DONE 0.2s
+
+#10 [bribebank-api builder 5/9] RUN npm install
+#10 CACHED
+
+#11 [bribebank-api builder 6/9] COPY prisma ./prisma
+#11 CACHED
+
+#12 [bribebank-api builder 2/9] RUN apk add --no-cache openssl
+#12 CACHED
+
+#13 [bribebank-api builder 3/9] WORKDIR /app
+#13 CACHED
+
+#14 [bribebank-api builder 4/9] COPY package.json package-lock.json* ./
+#14 CACHED
+
+#15 [bribebank-api builder 7/9] RUN npx prisma generate
+#15 CACHED
+
+#16 [bribebank-api builder 8/9] COPY . .
+#16 ...
+
+#6 [bribebank-frontend internal] load metadata for docker.io/library/nginx:alpine
+#6 DONE 2.3s
+
+#17 [bribebank-frontend internal] load .dockerignore
+#17 transferring context: 2B 0.0s done
+#17 DONE 0.3s
+
+#16 [bribebank-api builder 8/9] COPY . .
+#16 DONE 0.8s
+
+#9 [bribebank-frontend builder 1/9] FROM docker.io/library/node:20-alpine@sha256:643e7036aa985317ebfee460005e322aa550c6b6883000d01daefb58689a58e2
+#9 resolve docker.io/library/node:20-alpine@sha256:643e7036aa985317ebfee460005e322aa550c6b6883000d01daefb58689a58e2 0.3s done
+#9 DONE 0.3s
+
+#18 [bribebank-frontend internal] load build context
+#18 transferring context: 1.60kB 0.0s done
+#18 DONE 0.7s
+
+#19 [bribebank-frontend stage-1 1/3] FROM docker.io/library/nginx:alpine@sha256:052b75ab72f690f33debaa51c7e08d9b969a0447a133eb2b99cc905d9188cb2b
+#19 resolve docker.io/library/nginx:alpine@sha256:052b75ab72f690f33debaa51c7e08d9b969a0447a133eb2b99cc905d9188cb2b
+#19 resolve docker.io/library/nginx:alpine@sha256:052b75ab72f690f33debaa51c7e08d9b969a0447a133eb2b99cc905d9188cb2b 0.9s done
+#19 DONE 0.9s
+
+#20 [bribebank-frontend builder 6/6] RUN npm run build
+#20 CACHED
+
+#21 [bribebank-frontend stage-1 2/3] WORKDIR /usr/share/nginx/html
+#21 CACHED
+
+#22 [bribebank-frontend builder 5/6] COPY . .
+#22 CACHED
+
+#23 [bribebank-frontend builder 2/6] WORKDIR /app
+#23 CACHED
+
+#24 [bribebank-frontend builder 3/6] COPY package.json package-lock.json* ./
+#24 CACHED
+
+#25 [bribebank-frontend builder 4/6] RUN npm install
+#25 CACHED
+
+#26 [bribebank-frontend stage-1 3/3] COPY --from=builder /app/dist ./
+#26 CACHED
+
+#27 [bribebank-frontend] exporting to image
+#27 exporting layers done
+#27 exporting manifest sha256:dacacfd2c9a66f0b010435d6ccf6de0164bbbd6084af71d21c4b3ba9a10bf502 0.1s done
+#27 exporting config sha256:e137d52a2af8b6de8ac4f5ddfdad391b653b408e0d14f67ba0d06e6c7d1c3ae1
+#27 exporting config sha256:e137d52a2af8b6de8ac4f5ddfdad391b653b408e0d14f67ba0d06e6c7d1c3ae1 0.1s done
+#27 exporting attestation manifest sha256:e64ef57c7c537ac936e20b2b6396dfe28543f0df2bb5ec578a96c116f3b90188
+#27 exporting attestation manifest sha256:e64ef57c7c537ac936e20b2b6396dfe28543f0df2bb5ec578a96c116f3b90188 0.5s done
+#27 exporting manifest list sha256:91d168f414683e074b91cb41e7390fc5cad4863b74d0a8a8c5a704fa0058bea4
+#27 exporting manifest list sha256:91d168f414683e074b91cb41e7390fc5cad4863b74d0a8a8c5a704fa0058bea4 0.2s done
+#27 naming to docker.io/library/bribebank-bribebank-frontend:latest 0.0s done
+#27 unpacking to docker.io/library/bribebank-bribebank-frontend:latest 0.1s done
+#27 DONE 1.4s
+
+#28 [bribebank-api builder 9/9] RUN npm run build
+#28 2.263 
+#28 2.263 > bribebank-api@1.0.0 build
+#28 2.263 > tsc
+#28 2.263 
+#28 ...
+
+#29 [bribebank-frontend] resolving provenance for metadata file
+#29 DONE 0.0s
+
+#28 [bribebank-api builder 9/9] RUN npm run build
+#28 8.399 src/controllers/templateController.ts(192,17): error TS2322: Type '"STANDARD"' is not assignable to type 'PrizeType | undefined'.
+#28 ERROR: process "/bin/sh -c npm run build" did not complete successfully: exit code: 2
+------
+ > [bribebank-api builder 9/9] RUN npm run build:
+2.263 
+2.263 > bribebank-api@1.0.0 build
+2.263 > tsc
+2.263 
+8.399 src/controllers/templateController.ts(192,17): error TS2322: Type '"STANDARD"' is not assignable to type 'PrizeType | undefined'.
+------
+Dockerfile:21
+
+--------------------
+
+  19 |     
+
+  20 |     # Build TS
+
+  21 | >>> RUN npm run build
+
+  22 |     
+
+  23 |     ##############################
+
+--------------------
+
+target bribebank-api: failed to solve: process "/bin/sh -c npm run build" did not complete successfully: exit code: 2
+
+
+
+View build details: docker-desktop://dashboard/build/default/default/rp198ipbea9ir50gwk5jnw79u
+

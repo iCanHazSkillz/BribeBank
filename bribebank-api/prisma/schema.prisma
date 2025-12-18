@@ -24,6 +24,7 @@ model Family {
   joinCode       String?   @unique
   joinCodeExpiry DateTime?
   wheelSpinCost  Int       @default(1)
+  ticketConversionRate Int @default(10) // 10 tickets = $1 by default
 
   users     User[]
   bounties  Bounty[]

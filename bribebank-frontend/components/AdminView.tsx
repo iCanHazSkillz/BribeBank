@@ -3,7 +3,7 @@ import { AssignedPrize, PrizeStatus, PrizeTemplate, User, PrizeType, UserRole, H
 import { storageService } from '../services/storageService';
 import { API_BASE } from "../config";
 import { PrizeCard } from './PrizeCard';
-import { Trash2, Check, X, Gift, Edit2, CheckCircle, AlertCircle, UserPlus, Shield, User as UserIcon, KeyRound, History, Plus, ListTodo, CircleDollarSign, Search, Zap, Bell, Settings, ShoppingBag, Link as Linkicon, Image as ImageIcon, Ticket, RotateCcw, Send, ArrowUp, Sun, Moon } from 'lucide-react';
+import { Trash2, Check, X, Gift, Edit2, CheckCircle, AlertCircle, UserPlus, Shield, User as UserIcon, KeyRound, History, Plus, ListTodo, CircleDollarSign, Search, Zap, Bell, Settings, ShoppingBag, Link as Linkicon, Image as ImageIcon, Ticket, RotateCcw, Send, ArrowUp, Sun, Moon, ChevronDown, Download, Upload, HeartHandshake } from 'lucide-react';
 import { SseEvent } from "../types/sseEvents";
 import { useTheme } from '../contexts/ThemeContext';
 import EmojiPicker from "emoji-picker-react";
@@ -45,6 +45,8 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, o
   const [wheelSegments, setWheelSegments] = useState<WheelSegment[]>([]);
   const [history, setHistory] = useState<HistoryEvent[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [currentFamily, setCurrentFamily] = useState<Family | null>(null);
+  const [tempConversionRate, setTempConversionRate] = useState<string>('10');
   
   // Selection & Filter State
   const [searchTerm, setSearchTerm] = useState('');
@@ -65,6 +67,16 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, o
   // Create Template State
   const [createMode, setCreateMode] = useState<'reward' | 'bounty'>('reward');
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [createTab, setCreateTab] = useState<'rewards' | 'bounties' | 'import'>('rewards');
+  
+  // Import State
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importType, setImportType] = useState<'rewards' | 'bounties'>('rewards');
+  const [importPreview, setImportPreview] = useState<any[] | null>(null);
+  const [importErrors, setImportErrors] = useState<string[]>([]);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importDuplicates, setImportDuplicates] = useState<Set<number>>(new Set()); // Track duplicate indices
+  const [importSelected, setImportSelected] = useState<Set<number>>(new Set()); // Track which items are selected
   
   // Reward Form
   const [prizeTitle, setPrizeTitle] = useState('');
@@ -193,6 +205,16 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, o
       //----------------------------------------------------
       setWheelSegments(wheelSegmentsFromApi);
       setWheelSpinCost(wheelConfigFromApi.spinCost);
+      
+      // Set current family with wheel config data
+      setCurrentFamily({
+        id: familyId,
+        name: 'Family',
+        createdAt: Date.now(),
+        wheelSpinCost: wheelConfigFromApi.spinCost,
+        ticketConversionRate: wheelConfigFromApi.ticketConversionRate || 10,
+      });
+      setTempConversionRate(String(wheelConfigFromApi.ticketConversionRate || 10));
       
       // Calculate winning chance from segments (exclude Try Again segments)
       const prizeSegments = wheelSegmentsFromApi.filter((s: any) => !s.label.toLowerCase().includes('try again'));
@@ -566,6 +588,7 @@ const handleBulkAssign = async () => {
   const handleEditReward = (t: PrizeTemplate) => {
       resetForms();
       setCreateMode('reward');
+      setCreateTab('rewards');
       setEditingId(t.id);
       setPrizeTitle(t.title);
       setPrizeDesc(t.description);
@@ -577,6 +600,7 @@ const handleBulkAssign = async () => {
   const handleEditBounty = (b: BountyTemplate) => {
       resetForms();
       setCreateMode('bounty');
+      setCreateTab('bounties');
       setEditingId(b.id);
       setBountyTitle(b.title);
       setBountyRewardType(b.rewardType || 'CUSTOM');
@@ -822,6 +846,131 @@ const handleBulkAssign = async () => {
       showToast("User deleted.", "success");
     } catch (e: any) {
       showToast(e.message || "Error deleting user", "error");
+    }
+  };
+
+  // Template Export/Import
+  const handleExportTemplate = async (type: 'rewards' | 'bounties') => {
+    try {
+      showToast(`Exporting ${type}...`, 'success');
+      const blob = await storageService.exportTemplate(type);
+      
+      // Create download link
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `bribebank-${type}-${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      
+      showToast(`${type} exported successfully`, 'success');
+    } catch (error: any) {
+      showToast(error.message || `Failed to export ${type}`, 'error');
+    }
+  };
+
+  const handleImportFile = async (file: File) => {
+    try {
+      if (!file.name.endsWith('.json')) {
+        showToast('Please select a JSON file', 'error');
+        return;
+      }
+
+      if (file.size > 5 * 1024 * 1024) {
+        showToast('File must be less than 5MB', 'error');
+        return;
+      }
+
+      const text = await file.text();
+      const importData = JSON.parse(text);
+      console.log('[Import] Parsed file:', JSON.stringify(importData, null, 2));
+
+      // Validate basic structure
+      if (!importData.type || !importData.items || !Array.isArray(importData.items)) {
+        showToast('Invalid template file format', 'error');
+        return;
+      }
+
+      setImportType(importData.type);
+      setImportPreview(importData.items);
+      
+      // Detect duplicates - match same criteria as backend
+      const duplicates = new Set<number>();
+      const existingItems = importData.type === 'rewards' ? templates : bountyTemplates;
+      
+      importData.items.forEach((item: any, idx: number) => {
+        const isDuplicate = existingItems.some((existing: any) => {
+          // For rewards: match on title, emoji, description, themeColor
+          // For bounties: match on title, emoji, description (empty), themeColor
+          return (
+            existing.title === item.name &&
+            existing.emoji === item.icon &&
+            (existing.description || '') === (item.description || '') &&
+            existing.themeColor === item.color
+          );
+        });
+        if (isDuplicate) {
+          duplicates.add(idx);
+        }
+      });
+      
+      setImportDuplicates(duplicates);
+      
+      // Initially select all non-duplicate items
+      const selected = new Set<number>();
+      importData.items.forEach((_: any, idx: number) => {
+        if (!duplicates.has(idx)) {
+          selected.add(idx);
+        }
+      });
+      setImportSelected(selected);
+      
+      setImportErrors([]);
+      setShowImportModal(true);
+    } catch (error: any) {
+      showToast(error.message || 'Failed to read file', 'error');
+    }
+  };
+
+  const handleConfirmImport = async () => {
+    if (!importPreview) return;
+
+    setIsImporting(true);
+    try {
+      // Only send selected items
+      const selectedItems = importPreview.filter((_, idx) => importSelected.has(idx));
+      
+      if (selectedItems.length === 0) {
+        showToast('Please select at least one item to import', 'warning');
+        setIsImporting(false);
+        return;
+      }
+      
+      const payload = {
+        version: '1.0',
+        exportDate: new Date().toISOString(),
+        type: importType,
+        items: selectedItems,
+      };
+      console.log('[Import] Sending payload:', JSON.stringify(payload, null, 2));
+      
+      const result = await storageService.importTemplate(payload);
+
+      if (result.errors && result.errors.length > 0) {
+        setImportErrors(result.errors);
+        showToast(`${result.imported} items imported with ${result.errors.length} errors`, 'success');
+      } else {
+        showToast(`Successfully imported ${result.imported} ${importType}`, 'success');
+        setShowImportModal(false);
+      }
+
+      await refreshData();
+    } catch (error: any) {
+      showToast(error.message || `Failed to import ${importType}`, 'error');
+    } finally {
+      setIsImporting(false);
     }
   };
 
@@ -1590,20 +1739,20 @@ const handleBulkAssign = async () => {
           }}
         >
           <div
-            className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 mx-4"
+            className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-md p-6 mx-4"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-lg font-bold text-gray-900 mb-2">
+            <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">
               {confirmState.title}
             </h3>
-            <p className="text-sm text-gray-600 mb-6">
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
               {confirmState.message}
             </p>
 
             <div className="flex justify-end gap-3">
               <button
                 type="button"
-                className="px-4 py-2 text-sm rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-50"
+                className="px-4 py-2 text-sm rounded-xl border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
                 onClick={() => {
                   confirmResolveRef.current?.(false);
                   setConfirmState(null);
@@ -1617,8 +1766,8 @@ const handleBulkAssign = async () => {
                 className={
                   "px-4 py-2 text-sm rounded-xl text-white " +
                   (confirmState.destructive
-                    ? "bg-red-500 hover:bg-red-600"
-                    : "bg-blue-600 hover:bg-blue-700")
+                    ? "bg-red-500 hover:bg-red-600 dark:bg-red-600 dark:hover:bg-red-700"
+                    : "bg-blue-600 hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-700")
                 }
                 onClick={() => {
                   confirmResolveRef.current?.(true);
@@ -1837,17 +1986,44 @@ const handleBulkAssign = async () => {
         {tab === 'assign' && (
           <>
             {/* Sub Tabs */}
-            <div className="flex gap-4 mb-6 border-b border-gray-200">
-                <button onClick={() => setAssignSubTab('rewards')} className={`pb-2 text-sm font-bold ${assignSubTab === 'rewards' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-400'}`}>Give Rewards</button>
-                <button onClick={() => setAssignSubTab('bounties')} className={`pb-2 text-sm font-bold ${assignSubTab === 'bounties' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-400'}`}>Assign Tasks</button>
-                <button onClick={() => setAssignSubTab('tickets')} className={`pb-2 text-sm font-bold ${assignSubTab === 'tickets' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-400'}`}>Give Tickets</button>
+            <div className="flex gap-2 mb-6 bg-gray-100 dark:bg-gray-800 p-1 rounded-lg">
+                <button 
+                  onClick={() => setAssignSubTab('rewards')} 
+                  className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${
+                    assignSubTab === 'rewards' 
+                      ? 'bg-white dark:bg-gray-600 shadow-sm text-indigo-600 dark:text-indigo-400' 
+                      : 'text-gray-500 dark:text-gray-400'
+                  }`}
+                >
+                  Give Rewards
+                </button>
+                <button 
+                  onClick={() => setAssignSubTab('bounties')} 
+                  className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${
+                    assignSubTab === 'bounties' 
+                      ? 'bg-white dark:bg-gray-600 shadow-sm text-indigo-600 dark:text-indigo-400' 
+                      : 'text-gray-500 dark:text-gray-400'
+                  }`}
+                >
+                  Assign Tasks
+                </button>
+                <button 
+                  onClick={() => setAssignSubTab('tickets')} 
+                  className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${
+                    assignSubTab === 'tickets' 
+                      ? 'bg-white dark:bg-gray-600 shadow-sm text-indigo-600 dark:text-indigo-400' 
+                      : 'text-gray-500 dark:text-gray-400'
+                  }`}
+                >
+                  Give Tickets
+                </button>
             </div>
 
             <div className="mb-6 overflow-x-auto no-scrollbar">
               <label className="block text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">
                 Select Family Members
               </label>
-              <div className="flex gap-3">
+              <div className="flex gap-3 px-1 py-1">
                 {assignableUsers.map((user) => {
                   const isSelected = selectedUsers.includes(user.id);
 
@@ -1945,13 +2121,13 @@ const handleBulkAssign = async () => {
                             placeholder="Search tasks..."
                             value={searchTerm}
                             onChange={e => setSearchTerm(e.target.value)}
-                            className="w-full pl-10 pr-10 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-all text-gray-900 placeholder-gray-400"
+                            className="w-full pl-10 pr-10 py-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-indigo-200 dark:focus:ring-indigo-700 focus:border-indigo-500 dark:focus:border-indigo-400 outline-none transition-all text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500"
                         />
-                        <Search className="absolute left-3 top-3.5 text-gray-400" size={20}/>
+                        <Search className="absolute left-3 top-3.5 text-gray-400 dark:text-gray-500" size={20}/>
                         {searchTerm && (
                             <button
                                 onClick={() => setSearchTerm('')}
-                                className="absolute right-3 top-3.5 text-gray-400 hover:text-gray-600 transition-colors"
+                                className="absolute right-3 top-3.5 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 transition-colors"
                             >
                                 <X size={20} />
                             </button>
@@ -2010,12 +2186,18 @@ const handleBulkAssign = async () => {
                                 </div>
 
                                 {selectedUsers.length > 0 && ticketAmount && parseInt(ticketAmount) > 0 && (
-                                    <div className="bg-indigo-50 p-3 rounded-xl">
-                                        <p className="text-sm text-indigo-800 font-medium">
-                                            Give <span className="font-bold">{ticketAmount}</span> tickets to{' '}
-                                            <span className="font-bold">{selectedUsers.length}</span> child(ren)
+                                    <div className="bg-gradient-to-r from-purple-100 to-indigo-100 dark:from-purple-900/30 dark:to-indigo-900/30 border border-purple-200 dark:border-purple-700 p-4 rounded-xl">
+                                        <p className="text-sm font-medium text-purple-900 dark:text-purple-100">
+                                            💡 <span className="font-bold">{ticketAmount} tickets</span> = <span className="font-semibold">${((parseInt(ticketAmount) / (currentFamily?.ticketConversionRate || 10)) || 0).toFixed(2)}</span>
                                         </p>
                                     </div>
+                                )}
+
+                                {selectedUsers.length > 0 && ticketAmount && parseInt(ticketAmount) > 0 && (
+                                    <button onClick={handleGiveTickets} className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 dark:from-purple-500 dark:to-indigo-500 text-white py-3 rounded-xl shadow-lg flex items-center justify-center gap-2 font-bold hover:from-purple-700 hover:to-indigo-700 dark:hover:from-purple-600 dark:hover:to-indigo-600 transition-all">
+                                        <Send size={20} className="text-purple-200"/>
+                                        <span>Give Tickets</span>
+                                    </button>
                                 )}
                             </div>
                         </div>
@@ -2025,31 +2207,67 @@ const handleBulkAssign = async () => {
 
             {/* Action Buttons */}
             {assignSubTab === 'rewards' && selectedTemplateIds.length > 0 && (
-                <div className="fixed bottom-24 left-0 right-0 px-6 z-30 flex justify-center animate-bounce-in">
-                    <button onClick={handleBulkAssign} className="bg-gray-900 text-white w-full max-w-md py-4 rounded-2xl shadow-2xl flex items-center justify-center gap-3 font-bold text-lg">
-                        <Gift size={24} className="text-indigo-400"/>
-                        <span>Send Rewards</span>
-                    </button>
+                <div className="fixed bottom-24 left-1/2 -translate-x-1/2 px-6 z-30 flex justify-center animate-bounce-in">
+                    <div className="relative w-full max-w-lg">
+                        <button onClick={handleBulkAssign} className="bg-gradient-to-r from-indigo-600 to-indigo-700 dark:from-indigo-500 dark:to-indigo-600 text-white w-full py-4 rounded-l-2xl shadow-2xl flex items-center justify-center gap-3 font-bold text-lg hover:from-indigo-700 hover:to-indigo-800 dark:hover:from-indigo-600 dark:hover:to-indigo-700 transition-all">
+                            <Gift size={24} className="text-indigo-200"/>
+                            <span>Send Rewards</span>
+                        </button>
+                        <button 
+                            onClick={() => {
+                                const menu = document.getElementById('rewards-export-menu');
+                                if (menu) menu.classList.toggle('hidden');
+                            }}
+                            className="absolute right-0 top-0 bottom-0 bg-indigo-600 dark:bg-indigo-500 text-white px-4 rounded-r-2xl border-l border-indigo-700 dark:border-indigo-600 hover:bg-indigo-700 dark:hover:bg-indigo-600 transition-colors"
+                        >
+                            <ChevronDown size={20} />
+                        </button>
+                        <div id="rewards-export-menu" className="hidden absolute bottom-full mb-2 right-0 bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden w-48 z-50">
+                            <button 
+                                onClick={() => {
+                                    handleExportTemplate('rewards');
+                                    document.getElementById('rewards-export-menu')?.classList.add('hidden');
+                                }}
+                                className="w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-800 dark:text-white transition-colors"
+                            >
+                                Export as Template
+                            </button>
+                        </div>
+                    </div>
                 </div>
             )}
 
             {assignSubTab === 'bounties' && selectedBountyTemplateIds.length > 0 && (
-                <div className="fixed bottom-24 left-0 right-0 px-6 z-30 flex justify-center animate-bounce-in">
-                    <button onClick={handleBulkAssign} className="bg-gray-900 text-white w-full max-w-md py-4 rounded-2xl shadow-2xl flex items-center justify-center gap-3 font-bold text-lg">
-                        <ListTodo size={24} className="text-indigo-400"/>
-                        <span>Assign Tasks</span>
-                    </button>
+                <div className="fixed bottom-24 left-1/2 -translate-x-1/2 px-6 z-30 flex justify-center animate-bounce-in">
+                    <div className="relative w-full max-w-md">
+                        <button onClick={handleBulkAssign} className="bg-gradient-to-r from-purple-600 to-indigo-600 dark:from-purple-500 dark:to-indigo-500 text-white w-full py-4 rounded-l-2xl shadow-2xl flex items-center justify-center gap-3 font-bold text-lg hover:from-purple-700 hover:to-indigo-700 dark:hover:from-purple-600 dark:hover:to-indigo-600 transition-all">
+                            <ListTodo size={24} className="text-amber-200"/>
+                            <span>Assign Tasks</span>
+                        </button>
+                        <button 
+                            onClick={() => {
+                                const menu = document.getElementById('bounties-export-menu');
+                                if (menu) menu.classList.toggle('hidden');
+                            }}
+                            className="absolute right-0 top-0 bottom-0 bg-purple-600 dark:bg-purple-500 text-white px-4 rounded-r-2xl border-l border-purple-700 dark:border-purple-600 hover:bg-purple-700 dark:hover:bg-purple-600 transition-colors"
+                        >
+                            <ChevronDown size={20} />
+                        </button>
+                        <div id="bounties-export-menu" className="hidden absolute bottom-full mb-2 right-0 bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden w-48 z-50">
+                            <button 
+                                onClick={() => {
+                                    handleExportTemplate('bounties');
+                                    document.getElementById('bounties-export-menu')?.classList.add('hidden');
+                                }}
+                                className="w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-800 dark:text-white transition-colors"
+                            >
+                                Export as Template
+                            </button>
+                        </div>
+                    </div>
                 </div>
             )}
 
-            {assignSubTab === 'tickets' && selectedUsers.length > 0 && ticketAmount && parseInt(ticketAmount) > 0 && (
-                <div className="fixed bottom-24 left-0 right-0 px-6 z-30 flex justify-center animate-bounce-in">
-                    <button onClick={handleGiveTickets} className="bg-gray-900 text-white w-full max-w-md py-4 rounded-2xl shadow-2xl flex items-center justify-center gap-3 font-bold text-lg">
-                        <Send size={24} className="text-purple-400"/>
-                        <span>Give Tickets</span>
-                    </button>
-                </div>
-            )}
           </>
         )}
 
@@ -2198,47 +2416,125 @@ const handleBulkAssign = async () => {
             <div className="flex bg-gray-100 dark:bg-gray-800 p-1 rounded-xl mb-4">
               <button
                 type="button"
-                onClick={() => setCreateMode("reward")}
+                onClick={() => { setCreateTab('rewards'); setCreateMode("reward"); }}
                 className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${
-                  createMode === "reward"
+                  createTab === "rewards"
                     ? "bg-white dark:bg-gray-700 shadow-sm text-indigo-600 dark:text-indigo-400"
                     : "text-gray-500 dark:text-gray-400"
                 }`}
               >
-                Reward
+                Rewards
               </button>
               <button
                 type="button"
-                onClick={() => setCreateMode("bounty")}
+                onClick={() => { setCreateTab('bounties'); setCreateMode("bounty"); }}
                 className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${
-                  createMode === "bounty"
+                  createTab === "bounties"
                     ? "bg-white dark:bg-gray-700 shadow-sm text-indigo-600 dark:text-indigo-400"
                     : "text-gray-500 dark:text-gray-400"
                 }`}
               >
-                Task/Bounty
+                Tasks
+              </button>
+              <button
+                type="button"
+                onClick={() => setCreateTab('import')}
+                className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2 ${
+                  createTab === "import"
+                    ? "bg-white dark:bg-gray-700 shadow-sm text-indigo-600 dark:text-indigo-400"
+                    : "text-gray-500 dark:text-gray-400"
+                }`}
+              >
+                <Upload size={16} />
+                Import
               </button>
             </div>
 
-            <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-700">
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="text-xl font-bold text-gray-800 dark:text-white">
-                  {editingId ? "Edit" : "Create"}{" "}
-                  {createMode === "reward" ? "Reward" : "Task"}
-                </h3>
-                {editingId && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      resetForms();
-                      setTab("assign");
-                    }}
-                    className="text-gray-400"
-                  >
-                    Cancel
-                  </button>
-                )}
+            {createTab === 'import' ? (
+              // Import Tab Content
+              <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-700">
+                <h3 className="text-xl font-bold text-gray-800 dark:text-white mb-4">Import Templates</h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
+                      What would you like to import?
+                    </label>
+                    <div className="flex gap-3">
+                      <button
+                        onClick={() => setImportType('rewards')}
+                        className={`flex-1 py-2 px-4 rounded-lg border transition-colors ${
+                          importType === 'rewards'
+                            ? 'bg-indigo-100 dark:bg-indigo-900/30 border-indigo-300 dark:border-indigo-600 text-indigo-700 dark:text-indigo-300'
+                            : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700'
+                        }`}
+                      >
+                        Rewards
+                      </button>
+                      <button
+                        onClick={() => setImportType('bounties')}
+                        className={`flex-1 py-2 px-4 rounded-lg border transition-colors ${
+                          importType === 'bounties'
+                            ? 'bg-indigo-100 dark:bg-indigo-900/30 border-indigo-300 dark:border-indigo-600 text-indigo-700 dark:text-indigo-300'
+                            : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700'
+                        }`}
+                      >
+                        Tasks
+                      </button>
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
+                      Select JSON Template File
+                    </label>
+                    <input
+                      type="file"
+                      id="template-import"
+                      accept=".json"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          handleImportFile(file);
+                        }
+                      }}
+                    />
+                    <label
+                      htmlFor="template-import"
+                      className="block w-full px-6 py-4 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl text-center cursor-pointer hover:border-indigo-500 dark:hover:border-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors"
+                    >
+                      <div className="flex flex-col items-center gap-2">
+                        <Upload size={24} className="text-gray-400" />
+                        <div>
+                          <p className="text-sm font-medium text-gray-700 dark:text-gray-200">Click to upload</p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">JSON files only, max 5MB</p>
+                        </div>
+                      </div>
+                    </label>
+                  </div>
+                </div>
               </div>
+            ) : (
+              // Create/Edit Reward or Task Tab Content
+              <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-700">
+                  <div className="flex items-center justify-between mb-6">
+                    <h3 className="text-xl font-bold text-gray-800 dark:text-white">
+                      {editingId ? "Edit" : "Create"}{" "}
+                      {createMode === "reward" ? "Reward" : "Task"}
+                    </h3>
+                    {editingId && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          resetForms();
+                          setTab("assign");
+                        }}
+                        className="text-gray-400"
+                      >
+                        Cancel
+                      </button>
+                    )}
+                  </div>
 
               {createMode === "reward" ? (
                 <div className="space-y-4">
@@ -2522,23 +2818,30 @@ const handleBulkAssign = async () => {
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
                       {bountyRewardType === 'TICKETS' ? 'Ticket Amount' : 'Reward Value'}
                     </label>
-                    <div className="relative">
-                      <input
-                        type={bountyRewardType === 'TICKETS' ? "number" : "text"}
-                        value={bountyRewardValue}
-                        onChange={(e) => setBountyRewardValue(e.target.value)}
-                        placeholder={bountyRewardType === 'TICKETS' ? "e.g. 5" : "e.g. $5 or 30 mins TV"}
-                        className="w-full p-3 pl-10 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:border-indigo-500 outline-none"
-                        min={bountyRewardType === 'TICKETS' ? "1" : undefined}
-                        step={bountyRewardType === 'TICKETS' ? "1" : undefined}
-                      />
-                      {bountyRewardType === 'TICKETS' ? (
-                        <Ticket className="absolute left-3 top-3.5 text-gray-400 dark:text-gray-500" size={18}/>
-                      ) : (
-                        <CircleDollarSign
-                          className="absolute left-3 top-3.5 text-gray-400 dark:text-gray-500"
-                          size={18}
+                    <div className="flex items-center gap-3">
+                      <div className="relative flex-1">
+                        <input
+                          type={bountyRewardType === 'TICKETS' ? "number" : "text"}
+                          value={bountyRewardValue}
+                          onChange={(e) => setBountyRewardValue(e.target.value)}
+                          placeholder={bountyRewardType === 'TICKETS' ? "e.g. 5" : "e.g. $5 or 30 mins TV"}
+                          className="w-full p-3 pl-10 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:border-indigo-500 outline-none"
+                          min={bountyRewardType === 'TICKETS' ? "1" : undefined}
+                          step={bountyRewardType === 'TICKETS' ? "1" : undefined}
                         />
+                        {bountyRewardType === 'TICKETS' ? (
+                          <Ticket className="absolute left-3 top-3.5 text-gray-400 dark:text-gray-500" size={18}/>
+                        ) : (
+                          <CircleDollarSign
+                            className="absolute left-3 top-3.5 text-gray-400 dark:text-gray-500"
+                            size={18}
+                          />
+                        )}
+                      </div>
+                      {bountyRewardType === 'TICKETS' && bountyRewardValue && parseInt(bountyRewardValue) > 0 && (
+                        <div className="text-sm font-medium text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                          = ${((parseInt(bountyRewardValue) / (currentFamily?.ticketConversionRate || 10)) || 0).toFixed(2)}
+                        </div>
                       )}
                     </div>
                   </div>
@@ -2622,7 +2925,8 @@ const handleBulkAssign = async () => {
                   Delete Template
                 </button>
               )}
-            </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -2663,6 +2967,60 @@ const handleBulkAssign = async () => {
                     <Plus size={20} className="inline" /> New Item
                   </div>
                 </button>
+
+                {/* Ticket Conversion Rate Settings */}
+                <div className="bg-gradient-to-br from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20 border border-emerald-200 dark:border-emerald-700 rounded-2xl p-6">
+                    <div className="flex items-start justify-between mb-4">
+                        <div>
+                            <h3 className="text-lg font-bold text-emerald-900 dark:text-emerald-100 flex items-center gap-2">
+                                <CircleDollarSign size={20}/>
+                                Ticket Conversion Rate
+                            </h3>
+                            <p className="text-sm text-emerald-700 dark:text-emerald-300 mt-1">
+                                Set how many tickets equal $1 for reference
+                            </p>
+                        </div>
+                    </div>
+                    
+                    <div className="flex flex-col gap-4">
+                        <div className="flex items-center gap-4">
+                            <div className="flex items-center gap-2 bg-white dark:bg-gray-700 p-4 rounded-xl border border-emerald-200 dark:border-emerald-700 w-fit">
+                                <input 
+                                    type="number" 
+                                    min="1"
+                                    value={tempConversionRate}
+                                    onChange={(e) => setTempConversionRate(e.target.value)}
+                                    placeholder="10"
+                                    className="w-20 text-2xl font-bold text-emerald-600 dark:text-emerald-400 bg-transparent outline-none text-center"
+                                />
+                                <span className="text-lg font-semibold text-gray-700 dark:text-gray-300">tickets = $1</span>
+                            </div>
+                            <div className="text-sm text-emerald-700 dark:text-emerald-300 font-medium space-y-1">
+                                <div>1 ticket = ${(1 / (parseInt(tempConversionRate) || 10)).toFixed(2)}</div>
+                                <div>10 tickets = ${(10 / (parseInt(tempConversionRate) || 10)).toFixed(2)}</div>
+                                <div>100 tickets = ${(100 / (parseInt(tempConversionRate) || 10)).toFixed(2)}</div>
+                            </div>
+                        </div>
+                        {tempConversionRate !== String(currentFamily?.ticketConversionRate || 10) && (
+                            <button
+                                onClick={() => {
+                                    const val = parseInt(tempConversionRate);
+                                    if (val > 0 && currentFamily?.id) {
+                                        storageService.updateTicketConversionRate(currentFamily.id, val)
+                                            .then(() => {
+                                                setCurrentFamily({...currentFamily, ticketConversionRate: val} as Family);
+                                                showToast('Conversion rate updated', 'success');
+                                            })
+                                            .catch(err => showToast(err.message, 'error'));
+                                    }
+                                }}
+                                className="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-500 dark:hover:bg-emerald-600 text-white font-bold rounded-xl transition-all max-w-xs w-fit"
+                            >
+                                Save
+                            </button>
+                        )}
+                    </div>
+                </div>
 
                 <div>
                     <h3 className="text-lg font-bold text-gray-400 dark:text-gray-300 mb-4 flex items-center gap-2">
@@ -3062,6 +3420,173 @@ const handleBulkAssign = async () => {
 
             {/* Hidden canvas for cropping */}
             <canvas ref={cropCanvasRef} className="hidden" />
+          </div>
+        </div>
+      )}
+
+      {/* Import Template Modal */}
+      {showImportModal && importPreview && (
+        <div
+          className="fixed inset-0 bg-black/80 z-[90] flex items-center justify-center p-4"
+          onClick={() => setShowImportModal(false)}
+        >
+          <div
+            className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-4xl p-6 max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-4">
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Import Preview</h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                {importSelected.size} items ready to import
+                {importDuplicates.size > 0 && (
+                  <span className="ml-2 inline-block bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-200 px-3 py-1 rounded-full text-xs">
+                    {importDuplicates.size} {importDuplicates.size === 1 ? 'duplicate' : 'duplicates'} found
+                  </span>
+                )}
+              </p>
+            </div>
+
+            {/* Preview Cards Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6 max-h-96 overflow-y-auto p-4 -m-4 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+              {importPreview.map((item, idx) => {
+                const isDuplicate = importDuplicates.has(idx);
+                const isSelected = importSelected.has(idx);
+                
+                // Parse color to gradient - extract color name from Tailwind class
+                // e.g., "bg-orange-100..." -> create orange gradient
+                const colorMatch = item.color?.match(/(orange|blue|red|green|pink|purple|yellow|teal|indigo)/i);
+                const colorName = colorMatch ? colorMatch[1].toLowerCase() : 'blue';
+                
+                // Map color names to gradient colors
+                const gradientMap: Record<string, { from: string; to: string; light: string; dark: string }> = {
+                  orange: { from: 'from-orange-400', to: 'to-orange-500', light: 'bg-orange-400', dark: 'dark:from-orange-500 dark:to-orange-600' },
+                  blue: { from: 'from-blue-400', to: 'to-blue-500', light: 'bg-blue-400', dark: 'dark:from-blue-500 dark:to-blue-600' },
+                  red: { from: 'from-red-400', to: 'to-red-500', light: 'bg-red-400', dark: 'dark:from-red-500 dark:to-red-600' },
+                  green: { from: 'from-green-400', to: 'to-green-500', light: 'bg-green-400', dark: 'dark:from-green-500 dark:to-green-600' },
+                  pink: { from: 'from-pink-400', to: 'to-pink-500', light: 'bg-pink-400', dark: 'dark:from-pink-500 dark:to-pink-600' },
+                  purple: { from: 'from-purple-400', to: 'to-purple-500', light: 'bg-purple-400', dark: 'dark:from-purple-500 dark:to-purple-600' },
+                  yellow: { from: 'from-yellow-400', to: 'to-yellow-500', light: 'bg-yellow-400', dark: 'dark:from-yellow-500 dark:to-yellow-600' },
+                  teal: { from: 'from-teal-400', to: 'to-teal-500', light: 'bg-teal-400', dark: 'dark:from-teal-500 dark:to-teal-600' },
+                  indigo: { from: 'from-indigo-400', to: 'to-indigo-500', light: 'bg-indigo-400', dark: 'dark:from-indigo-500 dark:to-indigo-600' },
+                };
+                
+                const gradient = gradientMap[colorName] || gradientMap.blue;
+                
+                return (
+                  <div
+                    key={idx}
+                    className={`relative cursor-pointer transition-all ${isDuplicate ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    onClick={() => {
+                      if (!isDuplicate) {
+                        const newSelected = new Set(importSelected);
+                        if (isSelected) {
+                          newSelected.delete(idx);
+                        } else {
+                          newSelected.add(idx);
+                        }
+                        setImportSelected(newSelected);
+                      }
+                    }}
+                  >
+                    {/* Card Background Gradient */}
+                    <div className={`relative flex flex-col p-4 rounded-2xl border-2 transition-all duration-200 shadow-sm overflow-hidden text-white bg-gradient-to-br ${gradient.from} ${gradient.to} ${isDuplicate ? 'border-gray-400 dark:border-gray-600' : isSelected ? 'border-white ring-2 ring-white ring-offset-2 ring-offset-indigo-500' : 'border-opacity-30 border-white'}`}>
+                      
+                      {/* Fast Grab Badge */}
+                      {item.isFCFS && (
+                        <div className="absolute -top-1 -left-1 px-2 py-1 bg-yellow-500 dark:bg-yellow-600 text-white rounded-br-xl rounded-tl-xl flex items-center gap-1 font-bold text-[10px] shadow-sm border-b border-r border-white dark:border-gray-800 z-20">
+                          <Zap size={10} />
+                          <span>FAST GRAB</span>
+                        </div>
+                      )}
+                      
+                      {/* Duplicate Badge */}
+                      {isDuplicate && (
+                        <div className="absolute -top-1 -right-1 px-2 py-1 bg-amber-500 text-white rounded-bl-xl rounded-tr-xl font-bold text-[10px] shadow-sm border-b border-l border-white z-20">
+                          DUPLICATE
+                        </div>
+                      )}
+                      
+                      {/* Selection Indicator */}
+                      {!isDuplicate && (
+                        <div className={`absolute top-2 right-2 w-6 h-6 rounded-full border-2 border-white flex items-center justify-center z-10 transition-all ${isSelected ? 'bg-indigo-500 shadow-lg' : 'bg-white/20 backdrop-blur-sm'}`}>
+                          {isSelected && <Check size={16} className="text-white font-bold" />}
+                        </div>
+                      )}
+                      
+                      {/* Header: Emoji + Spacing */}
+                      <div className="flex justify-between items-start mb-2 z-10 mt-1">
+                        <span className="text-4xl shadow-sm filter drop-shadow-md">{item.icon || '🎁'}</span>
+                      </div>
+                      
+                      {/* Title */}
+                      <h3 className="text-lg font-bold leading-tight mb-1 z-10 break-words">
+                        {item.name}
+                      </h3>
+                      
+                      {/* Reward Info */}
+                      {item.rewardType ? (
+                        <p className="text-sm leading-snug mb-4 flex-grow z-10 font-semibold opacity-90">
+                          {item.rewardType === 'CUSTOM' && item.rewardValue
+                            ? `Reward: ${item.rewardValue}`
+                            : item.rewardType === 'TICKETS' && item.cost
+                            ? `${item.cost} ${item.cost === 1 ? 'Ticket' : 'Tickets'}`
+                            : 'Reward'}
+                        </p>
+                      ) : (
+                        <p className="text-sm leading-snug mb-4 flex-grow z-10 font-semibold opacity-90">
+                          Reward
+                        </p>
+                      )}
+                      
+                      {/* Decorative Icon - Bottom Right */}
+                      <div className="absolute -bottom-4 -right-4 opacity-20 transform rotate-12 text-white">
+                        <HeartHandshake size={220} />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Errors (if any) */}
+            {importErrors.length > 0 && (
+              <div className="mb-6 bg-red-50 dark:bg-red-900/20 p-4 rounded-lg">
+                <p className="text-sm font-medium text-red-700 dark:text-red-400 mb-2">Import Errors:</p>
+                <ul className="space-y-1">
+                  {importErrors.map((error, idx) => (
+                    <li key={idx} className="text-xs text-red-600 dark:text-red-300">{error}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={() => setShowImportModal(false)}
+                className="flex-1 px-4 py-3 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl font-medium hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors disabled:opacity-50"
+                disabled={isImporting}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmImport}
+                className="flex-1 px-4 py-3 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                disabled={isImporting || importSelected.size === 0}
+              >
+                {isImporting ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    Importing...
+                  </>
+                ) : (
+                  <>
+                    <Download size={18} />
+                    Import {importSelected.size > 0 && `(${importSelected.size})`}
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}

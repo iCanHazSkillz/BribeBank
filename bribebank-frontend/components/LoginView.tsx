@@ -127,9 +127,9 @@ const handleSignUp = async (e: React.FormEvent) => {
         <div className="absolute bottom-1/4 left-2/3 w-12 h-12 bg-orange-400/20 rounded-full animate-float-medium" style={{ animationDelay: '2.2s' }}></div>
       </div>
       
-      <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden relative z-10">
+      <div className="bg-gray-900 w-full max-w-md rounded-3xl shadow-2xl overflow-hidden relative z-10">
         {/* Header */}
-        <div className="bg-indigo-50 p-8 text-center border-b border-indigo-100">
+        <div className="bg-gray-800 p-8 text-center border-b border-gray-700">
           <div className="flex justify-center mb-4">
             <img
               src={BribeBankLogo}
@@ -137,10 +137,10 @@ const handleSignUp = async (e: React.FormEvent) => {
               className="w-32 h-32 object-contain drop-shadow-md"
             />
           </div>
-          <h1 className="text-3xl font-extrabold text-gray-900 tracking-tight">
+          <h1 className="text-3xl font-extrabold text-white tracking-tight">
             BribeBank
           </h1>
-          <p className="text-gray-600 mt-2 font-medium">
+          <p className="text-gray-300 mt-2 font-medium">
             {isSignUp ? "Create Family Account" : "Welcome Back"}
           </p>
         </div>
@@ -148,7 +148,7 @@ const handleSignUp = async (e: React.FormEvent) => {
         {/* Form */}
         <div className="p-8">
           {error && (
-            <div className="mb-4 p-3 bg-red-50 text-red-600 text-sm rounded-lg flex items-center justify-center font-medium">
+            <div className="mb-4 p-3 bg-red-900/30 text-red-300 text-sm rounded-lg flex items-center justify-center font-medium">
               {error}
             </div>
           )}
@@ -160,25 +160,25 @@ const handleSignUp = async (e: React.FormEvent) => {
             {isSignUp && (
               <>
                 <div>
-                  <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                  <label className="block text-xs font-bold text-gray-300 uppercase tracking-wider mb-1">
                     Family Name
                   </label>
                   <input
                     type="text"
                     placeholder="e.g. The Smiths"
-                    className="w-full p-3 bg-white rounded-xl border border-gray-300 text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
+                    className="w-full p-3 bg-gray-700 rounded-xl border border-gray-600 text-white placeholder-gray-400 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
                     value={familyName}
                     onChange={(e) => setFamilyName(e.target.value)}
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                  <label className="block text-xs font-bold text-gray-300 uppercase tracking-wider mb-1">
                     Your Name (Admin)
                   </label>
                   <input
                     type="text"
                     placeholder="e.g. Dad"
-                    className="w-full p-3 bg-white rounded-xl border border-gray-300 text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
+                    className="w-full p-3 bg-gray-700 rounded-xl border border-gray-600 text-white placeholder-gray-400 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
                     value={adminName}
                     onChange={(e) => setAdminName(e.target.value)}
                   />
@@ -187,14 +187,14 @@ const handleSignUp = async (e: React.FormEvent) => {
             )}
 
             <div>
-              <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+              <label className="block text-xs font-bold text-gray-300 uppercase tracking-wider mb-1">
                 Username
               </label>
               <div className="relative">
                 <input
                   type="text"
                   placeholder="username"
-                  className="w-full p-3 pl-10 bg-white rounded-xl border border-gray-300 text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
+                  className="w-full p-3 pl-10 bg-gray-700 rounded-xl border border-gray-600 text-white placeholder-gray-400 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
                   value={username}
                   autoCapitalize="none"
                   autoCorrect="off"
@@ -203,31 +203,31 @@ const handleSignUp = async (e: React.FormEvent) => {
                 />
                 <Users
                   size={18}
-                  className="absolute left-3 top-3.5 text-gray-400"
+                  className="absolute left-3 top-3.5 text-gray-500"
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+              <label className="block text-xs font-bold text-gray-300 uppercase tracking-wider mb-1">
                 Password
               </label>
               <div className="relative">
                 <input
                   type={showPassword ? "text" : "password"}
                   placeholder="•••••••"
-                  className="w-full p-3 pl-10 pr-10 bg-white rounded-xl border border-gray-300 text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
+                  className="w-full p-3 pl-10 pr-10 bg-gray-700 rounded-xl border border-gray-600 text-white placeholder-gray-400 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                 />
                 <Lock
                   size={18}
-                  className="absolute left-3 top-3.5 text-gray-400"
+                  className="absolute left-3 top-3.5 text-gray-500"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-3.5 text-gray-400 hover:text-gray-600 transition-colors"
+                  className="absolute right-3 top-3.5 text-gray-500 hover:text-gray-300 transition-colors"
                   tabIndex={-1}
                 >
                   {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
@@ -246,7 +246,7 @@ const handleSignUp = async (e: React.FormEvent) => {
 
           {/* Toggle */}
           <div className="mt-6 text-center">
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-gray-400">
               {isSignUp
                 ? "Already have a family account?"
                 : "First time here?"}
@@ -256,7 +256,7 @@ const handleSignUp = async (e: React.FormEvent) => {
                 setIsSignUp(!isSignUp);
                 setError("");
               }}
-              className="mt-1 text-indigo-600 font-bold text-sm hover:underline flex items-center justify-center gap-1 mx-auto"
+              className="mt-1 text-indigo-400 font-bold text-sm hover:underline flex items-center justify-center gap-1 mx-auto"
             >
               {isSignUp ? "Login instead" : "Create new family wallet"}
             </button>

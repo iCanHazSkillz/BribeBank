@@ -20,6 +20,7 @@ const App: React.FC = () => {
   const [view, setView] = useState<View>("login");
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
 
   // allow AdminView to open a specific tab via deep-link
   const [initialAdminTab, setInitialAdminTab] = useState<string | undefined>(
@@ -134,6 +135,34 @@ const App: React.FC = () => {
     };
 
     void init();
+
+    // Check for service worker updates on load
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistration().then((registration) => {
+        if (registration) {
+          // Check for updates immediately
+          registration.update();
+          
+          // Listen for new service worker being installed/waiting
+          registration.addEventListener('updatefound', () => {
+            const newWorker = registration.installing;
+            if (newWorker) {
+              newWorker.addEventListener('statechange', () => {
+                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                  // There's a new service worker waiting to activate
+                  setUpdateAvailable(true);
+                }
+              });
+            }
+          });
+
+          // Also check if there's already a waiting service worker
+          if (registration.waiting) {
+            setUpdateAvailable(true);
+          }
+        }
+      });
+    }
   }, []);
 
   useEffect(() => {
@@ -168,9 +197,7 @@ const App: React.FC = () => {
     const handleSWMessage = (event: MessageEvent) => {
       if (event.data?.type === 'SW_UPDATE_AVAILABLE') {
         console.log('[App] Service worker update available:', event.data.message);
-        // Show a subtle notification bar or banner here if desired
-        // For now, the user will see it on next refresh
-        // You can also auto-reload: window.location.reload();
+        setUpdateAvailable(true);
       }
     };
 
@@ -184,6 +211,12 @@ const App: React.FC = () => {
       document.removeEventListener("mousedown", handleClickOutside);
     };
   }, [currentUser?.id, showUserMenu, showNotifications]);
+
+  const handleUpdateClick = () => {
+    // Simply reload the page - the service worker will serve the new version
+    // Local storage and dark mode preference will be preserved
+    window.location.reload();
+  };
 
   const handleLogin = async (user: User) => {
     setCurrentUser(user);
@@ -306,8 +339,30 @@ const App: React.FC = () => {
         </div>
       </header>
       
+      {/* Update Available Banner */}
+      {updateAvailable && (
+        <div className="fixed top-0 left-0 right-0 bg-gradient-to-r from-blue-500 to-indigo-600 text-white px-4 py-3 z-40 lg:top-16">
+          <div className="max-w-md lg:max-w-none mx-auto flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="flex-shrink-0">
+                <div className="flex items-center justify-center h-6 w-6 rounded-md bg-white/20">
+                  <span className="text-sm font-bold">✓</span>
+                </div>
+              </div>
+              <p className="font-medium text-sm">A new version is available</p>
+            </div>
+            <button
+              onClick={handleUpdateClick}
+              className="flex-shrink-0 px-4 py-1.5 bg-white text-blue-600 font-semibold rounded-lg hover:bg-blue-50 transition-colors text-sm"
+            >
+              Update Now
+            </button>
+          </div>
+        </div>
+      )}
+      
       {/* Content Area */}
-      <main className="h-full overflow-y-auto no-scrollbar lg:pt-16">
+      <main className={`h-full overflow-y-auto no-scrollbar lg:pt-16 ${updateAvailable ? 'pt-16 lg:pt-24' : ''}`}>
         {view === "admin" && currentUser.role === UserRole.ADMIN && (
           <AdminView 
             currentUser={currentUser} 

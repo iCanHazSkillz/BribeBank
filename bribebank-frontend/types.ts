@@ -31,6 +31,8 @@ export interface Family {
   id: string;
   name: string;
   createdAt: number;
+  wheelSpinCost?: number; // Spin cost in tickets
+  ticketConversionRate?: number; // Tickets per dollar (e.g., 10 = 10 tickets per $1)
 }
 
 export interface User {

@@ -27,12 +27,12 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         return saved;
       }
     }
-    // Default to light
+    // Default to dark
     if (typeof window !== 'undefined') {
-      document.documentElement.classList.remove('dark');
-      document.body.style.backgroundColor = '#f3f4f6';
+      document.documentElement.classList.add('dark');
+      document.body.style.backgroundColor = '#111827';
     }
-    return 'light';
+    return 'dark';
   });
 
   useEffect(() => {
