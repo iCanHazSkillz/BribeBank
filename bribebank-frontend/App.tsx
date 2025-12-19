@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { User, UserRole } from "./types";
+import { User, UserRole, BountyStatus, AssignedBounty, AssignedPrize, PrizeStatus } from "./types";
 import { storageService } from "./services/storageService";
 import { LoginView } from "./components/LoginView";
 import { WalletView } from "./components/WalletView";
@@ -7,6 +7,8 @@ import { AdminView } from "./components/AdminView";
 import { PwaInstallPrompt } from "./components/PwaInstallPrompt";
 import { useTheme } from "./contexts/ThemeContext";
 import { LogOut, Wallet, Shield, ChevronDown, Bell, Sun, Moon } from "lucide-react";
+import { SseEvent } from "./types/sseEvents";
+import { API_BASE } from "./config";
 
 type View = "wallet" | "admin" | "login";
 type WalletTab = "wallet" | "tasks" | "history";
@@ -21,6 +23,8 @@ const App: React.FC = () => {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [updateAvailable, setUpdateAvailable] = useState(false);
+  const [walletBadgeCount, setWalletBadgeCount] = useState(0);
+  const [adminBadgeCount, setAdminBadgeCount] = useState(0);
 
   // allow AdminView to open a specific tab via deep-link
   const [initialAdminTab, setInitialAdminTab] = useState<string | undefined>(
@@ -165,6 +169,41 @@ const App: React.FC = () => {
     }
   }, []);
 
+  const fetchBadgeCounts = async () => {
+    if (!currentUser) return;
+
+    try {
+      const familyId = currentUser.familyId;
+      
+      // Fetch bounty assignments for wallet badge (child tasks)
+      const bountyAssignments = await storageService.getBountyAssignments(familyId);
+      const myActiveBounties = bountyAssignments.filter(
+        b => b.userId === currentUser.id && 
+        (b.status === BountyStatus.OFFERED || b.status === BountyStatus.DENIED)
+      );
+      setWalletBadgeCount(myActiveBounties.length);
+
+      // Fetch pending approvals for admin badge (parent approvals)
+      if (currentUser.role === UserRole.ADMIN) {
+        const [assignments, allBounties] = await Promise.all([
+          storageService.getAssignments(familyId),
+          storageService.getBountyAssignments(familyId),
+        ]);
+
+        const pendingRewards = assignments.filter(
+          a => a.status === PrizeStatus.PENDING_APPROVAL && a.userId !== currentUser.id
+        );
+        const pendingTasks = allBounties.filter(
+          b => b.status === BountyStatus.COMPLETED && b.userId !== currentUser.id
+        );
+
+        setAdminBadgeCount(pendingRewards.length + pendingTasks.length);
+      }
+    } catch (err) {
+      console.error("Failed to fetch badge counts", err);
+    }
+  };
+
   useEffect(() => {
     const refreshCurrentUser = async () => {
       if (!currentUser) return;
@@ -172,6 +211,7 @@ const App: React.FC = () => {
       try {
         const freshUser = await storageService.refreshSession();
         setCurrentUser(freshUser);
+        await fetchBadgeCounts();
       } catch (err) {
         console.error("Failed to refresh user session", err);
       }
@@ -211,6 +251,37 @@ const App: React.FC = () => {
       document.removeEventListener("mousedown", handleClickOutside);
     };
   }, [currentUser?.id, showUserMenu, showNotifications]);
+
+  useEffect(() => {
+    if (currentUser) {
+      fetchBadgeCounts();
+      
+      // Set up SSE connection for real-time badge updates
+      const token = storageService.getAuthToken();
+      if (!token) return;
+
+      const source = new EventSource(`${API_BASE}/events?token=${token}`);
+
+      source.onmessage = (msg) => {
+        try {
+          const event: SseEvent = JSON.parse(msg.data);
+
+          // Update badge counts on relevant events
+          switch (event.type) {
+            case "CHILD_ACTION":
+            case "WALLET_UPDATE":
+            case "TEMPLATE_UPDATE":
+              fetchBadgeCounts();
+              break;
+          }
+        } catch (err) {
+          console.error("Invalid SSE event in App", err);
+        }
+      };
+
+      return () => source.close();
+    }
+  }, [currentUser?.id]);
 
   const handleUpdateClick = () => {
     // Simply reload the page - the service worker will serve the new version
@@ -267,21 +338,31 @@ const App: React.FC = () => {
               <div className="flex items-center gap-2 bg-gray-100 dark:bg-gray-700 rounded-xl p-1">
                 <button
                   onClick={() => setView("wallet")}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors relative ${
                     view === "wallet" ? "bg-white dark:bg-gray-800 shadow-sm text-indigo-600 dark:text-indigo-400" : "text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white"
                   }`}
                 >
                   <Wallet size={18} />
                   <span className="font-medium">My Wallet</span>
+                  {walletBadgeCount > 0 && (
+                    <span className="absolute -top-1 -right-1 min-w-[20px] h-5 flex items-center justify-center text-xs font-bold rounded-full px-1.5 bg-red-500 text-white">
+                      {walletBadgeCount}
+                    </span>
+                  )}
                 </button>
                 <button
                   onClick={() => setView("admin")}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors relative ${
                     view === "admin" ? "bg-white dark:bg-gray-800 shadow-sm text-indigo-600 dark:text-indigo-400" : "text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white"
                   }`}
                 >
                   <Shield size={18} />
                   <span className="font-medium">Admin</span>
+                  {adminBadgeCount > 0 && (
+                    <span className="absolute -top-1 -right-1 min-w-[20px] h-5 flex items-center justify-center text-xs font-bold rounded-full px-1.5 bg-red-500 text-white">
+                      {adminBadgeCount}
+                    </span>
+                  )}
                 </button>
               </div>
             )}
@@ -375,7 +456,10 @@ const App: React.FC = () => {
           <AdminView 
             currentUser={currentUser} 
             initialTab={initialAdminTab}
-            onUserUpdate={handleUserUpdate}
+            onUserUpdate={async () => {
+              await handleUserUpdate();
+              await fetchBadgeCounts();
+            }}
             desktopShowNotifications={showNotifications}
             onDesktopNotificationsToggle={() => setShowNotifications(!showNotifications)}
           />
@@ -387,7 +471,10 @@ const App: React.FC = () => {
             initialTab={initialWalletTab}
             desktopShowNotifications={showNotifications}
             onDesktopNotificationsToggle={() => setShowNotifications(!showNotifications)}
-            onUserUpdate={handleUserUpdate}
+            onUserUpdate={async () => {
+              await handleUserUpdate();
+              await fetchBadgeCounts();
+            }}
           />
         )}
       </main>
@@ -398,7 +485,7 @@ const App: React.FC = () => {
           <>
             <button
               onClick={() => setView("wallet")}
-              className={`flex flex-col items-center space-y-1 transition-colors ${
+              className={`flex flex-col items-center space-y-1 transition-colors relative ${
                 view === "wallet" ? "text-indigo-600 dark:text-indigo-400" : "text-gray-400 dark:text-gray-500"
               }`}
             >
@@ -417,10 +504,15 @@ const App: React.FC = () => {
                 <line x1="2" x2="22" y1="10" y2="10" />
               </svg>
               <span className="text-xs font-medium">My Wallet</span>
+              {walletBadgeCount > 0 && (
+                <span className="absolute top-0 right-1/2 translate-x-3 -translate-y-1 min-w-[18px] h-[18px] flex items-center justify-center text-[10px] font-bold rounded-full px-1 bg-red-500 text-white">
+                  {walletBadgeCount}
+                </span>
+              )}
             </button>
             <button
               onClick={() => setView("admin")}
-              className={`flex flex-col items-center space-y-1 transition-colors ${
+              className={`flex flex-col items-center space-y-1 transition-colors relative ${
                 view === "admin" ? "text-indigo-600 dark:text-indigo-400" : "text-gray-400 dark:text-gray-500"
               }`}
             >
@@ -439,6 +531,11 @@ const App: React.FC = () => {
                 <path d="m9 12 2 2 4-4" />
               </svg>
               <span className="text-xs font-medium">Admin</span>
+              {adminBadgeCount > 0 && (
+                <span className="absolute top-0 right-1/2 translate-x-3 -translate-y-1 min-w-[18px] h-[18px] flex items-center justify-center text-[10px] font-bold rounded-full px-1 bg-red-500 text-white">
+                  {adminBadgeCount}
+                </span>
+              )}
             </button>
           </>
         )}

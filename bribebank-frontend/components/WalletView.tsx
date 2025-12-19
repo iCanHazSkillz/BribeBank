@@ -371,6 +371,9 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab,
       }
 
       await refreshData();
+      if (onUserUpdate) {
+        await onUserUpdate();
+      }
     } catch (err) {
       console.error("handleBountyAction error:", err);
       setToast({ message: "Something went wrong with this task.", type: 'error' });
@@ -732,8 +735,13 @@ const groupedPrizes: GroupedPrize[] = Object.values(
     : groupedPrizes;
 
 
-  // Active Bounties
+  // Active Bounties - show all tasks not yet verified
   const activeBounties = myBounties.filter(b => b.status !== BountyStatus.VERIFIED);
+
+  // Badge count - only tasks requiring user action
+  const actionRequiredBounties = myBounties.filter(
+    b => b.status === BountyStatus.OFFERED || b.status === BountyStatus.DENIED
+  );
 
   // Filter tasks by search term
   const filteredActiveBounties = searchTerm.trim()
@@ -815,7 +823,7 @@ const groupedPrizes: GroupedPrize[] = Object.values(
         <nav className="flex-1 p-4 space-y-2">
           {[
             { id: 'wallet', label: 'Rewards', icon: Ticket },
-            { id: 'tasks', label: 'Tasks', icon: ListTodo, badge: activeBounties.length },
+            { id: 'tasks', label: 'Tasks', icon: ListTodo, badge: actionRequiredBounties.length },
             { id: 'store', label: 'Store', icon: ShoppingBag },
             { id: 'history', label: 'History', icon: History }
           ].map(t => (
@@ -963,7 +971,7 @@ const groupedPrizes: GroupedPrize[] = Object.values(
         <button onClick={() => setTab('wallet')} className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-bold transition-colors ${tab === 'wallet' ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300'}`}><Ticket size={16} /> Rewards</button>
         <button onClick={() => setTab('tasks')} className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-bold transition-colors relative ${tab === 'tasks' ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300'}`}>
             <ListTodo size={16} /> Tasks
-            {activeBounties.length > 0 && <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full text-[10px] flex items-center justify-center text-white border border-white dark:border-gray-800">{activeBounties.length}</span>}
+            {actionRequiredBounties.length > 0 && <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full text-[10px] flex items-center justify-center text-white border border-white dark:border-gray-800">{actionRequiredBounties.length}</span>}
         </button>
         <button onClick={() => setTab('store')} className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-bold transition-colors ${tab === 'store' ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300'}`}><ShoppingBag size={16} /> Store</button>
         <button onClick={() => setTab('history')} className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-bold transition-colors ${tab === 'history' ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300'}`}><History size={16} /> History</button>
