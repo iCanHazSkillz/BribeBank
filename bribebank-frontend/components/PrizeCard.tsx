@@ -19,6 +19,7 @@ interface PrizeCardProps {
   count?: number;
   isFCFS?: boolean;
   assignedBy?: string;
+  denialReason?: string; // Display denial reason on denied bounties
 }
 
 // Map pastel color classes to vibrant gradients
@@ -144,7 +145,8 @@ export const PrizeCard: React.FC<PrizeCardProps> = ({
   highlight = false,
   count,
   isFCFS,
-  assignedBy
+  assignedBy,
+  denialReason,
 }) => {
   const baseStyles = "relative flex flex-col p-4 rounded-2xl border-2 transition-all duration-200 shadow-sm overflow-hidden";
   const hoverStyles = !disabled && onClick ? "hover:scale-[1.02] hover:shadow-md active:scale-[0.98] cursor-pointer" : "";
@@ -206,6 +208,13 @@ export const PrizeCard: React.FC<PrizeCardProps> = ({
       
       <h3 className="text-lg font-bold leading-tight mb-1 z-10">{title}</h3>
       <p className={`text-sm leading-snug mb-4 flex-grow z-10 ${isBounty ? 'font-semibold opacity-90' : 'opacity-80'}`}>{description}</p>
+      
+      {/* Denial Reason Display */}
+      {denialReason && status === BountyStatus.DENIED && (
+        <div className="text-xs font-semibold text-red-700 dark:text-red-300 bg-red-100 dark:bg-red-900/30 px-2 py-1.5 rounded-lg mb-3 z-10 border border-red-200 dark:border-red-700">
+          ❌ {denialReason}
+        </div>
+      )}
       
       {/* Decoration for Prize Wheel */}
       {isPrizeWheel && (

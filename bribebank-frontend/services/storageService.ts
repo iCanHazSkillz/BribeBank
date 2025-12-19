@@ -924,11 +924,15 @@ export const storageService = {
         bountyTemplateId: a.bountyId,
         userId: a.userId,
         assignedBy: a.assignedBy,
+        assignerName: a.assignerName,
         status: a.status as BountyStatus,
         assignedAt: new Date(a.assignedAt).getTime(),
         completedAt: a.completedAt
           ? new Date(a.completedAt).getTime()
           : undefined,
+        denialReason: a.denialReason || null,
+        denialNotes: a.denialNotes || null,
+        deniedAt: a.deniedAt ? new Date(a.deniedAt).getTime() : null,
         // if your UI needs bounty/user nested data, you can also keep a.bounty / a.user
       })
     );

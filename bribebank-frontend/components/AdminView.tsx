@@ -145,7 +145,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, o
   // Denial Modal State
   const [showDenialModal, setShowDenialModal] = useState(false);
   const [denialAssignmentId, setDenialAssignmentId] = useState<string | null>(null);
-  const [selectedDenialReason, setSelectedDenialReason] = useState<'NOT_COMPLETED_ADEQUATELY' | 'TOO_OLD_NO_LONGER_REQUIRED' | 'NOT_COMPLETED'>('NOT_COMPLETED_ADEQUATELY');
+  const [selectedDenialReason, setSelectedDenialReason] = useState<'INSTRUCTIONS_NOT_FOLLOWED' | 'LOW_EFFORT' | 'NOT_COMPLETED'>('NOT_COMPLETED');
   const [denialNotes, setDenialNotes] = useState('');
 
   const confirm = (options: ConfirmOptions): Promise<boolean> => {
@@ -646,7 +646,7 @@ const handleBulkAssign = async () => {
 
   const handleOpenDenialModal = (assignmentId: string) => {
       setDenialAssignmentId(assignmentId);
-      setSelectedDenialReason('NOT_COMPLETED_ADEQUATELY');
+      setSelectedDenialReason('NOT_COMPLETED');
       setDenialNotes('');
       setShowDenialModal(true);
   };
@@ -2330,7 +2330,7 @@ const handleBulkAssign = async () => {
             {pendingBounties.length > 0 && (
                 <div>
                     <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-4 flex items-center gap-2"><ListTodo size={20}/> Tasks to Verify</h3>
-                    <div className="space-y-3">
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                         {pendingBounties.map(b => {
                             const template = bountyTemplates.find(t => t.id === b.bountyTemplateId);
                             const user = users.find(u => u.id === b.userId);
@@ -2359,10 +2359,10 @@ const handleBulkAssign = async () => {
                                         <span className="text-2xl">{template.emoji}</span>
                                     </div>
                                     <div className="mt-3 pt-3 border-t border-green-50 dark:border-green-900 flex gap-3 justify-end">
-                                        <button onClick={() => handleOpenDenialModal(b.id)} className="flex items-center gap-2 px-4 py-2 bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400 rounded-xl font-bold text-sm hover:bg-red-100 dark:hover:bg-red-900/50">
+                                        <button onClick={() => handleOpenDenialModal(b.id)} className="flex-1 py-2 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 font-bold rounded-xl hover:bg-red-100 dark:hover:bg-red-900/50 flex items-center justify-center gap-1 text-sm border border-red-200 dark:border-red-700">
                                             <X size={16}/> Deny
                                         </button>
-                                        <button onClick={() => handleVerifyBounty(b.id)} className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-xl font-bold text-sm shadow-md hover:bg-green-700">
+                                        <button onClick={() => handleVerifyBounty(b.id)} className="flex-1 py-2 bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400 font-bold rounded-xl hover:bg-green-100 dark:hover:bg-green-900/50 flex items-center justify-center gap-1 text-sm border border-green-200 dark:border-green-700">
                                             <CheckCircle size={16}/> Verify & Send Reward
                                         </button>
                                     </div>
@@ -2374,7 +2374,9 @@ const handleBulkAssign = async () => {
             )}
 
             {pendingApprovals.length > 0 && (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div>
+                    <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-4 flex items-center gap-2"><CheckCircle size={20}/> Claims to Approve</h3>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                     {pendingApprovals.map((assignment) => {
                 const user = users.find((u) => u.id === assignment.userId);
                 const isSelfClaim = assignment.userId === currentUser.id;
@@ -2431,22 +2433,23 @@ const handleBulkAssign = async () => {
                                 onClick={() => {
                                     void handleRejectPrize(assignment.id);
                                 }}
-                                className="flex-1 py-3 rounded-xl font-bold bg-red-50 text-red-600"
+                                className="flex-1 py-2 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 font-bold rounded-xl hover:bg-red-100 dark:hover:bg-red-900/50 flex items-center justify-center gap-1 text-sm border border-red-200 dark:border-red-700"
                             >
-                                Deny
+                                <X size={16}/>Deny
                             </button>
                             <button
                                 onClick={() => {
                                     void handleApprovePrize(assignment.id);
                                 }}
-                                className="flex-1 py-3 rounded-xl font-bold bg-green-600 text-white"
+                                className="flex-1 py-2 bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400 font-bold rounded-xl hover:bg-green-100 dark:hover:bg-green-900/50 flex items-center justify-center gap-1 text-sm border border-green-200 dark:border-green-700"
                             >
-                                Approve
+                                <CheckCircle size={16}/>Approve
                             </button>
                         </div>
                     </div>
                 );
             })}
+                    </div>
                 </div>
             )}
 
@@ -3507,7 +3510,7 @@ const handleBulkAssign = async () => {
             </p>
 
             <div className="space-y-3 mb-6">
-              <label className="flex items-center p-3 border-2 border-gray-200 dark:border-gray-700 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors" onClick={() => setSelectedDenialReason('NOT_COMPLETED_ADEQUATELY')}>
+              <label className="flex items-center p-3 border-2 border-gray-200 dark:border-gray-700 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
                 <input
                   type="radio"
                   name="denialReason"
@@ -3517,11 +3520,11 @@ const handleBulkAssign = async () => {
                   className="w-4 h-4"
                 />
                 <span className="ml-3 text-sm font-medium text-gray-800 dark:text-white">
-                  Didn’t follow the instructions
+                  Didn't follow the instructions
                 </span>
               </label>
 
-              <label className="flex items-center p-3 border-2 border-gray-200 dark:border-gray-700 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors" onClick={() => setSelectedDenialReason('TOO_OLD_NO_LONGER_REQUIRED')}>
+              <label className="flex items-center p-3 border-2 border-gray-200 dark:border-gray-700 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
                 <input
                   type="radio"
                   name="denialReason"
@@ -3535,7 +3538,7 @@ const handleBulkAssign = async () => {
                 </span>
               </label>
 
-              <label className="flex items-center p-3 border-2 border-gray-200 dark:border-gray-700 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors" onClick={() => setSelectedDenialReason('NOT_COMPLETED')}>
+              <label className="flex items-center p-3 border-2 border-gray-200 dark:border-gray-700 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
                 <input
                   type="radio"
                   name="denialReason"
@@ -3545,11 +3548,10 @@ const handleBulkAssign = async () => {
                   className="w-4 h-4"
                 />
                 <span className="ml-3 text-sm font-medium text-gray-800 dark:text-white">
-                  Only partially completed (some parts done, others not)
+                  Task not completed
                 </span>
               </label>
             </div>
-
             <div className="mb-6">
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
                 Optional Notes

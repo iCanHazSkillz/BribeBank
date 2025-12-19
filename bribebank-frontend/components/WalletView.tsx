@@ -333,7 +333,8 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab,
 
   const handleBountyAction = async (
     assignmentId: string,
-    action: 'start' | 'finish' | 'reject'
+    action: 'start' | 'finish' | 'reject',
+    isDenied: boolean = false
   ) => {
     try {
       if (action === 'start') {
@@ -355,7 +356,9 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab,
 
         const ok = await confirm({
           title: "Reject This Task?",
-          message: "Reject this task? This cannot be undone.",
+          message: isDenied 
+            ? "Are you sure you want to reject this task? You will forfeit the reward and this cannot be undone."
+            : "Reject this task? This cannot be undone.",
           confirmLabel: "Reject Task",
           cancelLabel: "Cancel",
           destructive: true,
@@ -749,8 +752,16 @@ const groupedPrizes: GroupedPrize[] = Object.values(
         'NOT_COMPLETED_ADEQUATELY': 'Task not completed to adequate standard',
         'TOO_OLD_NO_LONGER_REQUIRED': 'Task too old and no longer required',
         'NOT_COMPLETED': 'Task not completed',
+        'INSTRUCTIONS_NOT_FOLLOWED': 'Didn\'t follow the instructions',
+        'LOW_EFFORT': 'Not enough effort / rushed',
       };
-      return reasonMessages[assignment.denialReason] || 'Task was denied';
+      const reasonText = reasonMessages[assignment.denialReason] || 'Task was denied';
+      
+      // Include notes if they exist
+      if (assignment.denialNotes) {
+        return `${reasonText}: ${assignment.denialNotes}`;
+      }
+      return reasonText;
     }
     return null;
   };
@@ -1445,7 +1456,26 @@ const groupedPrizes: GroupedPrize[] = Object.values(
                       ? `Reward: ${t.rewardValue} Tickets`
                       : `Reward: ${t.rewardValue}`;
 
+                    // Get just the reason text without notes for the card display
+                    const getDenialReasonText = (): string | undefined => {
+                      if (b.denialReason) {
+                        const reasonMessages: Record<string, string> = {
+                          'NOT_COMPLETED_ADEQUATELY': 'Task not completed to adequate standard',
+                          'TOO_OLD_NO_LONGER_REQUIRED': 'Task too old and no longer required',
+                          'NOT_COMPLETED': 'Task not completed',
+                          'INSTRUCTIONS_NOT_FOLLOWED': 'Didn\'t follow the instructions',
+                          'LOW_EFFORT': 'Not enough effort / rushed',
+                        };
+                        return reasonMessages[b.denialReason] || 'Task was denied';
+                      }
+                      return undefined;
+                    };
+
+                    const denialReasonText = getDenialReasonText();
                     const denialMessage = getDenialMessage(b);
+                    
+                    // Get the parent's name from the assignment
+                    const parentName = b.assignerName || 'Parent';
                     
                     return (
                         <div key={b.id} className="relative">
@@ -1465,13 +1495,14 @@ const groupedPrizes: GroupedPrize[] = Object.values(
                                     : t.themeColor || "bg-white border-indigo-200 text-gray-900"
                                 }
                                 customActions={
-                                    <div className="flex flex-col gap-2 mt-4">
-                                        {denialMessage && (
+                                    <div className="flex flex-col gap-2 mt-2">
+                                        {(denialReasonText || b.denialNotes) && (
                                           <div className="text-sm text-red-600 dark:text-red-400 font-medium bg-red-50 dark:bg-red-900/20 p-2 rounded-lg">
-                                            ❌ {denialMessage}
+                                            {denialReasonText && <div>❌ {denialReasonText}</div>}
+                                            {b.denialNotes && <div><span className="font-semibold">Note from {parentName}:</span> {b.denialNotes}</div>}
                                           </div>
                                         )}
-                                        <div className="flex gap-2">
+                                        <div className="flex gap-2 mt-4">
                                             {b.status === BountyStatus.OFFERED ? (
                                                 <>
                                                     <button 
@@ -1495,12 +1526,20 @@ const groupedPrizes: GroupedPrize[] = Object.values(
                                                     <CheckCircle size={16}/> Mark Complete
                                                 </button>
                                             ) : b.status === BountyStatus.DENIED ? (
-                                                <button 
-                                                    onClick={(e) => { e.stopPropagation(); handleBountyAction(b.id, 'finish'); }} 
-                                                    className="w-full py-2 bg-orange-600 text-white font-bold rounded-xl shadow-md hover:bg-orange-700 flex items-center justify-center gap-1 text-sm"
-                                                >
-                                                    <CheckCircle size={16}/> Re-submit for Review
-                                                </button>
+                                                <>
+                                                    <button 
+                                                        onClick={(e) => { e.stopPropagation(); handleBountyAction(b.id, 'reject', true); }} 
+                                                        className="flex-1 py-2 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 font-bold rounded-xl hover:bg-red-100 dark:hover:bg-red-900/50 flex items-center justify-center gap-1 text-sm border border-red-200 dark:border-red-700"
+                                                    >
+                                                        <X size={16}/> Reject
+                                                    </button>
+                                                    <button 
+                                                        onClick={(e) => { e.stopPropagation(); handleBountyAction(b.id, 'finish'); }} 
+                                                        className="flex-[2] py-2 bg-orange-600 text-white font-bold rounded-xl shadow-md hover:bg-orange-700 flex items-center justify-center gap-1 text-sm"
+                                                    >
+                                                        <CheckCircle size={16}/> Re-submit for Review
+                                                    </button>
+                                                </>
                                             ) : (
                                                 <button 
                                                     disabled

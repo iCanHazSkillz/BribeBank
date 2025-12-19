@@ -102,10 +102,12 @@ export interface AssignedBounty {
   bountyTemplateId: string;
   userId: string;
   assignedBy: string;
+  assignerName?: string;
   assignedAt: number;
   status: BountyStatus;
   completedAt?: number;
   denialReason?: string | null;
+  denialNotes?: string | null;
   deniedAt?: number | null;
 }
 
