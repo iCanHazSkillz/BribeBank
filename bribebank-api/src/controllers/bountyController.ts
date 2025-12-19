@@ -1197,7 +1197,6 @@ export const deleteAssignedBounty = async (req: Request, res: Response) => {
 
         for (const parent of parents) {
           await addNotification({
-            familyId,
             userId: parent.id,
             message,
           });
