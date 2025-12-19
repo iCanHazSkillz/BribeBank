@@ -114,6 +114,8 @@ enum DenialReason {
   NOT_COMPLETED_ADEQUATELY
   TOO_OLD_NO_LONGER_REQUIRED
   NOT_COMPLETED
+  INSTRUCTIONS_NOT_FOLLOWED
+  LOW_EFFORT
 }
 
 // -----------------------------------------------------
@@ -241,6 +243,7 @@ model BountyAssignment {
   assignedAt  DateTime     @default(now())
   completedAt DateTime?
   denialReason DenialReason?
+  denialNotes String?      // Optional parent feedback/notes on why task was denied
   deniedAt    DateTime?
 
   @@index([familyId, userId])

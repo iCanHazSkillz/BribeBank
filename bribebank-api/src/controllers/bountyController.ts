@@ -245,7 +245,22 @@ export const getFamilyBountyAssignments = async (
       },
     });
 
-    return res.json(assignments);
+    // Fetch assigner details for each assignment
+    const enrichedAssignments = await Promise.all(
+      assignments.map(async (assignment) => {
+        const assigner = await prisma.user.findUnique({
+          where: { id: assignment.assignedBy },
+          select: { displayName: true },
+        });
+
+        return {
+          ...assignment,
+          assignerName: assigner?.displayName || 'Parent',
+        };
+      })
+    );
+
+    return res.json(enrichedAssignments);
   } catch (err: any) {
     if (err && typeof err === "object" && "status" in err) {
       return res.status(err.status).json({ error: err.error });
@@ -314,7 +329,7 @@ export const assignBounty = async (req: Request, res: Response) => {
           familyId,
           bountyId,
           userId,
-          assignedBy: parentName,
+          assignedBy: parent.id,
           status: BountyStatus.OFFERED,
         },
         include: {
@@ -627,8 +642,9 @@ export const completeAssignedBounty = async (req: Request, res: Response) => {
         data: {
           status: BountyStatus.COMPLETED,
           completedAt: now,
-          // Clear denial reason if resubmitting after denial
+          // Clear denial reason and notes if resubmitting after denial
           denialReason: null,
+          denialNotes: null,
           deniedAt: null,
         },
       });
@@ -1027,6 +1043,7 @@ export const denyAssignedBounty = async (req: Request, res: Response) => {
       data: {
         status: BountyStatus.DENIED,
         denialReason,
+        denialNotes: denialNotes || null,
         deniedAt: new Date(),
       },
     });
@@ -1039,6 +1056,8 @@ export const denyAssignedBounty = async (req: Request, res: Response) => {
       [DenialReason.NOT_COMPLETED_ADEQUATELY]: "Task not completed to adequate standard",
       [DenialReason.TOO_OLD_NO_LONGER_REQUIRED]: "Task too old and no longer required",
       [DenialReason.NOT_COMPLETED]: "Task not completed",
+      [DenialReason.INSTRUCTIONS_NOT_FOLLOWED]: "Didn't follow the instructions",
+      [DenialReason.LOW_EFFORT]: "Not enough effort / rushed",
     };
 
     const reasonMessage = reasonMessages[denialReason as DenialReason];
@@ -1119,6 +1138,10 @@ export const deleteAssignedBounty = async (req: Request, res: Response) => {
   try {
     const assignment = await prisma.bountyAssignment.findUnique({
       where: { id },
+      include: {
+        bounty: true,
+        user: true,
+      },
     });
 
     if (!assignment) {
@@ -1127,33 +1150,80 @@ export const deleteAssignedBounty = async (req: Request, res: Response) => {
 
     const user = await assertFamilyMember(req, assignment.familyId);
     const familyId = assignment.familyId;
+    const bounty = assignment.bounty;
+    const child = assignment.user;
+    
     // PARENTS: can always delete any assignment
     if (user.role === Role.PARENT) {
       await prisma.bountyAssignment.delete({ where: { id } });
       return res.status(204).send();
     }
 
-    // CHILD: can delete only their own assignment while it's still OFFERED
+    // CHILD: can delete only their own assignment while it's OFFERED or DENIED
     if (
       user.role === Role.CHILD &&
       user.id === assignment.userId &&
-      assignment.status === BountyStatus.OFFERED
+      (assignment.status === BountyStatus.OFFERED || assignment.status === BountyStatus.DENIED)
     ) {
+      const wasDenied = assignment.status === BountyStatus.DENIED;
+      const wasOffered = assignment.status === BountyStatus.OFFERED;
+      
       await prisma.bountyAssignment.delete({ where: { id } });
+      
+      // Notify parents when child rejects any task (OFFERED or DENIED)
+      if ((wasDenied || wasOffered) && bounty && child) {
+        const childName = child.displayName || child.username || "Child";
+        const message = wasDenied 
+          ? `${childName} rejected the denied task "${bounty.title}"`
+          : `${childName} refused the task "${bounty.title}"`;
+        
+        const action = wasDenied ? "TASK_REJECTED_AFTER_DENIAL" : "TASK_REFUSED";
+        
+        // Add history event
+        await addHistoryEvent({
+          familyId,
+          userId: user.id,
+          userName: childName,
+          title: bounty.title,
+          emoji: bounty.emoji,
+          action,
+          assignerName: childName,
+        });
+
+        // Notify all parents in the family
+        const parents = await prisma.user.findMany({
+          where: { familyId, role: Role.PARENT },
+        });
+
+        for (const parent of parents) {
+          await addNotification({
+            familyId,
+            userId: parent.id,
+            message,
+          });
+
+          await sendPushToUser(parent.id, {
+            title: wasDenied ? "Task Rejected" : "Task Refused",
+            body: message,
+            icon: bounty.emoji,
+          });
+        }
+      }
+      
+      const event: SseEvent = {
+        type: "WALLET_UPDATE",
+        familyId,
+        reason: "TASK_REJECTED",
+        timestamp: Date.now(),
+      };
+
+      broadcastToFamily(familyId, event);
+      
       return res.status(204).send();
     }
 
     // Everyone else: forbidden
     return res.status(403).json({ error: "FORBIDDEN" });
-
-    const event: SseEvent = {
-      type: "WALLET_UPDATE",
-      familyId,
-      reason: "TASK_REJECTED",
-      timestamp: Date.now(),
-    };
-
-    broadcastToFamily(familyId, event);
 
   } catch (err: any) {
     if (err && typeof err === "object" && "status" in err) {
