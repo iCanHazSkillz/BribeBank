@@ -86,7 +86,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, o
 
   // Bounty Form
   const [bountyTitle, setBountyTitle] = useState('');
-  const [bountyRewardType, setBountyRewardType] = useState<'CUSTOM' | 'TICKETS'>('CUSTOM');
+  const [bountyRewardType, setBountyRewardType] = useState<'CUSTOM' | 'TICKETS'>('TICKETS');
   const [bountyRewardValue, setBountyRewardValue] = useState('');
   const [bountyEmoji, setBountyEmoji] = useState('🧹');
   const [bountyFCFS, setBountyFCFS] = useState(false);
@@ -141,6 +141,12 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, o
 
   const [confirmState, setConfirmState] = useState<ConfirmOptions | null>(null);
   const confirmResolveRef = useRef<(result: boolean) => void>();
+
+  // Denial Modal State
+  const [showDenialModal, setShowDenialModal] = useState(false);
+  const [denialAssignmentId, setDenialAssignmentId] = useState<string | null>(null);
+  const [selectedDenialReason, setSelectedDenialReason] = useState<'NOT_COMPLETED_ADEQUATELY' | 'TOO_OLD_NO_LONGER_REQUIRED' | 'NOT_COMPLETED'>('NOT_COMPLETED_ADEQUATELY');
+  const [denialNotes, setDenialNotes] = useState('');
 
   const confirm = (options: ConfirmOptions): Promise<boolean> => {
     return new Promise<boolean>((resolve) => {
@@ -355,7 +361,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, o
 
   const resetForms = () => {
     setPrizeTitle(''); setPrizeDesc(''); setPrizeEmoji('🎁'); setPrizeColor(PASTEL_COLORS[6]);
-    setBountyTitle(''); setBountyRewardType('CUSTOM'); setBountyRewardValue(''); setBountyEmoji('🧹'); setBountyFCFS(false); setBountyColor(PASTEL_COLORS[6]);
+    setBountyTitle(''); setBountyRewardType('TICKETS'); setBountyRewardValue(''); setBountyEmoji('🧹'); setBountyFCFS(false); setBountyColor(PASTEL_COLORS[6]);
     setStoreItemTitle(''); setStoreItemCost(''); setStoreItemImage(''); setStoreItemLink(''); setStoreItemDescription('');
     setEditingId(null);
     setEditingStoreItemId(null);
@@ -638,6 +644,28 @@ const handleBulkAssign = async () => {
       showToast("Task verified! Reward sent.", 'success');
   };
 
+  const handleOpenDenialModal = (assignmentId: string) => {
+      setDenialAssignmentId(assignmentId);
+      setSelectedDenialReason('NOT_COMPLETED_ADEQUATELY');
+      setDenialNotes('');
+      setShowDenialModal(true);
+  };
+
+  const handleDenyBounty = async () => {
+      if (!denialAssignmentId) return;
+
+      try {
+          await storageService.denyBounty(denialAssignmentId, selectedDenialReason, denialNotes);
+          await refreshData();
+          showToast("Task denied. Child has been notified.", 'success');
+          setShowDenialModal(false);
+          setDenialAssignmentId(null);
+      } catch (err) {
+          console.error("Failed to deny bounty:", err);
+          showToast("Failed to deny task", 'error');
+      }
+  };
+
   // User Management Logic
   const handleOpenUserForm = (user?: User) => {
       if (user) {
@@ -850,7 +878,7 @@ const handleBulkAssign = async () => {
   };
 
   // Template Export/Import
-  const handleExportTemplate = async (type: 'rewards' | 'bounties') => {
+  const handleExportTemplate = async (type: 'rewards' | 'bounties', exportType: 'selected' | 'all' = 'selected') => {
     try {
       showToast(`Exporting ${type}...`, 'success');
       const blob = await storageService.exportTemplate(type);
@@ -859,7 +887,14 @@ const handleBulkAssign = async () => {
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `bribebank-${type}-${new Date().toISOString().split('T')[0]}.json`;
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const day = String(now.getDate()).padStart(2, '0');
+      const hours = String(now.getHours()).padStart(2, '0');
+      const minutes = String(now.getMinutes()).padStart(2, '0');
+      const dateTime = `${year}${month}${day}_${hours}${minutes}`;
+      link.download = `bribebank-${type}-${dateTime}.json`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -1784,14 +1819,14 @@ const handleBulkAssign = async () => {
       {/* Viewing Rewards Modal */}
       {viewingRewardsForUser && (
         <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-6 animate-fade-in" onClick={() => setViewingRewardsForUser(null)}>
-            <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[80vh]" onClick={e => e.stopPropagation()}>
-                <div className="p-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
-                    <h3 className="font-bold text-gray-800">Rewards for {users.find(u => u.id === viewingRewardsForUser)?.name}</h3>
-                    <button onClick={() => setViewingRewardsForUser(null)} className="text-gray-400 hover:text-gray-600"><X size={24}/></button>
+            <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[80vh]" onClick={e => e.stopPropagation()}>
+                <div className="p-4 border-b border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 flex justify-between items-center">
+                    <h3 className="font-bold text-gray-800 dark:text-white">Rewards for {users.find(u => u.id === viewingRewardsForUser)?.name}</h3>
+                    <button onClick={() => setViewingRewardsForUser(null)} className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400"><X size={24}/></button>
                 </div>
                 <div className="p-4 overflow-y-auto space-y-3">
                     {rewardsForViewingUser.length === 0 ? (
-                        <div className="text-center py-8 text-gray-400">
+                        <div className="text-center py-8 text-gray-400 dark:text-gray-500">
                             <Gift className="mx-auto mb-2 opacity-20" size={40} />
                             <p className="text-sm italic">No active rewards assigned.</p>
                         </div>
@@ -1819,20 +1854,20 @@ const handleBulkAssign = async () => {
                             return (
                                 <div
                                     key={assignment.id}
-                                    className={`bg-white p-3 rounded-2xl border border-gray-200 flex justify-between items-center shadow-sm`}
+                                    className={`bg-white dark:bg-gray-700 p-3 rounded-2xl border border-gray-200 dark:border-gray-600 flex justify-between items-center shadow-sm`}
                                 >
                                     <div className="flex items-center gap-3">
                                         <span className="text-2xl">{emoji}</span>
                                         <div>
-                                            <p className="font-bold text-gray-800 text-sm">
+                                            <p className="font-bold text-gray-800 dark:text-white text-sm">
                                                 {title}
                                             </p>
                                             {description && (
-                                                <p className="text-xs text-gray-500">
+                                                <p className="text-xs text-gray-500 dark:text-gray-400">
                                                     {description}
                                                 </p>
                                             )}
-                                            <p className="text-[11px] text-gray-400 mt-1">
+                                            <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-1">
                                                 Assigned{" "}
                                                 {new Date(
                                                     assignment.assignedAt
@@ -1846,7 +1881,7 @@ const handleBulkAssign = async () => {
                                             handleDeleteAssignment(assignment.id);
                                             refreshData();
                                         }}
-                                        className="text-red-400 p-2 hover:bg-red-50 rounded-full"
+                                        className="text-red-400 dark:text-red-500 p-2 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-full"
                                     >
                                         <Trash2 size={18} />
                                     </button>
@@ -2019,11 +2054,11 @@ const handleBulkAssign = async () => {
                 </button>
             </div>
 
+            <label className="block text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">
+              Select Family Members
+            </label>
             <div className="mb-6 overflow-x-auto no-scrollbar">
-              <label className="block text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">
-                Select Family Members
-              </label>
-              <div className="flex gap-3 px-1 py-1">
+              <div className="flex gap-4 px-1 py-1">
                 {assignableUsers.map((user) => {
                   const isSelected = selectedUsers.includes(user.id);
 
@@ -2185,7 +2220,7 @@ const handleBulkAssign = async () => {
                                     />
                                 </div>
 
-                                {selectedUsers.length > 0 && ticketAmount && parseInt(ticketAmount) > 0 && (
+                                {ticketAmount && parseInt(ticketAmount) > 0 && (
                                     <div className="bg-gradient-to-r from-purple-100 to-indigo-100 dark:from-purple-900/30 dark:to-indigo-900/30 border border-purple-200 dark:border-purple-700 p-4 rounded-xl">
                                         <p className="text-sm font-medium text-purple-900 dark:text-purple-100">
                                             💡 <span className="font-bold">{ticketAmount} tickets</span> = <span className="font-semibold">${((parseInt(ticketAmount) / (currentFamily?.ticketConversionRate || 10)) || 0).toFixed(2)}</span>
@@ -2193,7 +2228,7 @@ const handleBulkAssign = async () => {
                                     </div>
                                 )}
 
-                                {selectedUsers.length > 0 && ticketAmount && parseInt(ticketAmount) > 0 && (
+                                {ticketAmount && parseInt(ticketAmount) > 0 && (
                                     <button onClick={handleGiveTickets} className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 dark:from-purple-500 dark:to-indigo-500 text-white py-3 rounded-xl shadow-lg flex items-center justify-center gap-2 font-bold hover:from-purple-700 hover:to-indigo-700 dark:hover:from-purple-600 dark:hover:to-indigo-600 transition-all">
                                         <Send size={20} className="text-purple-200"/>
                                         <span>Give Tickets</span>
@@ -2208,29 +2243,38 @@ const handleBulkAssign = async () => {
             {/* Action Buttons */}
             {assignSubTab === 'rewards' && selectedTemplateIds.length > 0 && (
                 <div className="fixed bottom-24 left-1/2 -translate-x-1/2 px-6 z-30 flex justify-center animate-bounce-in">
-                    <div className="relative w-full max-w-lg">
-                        <button onClick={handleBulkAssign} className="bg-gradient-to-r from-indigo-600 to-indigo-700 dark:from-indigo-500 dark:to-indigo-600 text-white w-full py-4 rounded-l-2xl shadow-2xl flex items-center justify-center gap-3 font-bold text-lg hover:from-indigo-700 hover:to-indigo-800 dark:hover:from-indigo-600 dark:hover:to-indigo-700 transition-all">
+                    <div className="relative w-full max-w-full flex">
+                        <button onClick={handleBulkAssign} className="bg-gradient-to-r from-indigo-600 to-indigo-700 dark:from-indigo-500 dark:to-indigo-600 text-white flex-1 py-4 px-6 rounded-l-2xl shadow-2xl flex items-center justify-center gap-4 font-bold text-lg hover:from-indigo-700 hover:to-indigo-800 dark:hover:from-indigo-600 dark:hover:to-indigo-700 transition-all">
                             <Gift size={24} className="text-indigo-200"/>
-                            <span>Send Rewards</span>
+                            <span className="whitespace-nowrap">Send Rewards</span>
                         </button>
                         <button 
                             onClick={() => {
                                 const menu = document.getElementById('rewards-export-menu');
                                 if (menu) menu.classList.toggle('hidden');
                             }}
-                            className="absolute right-0 top-0 bottom-0 bg-indigo-600 dark:bg-indigo-500 text-white px-4 rounded-r-2xl border-l border-indigo-700 dark:border-indigo-600 hover:bg-indigo-700 dark:hover:bg-indigo-600 transition-colors"
+                            className="bg-indigo-600 dark:bg-indigo-500 text-white px-8 rounded-r-2xl border-l border-indigo-700 dark:border-indigo-600 hover:bg-indigo-700 dark:hover:bg-indigo-600 transition-colors shadow-2xl flex items-center justify-center"
                         >
                             <ChevronDown size={20} />
                         </button>
-                        <div id="rewards-export-menu" className="hidden absolute bottom-full mb-2 right-0 bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden w-48 z-50">
+                        <div id="rewards-export-menu" className="hidden absolute bottom-full mb-2 left-0 bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden w-full z-50">
                             <button 
                                 onClick={() => {
-                                    handleExportTemplate('rewards');
+                                    handleExportTemplate('rewards', 'selected');
+                                    document.getElementById('rewards-export-menu')?.classList.add('hidden');
+                                }}
+                                className="w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-800 dark:text-white transition-colors border-b border-gray-100 dark:border-gray-700"
+                            >
+                                Export Selected as Template
+                            </button>
+                            <button 
+                                onClick={() => {
+                                    handleExportTemplate('rewards', 'all');
                                     document.getElementById('rewards-export-menu')?.classList.add('hidden');
                                 }}
                                 className="w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-800 dark:text-white transition-colors"
                             >
-                                Export as Template
+                                Export All as Template
                             </button>
                         </div>
                     </div>
@@ -2239,29 +2283,38 @@ const handleBulkAssign = async () => {
 
             {assignSubTab === 'bounties' && selectedBountyTemplateIds.length > 0 && (
                 <div className="fixed bottom-24 left-1/2 -translate-x-1/2 px-6 z-30 flex justify-center animate-bounce-in">
-                    <div className="relative w-full max-w-md">
-                        <button onClick={handleBulkAssign} className="bg-gradient-to-r from-purple-600 to-indigo-600 dark:from-purple-500 dark:to-indigo-500 text-white w-full py-4 rounded-l-2xl shadow-2xl flex items-center justify-center gap-3 font-bold text-lg hover:from-purple-700 hover:to-indigo-700 dark:hover:from-purple-600 dark:hover:to-indigo-600 transition-all">
+                    <div className="relative w-full max-w-full flex">
+                        <button onClick={handleBulkAssign} className="bg-gradient-to-r from-purple-600 to-indigo-600 dark:from-purple-500 dark:to-indigo-500 text-white flex-1 py-4 px-6 rounded-l-2xl shadow-2xl flex items-center justify-center gap-3 font-bold text-lg hover:from-purple-700 hover:to-indigo-700 dark:hover:from-purple-600 dark:hover:to-indigo-600 transition-all">
                             <ListTodo size={24} className="text-amber-200"/>
-                            <span>Assign Tasks</span>
+                            <span className="whitespace-nowrap">Assign Tasks</span>
                         </button>
                         <button 
                             onClick={() => {
                                 const menu = document.getElementById('bounties-export-menu');
                                 if (menu) menu.classList.toggle('hidden');
                             }}
-                            className="absolute right-0 top-0 bottom-0 bg-purple-600 dark:bg-purple-500 text-white px-4 rounded-r-2xl border-l border-purple-700 dark:border-purple-600 hover:bg-purple-700 dark:hover:bg-purple-600 transition-colors"
+                            className="bg-purple-600 dark:bg-purple-500 text-white px-8 rounded-r-2xl border-l border-purple-700 dark:border-purple-600 hover:bg-purple-700 dark:hover:bg-purple-600 transition-colors shadow-2xl flex items-center justify-center"
                         >
                             <ChevronDown size={20} />
                         </button>
-                        <div id="bounties-export-menu" className="hidden absolute bottom-full mb-2 right-0 bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden w-48 z-50">
+                        <div id="bounties-export-menu" className="hidden absolute bottom-full mb-2 left-0 bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden w-full z-50">
                             <button 
                                 onClick={() => {
-                                    handleExportTemplate('bounties');
+                                    handleExportTemplate('bounties', 'selected');
+                                    document.getElementById('bounties-export-menu')?.classList.add('hidden');
+                                }}
+                                className="w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-800 dark:text-white transition-colors border-b border-gray-100 dark:border-gray-700"
+                            >
+                                Export Selected as Template
+                            </button>
+                            <button 
+                                onClick={() => {
+                                    handleExportTemplate('bounties', 'all');
                                     document.getElementById('bounties-export-menu')?.classList.add('hidden');
                                 }}
                                 className="w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-800 dark:text-white transition-colors"
                             >
-                                Export as Template
+                                Export All as Template
                             </button>
                         </div>
                     </div>
@@ -2305,7 +2358,10 @@ const handleBulkAssign = async () => {
                                         </div>
                                         <span className="text-2xl">{template.emoji}</span>
                                     </div>
-                                    <div className="mt-3 pt-3 border-t border-green-50 dark:border-green-900 flex justify-end">
+                                    <div className="mt-3 pt-3 border-t border-green-50 dark:border-green-900 flex gap-3 justify-end">
+                                        <button onClick={() => handleOpenDenialModal(b.id)} className="flex items-center gap-2 px-4 py-2 bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400 rounded-xl font-bold text-sm hover:bg-red-100 dark:hover:bg-red-900/50">
+                                            <X size={16}/> Deny
+                                        </button>
                                         <button onClick={() => handleVerifyBounty(b.id)} className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-xl font-bold text-sm shadow-md hover:bg-green-700">
                                             <CheckCircle size={16}/> Verify & Send Reward
                                         </button>
@@ -2317,7 +2373,9 @@ const handleBulkAssign = async () => {
                 </div>
             )}
 
-            {pendingApprovals.map((assignment) => {
+            {pendingApprovals.length > 0 && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    {pendingApprovals.map((assignment) => {
                 const user = users.find((u) => u.id === assignment.userId);
                 const isSelfClaim = assignment.userId === currentUser.id;
 
@@ -2381,7 +2439,7 @@ const handleBulkAssign = async () => {
                                 onClick={() => {
                                     void handleApprovePrize(assignment.id);
                                 }}
-                                className="flex-1 py-3 rounded-xl font-bold bg-green-600 text-white shadow-lg shadow-green-200"
+                                className="flex-1 py-3 rounded-xl font-bold bg-green-600 text-white"
                             >
                                 Approve
                             </button>
@@ -2389,6 +2447,8 @@ const handleBulkAssign = async () => {
                     </div>
                 );
             })}
+                </div>
+            )}
 
             
             <div className="pt-6 border-t border-gray-200 dark:border-gray-700">
@@ -2795,20 +2855,20 @@ const handleBulkAssign = async () => {
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
                       Reward Type
                     </label>
-                    <div className="flex bg-gray-50 dark:bg-gray-700 p-1 rounded-lg border border-gray-200 dark:border-gray-600">
-                      <button 
-                        type="button"
-                        onClick={() => setBountyRewardType('CUSTOM')} 
-                        className={`flex-1 py-1.5 rounded-md text-xs font-bold transition-all ${bountyRewardType === 'CUSTOM' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500'}`}
-                      >
-                        Custom
-                      </button>
+                    <div className="flex bg-gray-100 dark:bg-gray-800 p-1 rounded-xl">
                       <button 
                         type="button"
                         onClick={() => setBountyRewardType('TICKETS')} 
-                        className={`flex-1 py-1.5 rounded-md text-xs font-bold transition-all ${bountyRewardType === 'TICKETS' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500'}`}
+                        className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${bountyRewardType === 'TICKETS' ? 'bg-white dark:bg-gray-700 shadow-sm text-indigo-600 dark:text-indigo-400' : 'text-gray-500 dark:text-gray-400'}`}
                       >
                         Tickets
+                      </button>
+                      <button 
+                        type="button"
+                        onClick={() => setBountyRewardType('CUSTOM')} 
+                        className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${bountyRewardType === 'CUSTOM' ? 'bg-white dark:bg-gray-700 shadow-sm text-indigo-600 dark:text-indigo-400' : 'text-gray-500 dark:text-gray-400'}`}
+                      >
+                        Custom
                       </button>
                     </div>
                   </div>
@@ -3233,7 +3293,7 @@ const handleBulkAssign = async () => {
                             {!newUserAvatarUrl && (
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">Avatar Color</label>
-                                    <div className="grid grid-cols-6 gap-2">
+                                    <div className="flex flex-wrap gap-6">
                                         {AVATAR_COLORS.map((c) => (
                                             <button
                                                 key={c}
@@ -3425,6 +3485,107 @@ const handleBulkAssign = async () => {
       )}
 
       {/* Import Template Modal */}
+      {/* Denial Modal */}
+      {showDenialModal && denialAssignmentId && (
+        <div
+          className="fixed inset-0 z-[95] bg-black/50 flex items-center justify-center p-4"
+          onClick={() => setShowDenialModal(false)}
+        >
+          <div
+            className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-sm p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-3 bg-red-100 dark:bg-red-900/30 rounded-lg">
+                <X size={24} className="text-red-600 dark:text-red-400" />
+              </div>
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white">Deny Task</h3>
+            </div>
+
+            <p className="text-gray-600 dark:text-gray-300 mb-6">
+              Why are you denying this task? The child will be notified and can resubmit.
+            </p>
+
+            <div className="space-y-3 mb-6">
+              <label className="flex items-center p-3 border-2 border-gray-200 dark:border-gray-700 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors" onClick={() => setSelectedDenialReason('NOT_COMPLETED_ADEQUATELY')}>
+                <input
+                  type="radio"
+                  name="denialReason"
+                  value="INSTRUCTIONS_NOT_FOLLOWED"
+                  checked={selectedDenialReason === 'INSTRUCTIONS_NOT_FOLLOWED'}
+                  onChange={() => setSelectedDenialReason('INSTRUCTIONS_NOT_FOLLOWED')}
+                  className="w-4 h-4"
+                />
+                <span className="ml-3 text-sm font-medium text-gray-800 dark:text-white">
+                  Didn’t follow the instructions
+                </span>
+              </label>
+
+              <label className="flex items-center p-3 border-2 border-gray-200 dark:border-gray-700 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors" onClick={() => setSelectedDenialReason('TOO_OLD_NO_LONGER_REQUIRED')}>
+                <input
+                  type="radio"
+                  name="denialReason"
+                  value="LOW_EFFORT"
+                  checked={selectedDenialReason === 'LOW_EFFORT'}
+                  onChange={() => setSelectedDenialReason('LOW_EFFORT')}
+                  className="w-4 h-4"
+                />
+                <span className="ml-3 text-sm font-medium text-gray-800 dark:text-white">
+                  Not enough effort / rushed
+                </span>
+              </label>
+
+              <label className="flex items-center p-3 border-2 border-gray-200 dark:border-gray-700 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors" onClick={() => setSelectedDenialReason('NOT_COMPLETED')}>
+                <input
+                  type="radio"
+                  name="denialReason"
+                  value="NOT_COMPLETED"
+                  checked={selectedDenialReason === 'NOT_COMPLETED'}
+                  onChange={() => setSelectedDenialReason('NOT_COMPLETED')}
+                  className="w-4 h-4"
+                />
+                <span className="ml-3 text-sm font-medium text-gray-800 dark:text-white">
+                  Only partially completed (some parts done, others not)
+                </span>
+              </label>
+            </div>
+
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
+                Optional Notes
+              </label>
+              <textarea
+                value={denialNotes}
+                onChange={(e) => setDenialNotes(e.target.value)}
+                placeholder="e.g., 'Please re-sweep under the table and corners.'"
+                className="w-full px-4 py-2 border-2 border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent resize-none"
+                rows={3}
+                maxLength={200}
+              />
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                {denialNotes.length}/200 characters
+              </p>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowDenialModal(false)}
+                className="flex-1 px-4 py-3 border-2 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl font-bold hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDenyBounty}
+                className="flex-1 px-4 py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 transition-colors flex items-center justify-center gap-2"
+              >
+                <X size={18} />
+                Deny Task
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showImportModal && importPreview && (
         <div
           className="fixed inset-0 bg-black/80 z-[90] flex items-center justify-center p-4"

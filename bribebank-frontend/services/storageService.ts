@@ -1035,6 +1035,29 @@ export const storageService = {
     }
   },
 
+  denyBounty: async (assignmentId: string, denialReason: string, denialNotes?: string): Promise<void> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const res = await fetch(
+      apiUrl(`/bounty-assignments/${assignmentId}/deny`),
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ denialReason, denialNotes: denialNotes || '' })
+      }
+    );
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      console.error("denyBounty error:", res.status, body);
+      throw new Error(body?.error || "Failed to deny bounty");
+    }
+  },
+
   deleteBountyAssignment: async (id: string): Promise<void> => {
     const token = getAuthToken();
     if (!token) throw new Error("Not authenticated");

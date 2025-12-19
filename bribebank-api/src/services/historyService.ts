@@ -12,10 +12,11 @@ export async function addHistoryEvent(
     title: string;
     action: string;
     assignerName: string;
+    metadata?: string;
   },
   client: PrismaClientOrTx = prisma
 ) {
-  const { familyId, userId, userName, emoji, title, action, assignerName } =
+  const { familyId, userId, userName, emoji, title, action, assignerName, metadata } =
     params;
 
   return client.historyEvent.create({
@@ -27,6 +28,7 @@ export async function addHistoryEvent(
       title,
       action,
       assignerName,
+      metadata: metadata ?? null,
     },
   });
 }

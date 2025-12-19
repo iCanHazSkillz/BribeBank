@@ -308,9 +308,17 @@ const App: React.FC = () => {
                 onClick={() => setShowUserMenu(!showUserMenu)}
                 className="flex items-center gap-3 px-4 py-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
               >
-                <div className={`w-10 h-10 rounded-full ${currentUser.avatarColor} flex items-center justify-center text-white font-bold`}>
-                  {currentUser.name.charAt(0)}
-                </div>
+                {currentUser.avatarUrl ? (
+                  <img 
+                    src={currentUser.avatarUrl} 
+                    alt={currentUser.name}
+                    className="w-10 h-10 rounded-full object-cover"
+                  />
+                ) : (
+                  <div className={`w-10 h-10 rounded-full ${currentUser.avatarColor} flex items-center justify-center text-white font-bold`}>
+                    {currentUser.name.charAt(0)}
+                  </div>
+                )}
                 <div className="text-left">
                   <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{currentUser.name}</p>
                   <p className="text-xs text-gray-500 dark:text-gray-400">{currentUser.role === UserRole.ADMIN ? 'Admin' : 'Member'}</p>

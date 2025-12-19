@@ -742,6 +742,19 @@ const groupedPrizes: GroupedPrize[] = Object.values(
       })
     : activeBounties;
 
+  // Get denial message for denied tasks
+  const getDenialMessage = (assignment: BountyAssignment): string | null => {
+    if (assignment.denialReason) {
+      const reasonMessages: Record<string, string> = {
+        'NOT_COMPLETED_ADEQUATELY': 'Task not completed to adequate standard',
+        'TOO_OLD_NO_LONGER_REQUIRED': 'Task too old and no longer required',
+        'NOT_COMPLETED': 'Task not completed',
+      };
+      return reasonMessages[assignment.denialReason] || 'Task was denied';
+    }
+    return null;
+  };
+
   // Filter store items by search term
   const filteredStoreItems = searchTerm.trim()
     ? storeItems.filter(item =>
@@ -1431,6 +1444,8 @@ const groupedPrizes: GroupedPrize[] = Object.values(
                     const rewardDescription = t.rewardType === 'TICKETS' 
                       ? `Reward: ${t.rewardValue} Tickets`
                       : `Reward: ${t.rewardValue}`;
+
+                    const denialMessage = getDenialMessage(b);
                     
                     return (
                         <div key={b.id} className="relative">
@@ -1443,40 +1458,58 @@ const groupedPrizes: GroupedPrize[] = Object.values(
                                 isFCFS={t.isFCFS}
                                 actionLabel={null} // We render custom buttons below
                                 onClick={undefined} // Remove click handler from card body
-                                disabled={b.status === BountyStatus.COMPLETED}
-                                themeColor= {t.themeColor || "bg-white border-indigo-200 text-gray-900"}
+                                disabled={b.status === BountyStatus.COMPLETED || b.status === BountyStatus.DENIED}
+                                themeColor={
+                                  b.status === BountyStatus.DENIED
+                                    ? "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-gray-900 dark:text-white"
+                                    : t.themeColor || "bg-white border-indigo-200 text-gray-900"
+                                }
                                 customActions={
-                                    <div className="flex gap-2 mt-4">
-                                        {b.status === BountyStatus.OFFERED ? (
-                                            <>
-                                                <button 
-                                                    onClick={(e) => { e.stopPropagation(); handleBountyAction(b.id, 'reject'); }} 
-                                                    className="flex-1 py-2 bg-red-50 text-red-600 font-bold rounded-xl hover:bg-red-100 flex items-center justify-center gap-1 text-sm"
-                                                >
-                                                    <X size={16}/> Refuse
-                                                </button>
-                                                <button 
-                                                    onClick={(e) => { e.stopPropagation(); handleBountyAction(b.id, 'start'); }} 
-                                                    className="flex-[2] py-2 bg-green-600 text-white font-bold rounded-xl shadow-md hover:bg-green-700 flex items-center justify-center gap-1 text-sm"
-                                                >
-                                                    <ThumbsUp size={16}/> Accept
-                                                </button>
-                                            </>
-                                        ) : b.status === BountyStatus.IN_PROGRESS ? (
-                                            <button 
-                                                onClick={(e) => { e.stopPropagation(); handleBountyAction(b.id, 'finish'); }} 
-                                                className="w-full py-2 bg-indigo-600 text-white font-bold rounded-xl shadow-md hover:bg-indigo-700 flex items-center justify-center gap-1 text-sm"
-                                            >
-                                                <CheckCircle size={16}/> Mark Complete
-                                            </button>
-                                        ) : (
-                                            <button 
-                                                disabled
-                                                className="w-full py-2 bg-gray-100 text-gray-400 font-bold rounded-xl border border-gray-200 cursor-not-allowed text-sm"
-                                            >
-                                                Pending Verification
-                                            </button>
+                                    <div className="flex flex-col gap-2 mt-4">
+                                        {denialMessage && (
+                                          <div className="text-sm text-red-600 dark:text-red-400 font-medium bg-red-50 dark:bg-red-900/20 p-2 rounded-lg">
+                                            ❌ {denialMessage}
+                                          </div>
                                         )}
+                                        <div className="flex gap-2">
+                                            {b.status === BountyStatus.OFFERED ? (
+                                                <>
+                                                    <button 
+                                                        onClick={(e) => { e.stopPropagation(); handleBountyAction(b.id, 'reject'); }} 
+                                                        className="flex-1 py-2 bg-red-50 text-red-600 font-bold rounded-xl hover:bg-red-100 flex items-center justify-center gap-1 text-sm"
+                                                    >
+                                                        <X size={16}/> Refuse
+                                                    </button>
+                                                    <button 
+                                                        onClick={(e) => { e.stopPropagation(); handleBountyAction(b.id, 'start'); }} 
+                                                        className="flex-[2] py-2 bg-green-600 text-white font-bold rounded-xl shadow-md hover:bg-green-700 flex items-center justify-center gap-1 text-sm"
+                                                    >
+                                                        <ThumbsUp size={16}/> Accept
+                                                    </button>
+                                                </>
+                                            ) : b.status === BountyStatus.IN_PROGRESS ? (
+                                                <button 
+                                                    onClick={(e) => { e.stopPropagation(); handleBountyAction(b.id, 'finish'); }} 
+                                                    className="w-full py-2 bg-indigo-600 text-white font-bold rounded-xl shadow-md hover:bg-indigo-700 flex items-center justify-center gap-1 text-sm"
+                                                >
+                                                    <CheckCircle size={16}/> Mark Complete
+                                                </button>
+                                            ) : b.status === BountyStatus.DENIED ? (
+                                                <button 
+                                                    onClick={(e) => { e.stopPropagation(); handleBountyAction(b.id, 'finish'); }} 
+                                                    className="w-full py-2 bg-orange-600 text-white font-bold rounded-xl shadow-md hover:bg-orange-700 flex items-center justify-center gap-1 text-sm"
+                                                >
+                                                    <CheckCircle size={16}/> Re-submit for Review
+                                                </button>
+                                            ) : (
+                                                <button 
+                                                    disabled
+                                                    className="w-full py-2 bg-gray-100 dark:bg-gray-700 text-gray-400 font-bold rounded-xl border border-gray-200 dark:border-gray-600 cursor-not-allowed text-sm"
+                                                >
+                                                    Pending Verification
+                                                </button>
+                                            )}
+                                        </div>
                                     </div>
                                 }
                             />

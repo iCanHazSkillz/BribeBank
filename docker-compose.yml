@@ -30,11 +30,15 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       PORT: 3001
       NODE_ENV: "production"
+      TZ: America/Edmonton
     depends_on:
       bribebank-db:
         condition: service_healthy
     ports:
       - "3040:3001"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
     networks:
       - bribebank_net
       - npm_net
@@ -48,6 +52,10 @@ services:
     restart: unless-stopped
     environment:
       VITE_API_URL: ${VITE_API_URL}
+      TZ: America/Edmonton
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
     networks:
       - bribebank_net
       - npm_net

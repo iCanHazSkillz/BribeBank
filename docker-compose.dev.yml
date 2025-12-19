@@ -28,12 +28,15 @@ services:
     volumes:
       - ./bribebank-api:/app
       - /app/node_modules
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
     environment:
       DATABASE_URL: ${DATABASE_URL}
       JWT_SECRET: ${JWT_SECRET}
       PORT: 3001
       NODE_ENV: development
       CHOKIDAR_USEPOLLING: "true"
+      TZ: America/Edmonton
     command: sh -c "npm install && npm run dev"
     depends_on:
       bribebank-db:
@@ -52,9 +55,12 @@ services:
     volumes:
       - ./bribebank-frontend:/app
       - /app/node_modules
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
     environment:
       VITE_API_URL: ${VITE_API_URL}
       CHOKIDAR_USEPOLLING: "true"
+      TZ: America/Edmonton
     command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
     depends_on:
       - bribebank-api

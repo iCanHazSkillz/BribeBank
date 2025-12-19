@@ -107,6 +107,13 @@ enum BountyStatus {
   IN_PROGRESS
   COMPLETED
   VERIFIED
+  DENIED
+}
+
+enum DenialReason {
+  NOT_COMPLETED_ADEQUATELY
+  TOO_OLD_NO_LONGER_REQUIRED
+  NOT_COMPLETED
 }
 
 // -----------------------------------------------------
@@ -233,6 +240,8 @@ model BountyAssignment {
 
   assignedAt  DateTime     @default(now())
   completedAt DateTime?
+  denialReason DenialReason?
+  deniedAt    DateTime?
 
   @@index([familyId, userId])
   @@index([familyId, status])
@@ -255,6 +264,7 @@ model HistoryEvent {
   emoji        String
   action       String
   assignerName String
+  metadata     String?  // For storing additional context like denial reasons
 
   createdAt    DateTime @default(now())
 

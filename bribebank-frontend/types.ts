@@ -24,6 +24,13 @@ export enum BountyStatus {
   IN_PROGRESS = 'IN_PROGRESS',
   COMPLETED = 'COMPLETED', // Waiting for parent verification
   VERIFIED = 'VERIFIED',   // Done, reward issued
+  DENIED = 'DENIED',       // Parent denied completion
+}
+
+export enum DenialReason {
+  NOT_COMPLETED_ADEQUATELY = 'NOT_COMPLETED_ADEQUATELY',
+  TOO_OLD_NO_LONGER_REQUIRED = 'TOO_OLD_NO_LONGER_REQUIRED',
+  NOT_COMPLETED = 'NOT_COMPLETED',
 }
 
 // New interface for Family/Tenant isolation
@@ -98,6 +105,8 @@ export interface AssignedBounty {
   assignedAt: number;
   status: BountyStatus;
   completedAt?: number;
+  denialReason?: string | null;
+  deniedAt?: number | null;
 }
 
 // STORE INTERFACES

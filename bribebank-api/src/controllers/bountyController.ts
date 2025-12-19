@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { BountyStatus, Role, PrizeStatus, PrizeType } from "@prisma/client";
+import { BountyStatus, Role, PrizeStatus, PrizeType, DenialReason } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { assertFamilyMember, assertParent, getRequestUser } from "../lib/authHelpers.js";
 import { broadcastToFamily } from "../realtime/eventBus.js";
@@ -609,7 +609,8 @@ export const completeAssignedBounty = async (req: Request, res: Response) => {
       return res.status(403).json({ error: "ONLY_ASSIGNEE_CAN_COMPLETE" });
     }
 
-    if (assignment.status !== BountyStatus.IN_PROGRESS) {
+    // Allow completion from IN_PROGRESS or DENIED (resubmission after denial)
+    if (assignment.status !== BountyStatus.IN_PROGRESS && assignment.status !== BountyStatus.DENIED) {
       return res.status(400).json({ error: "INVALID_STATUS" });
     }
 
@@ -626,6 +627,9 @@ export const completeAssignedBounty = async (req: Request, res: Response) => {
         data: {
           status: BountyStatus.COMPLETED,
           completedAt: now,
+          // Clear denial reason if resubmitting after denial
+          denialReason: null,
+          deniedAt: null,
         },
       });
 
@@ -961,6 +965,144 @@ export const verifyAssignedBounty = async (req: Request, res: Response) => {
     });
   } catch (err) {
     console.error("verifyAssignedBounty error:", err);
+    return res.status(500).json({ error: "INTERNAL_SERVER_ERROR" });
+  }
+};
+
+// POST /bounty-assignments/:id/deny
+export const denyAssignedBounty = async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { denialReason, denialNotes } = req.body;
+
+  if (!id) {
+    return res.status(400).json({ error: "MISSING_ASSIGNMENT_ID" });
+  }
+
+  if (!denialReason) {
+    return res.status(400).json({ error: "MISSING_DENIAL_REASON" });
+  }
+
+  // Validate the denial reason is one of the enum values
+  const validReasons = Object.values(DenialReason);
+  if (!validReasons.includes(denialReason)) {
+    return res.status(400).json({ error: "INVALID_DENIAL_REASON" });
+  }
+
+  try {
+    const existingAssignment = await prisma.bountyAssignment.findUnique({
+      where: { id },
+      include: {
+        bounty: true,
+        user: true,
+      },
+    });
+
+    if (!existingAssignment) {
+      return res.status(404).json({ error: "NOT_FOUND" });
+    }
+
+    const bounty = existingAssignment.bounty;
+    const child = existingAssignment.user;
+
+    if (!bounty || !child) {
+      return res.status(500).json({ error: "BOUNTY_OR_CHILD_MISSING" });
+    }
+
+    const parent = await assertFamilyMember(req, existingAssignment.familyId);
+    assertParent(parent);
+
+    if (parent.id === child.id) {
+      return res
+        .status(403)
+        .json({ error: "CANNOT_DENY_OWN_TASK" });
+    }
+
+    if (existingAssignment.status !== BountyStatus.COMPLETED) {
+      return res.status(400).json({ error: "INVALID_STATUS" });
+    }
+
+    // Update bounty assignment to DENIED status
+    const updatedAssignment = await prisma.bountyAssignment.update({
+      where: { id },
+      data: {
+        status: BountyStatus.DENIED,
+        denialReason,
+        deniedAt: new Date(),
+      },
+    });
+
+    const parentName = parent.displayName || parent.username || "Parent";
+    const childName = child.displayName || child.username || "Child";
+
+    // Create human-readable reason message
+    const reasonMessages: Record<DenialReason, string> = {
+      [DenialReason.NOT_COMPLETED_ADEQUATELY]: "Task not completed to adequate standard",
+      [DenialReason.TOO_OLD_NO_LONGER_REQUIRED]: "Task too old and no longer required",
+      [DenialReason.NOT_COMPLETED]: "Task not completed",
+    };
+
+    const reasonMessage = reasonMessages[denialReason as DenialReason];
+    
+    // Build full message with notes if provided
+    const fullMessage = denialNotes ? `${reasonMessage}: ${denialNotes}` : reasonMessage;
+
+    // Log task denial in history and add notification in a transaction
+    await prisma.$transaction(async (tx) => {
+      // Log task denial in history
+      await addHistoryEvent(
+        {
+          familyId: existingAssignment.familyId,
+          userId: existingAssignment.userId,
+          userName: childName,
+          title: bounty.title,
+          emoji: bounty.emoji || "🧹",
+          action: "DENIED_TASK",
+          assignerName: parentName,
+          metadata: fullMessage,
+        },
+        tx
+      );
+
+      // Add notification to child
+      await addNotification(
+        {
+          userId: existingAssignment.userId,
+          message: `Task "${bounty.title}" was denied: ${fullMessage}. Please try again!`,
+        },
+        tx
+      );
+    });
+
+    // Send push notification
+    try {
+      await sendPushToUser(child.id, {
+        title: "Task Denied ❌",
+        body: `${parentName} denied: ${bounty.title}. ${fullMessage}.`,
+        tag: "task-denied",
+        type: "TASK_DENIED",
+        familyId: existingAssignment.familyId,
+        assignmentId: existingAssignment.id,
+        url: "/?view=wallet&walletTab=tasks",
+      });
+    } catch (pushErr) {
+      console.warn("denyAssignedBounty push failed:", pushErr);
+    }
+
+    const event: SseEvent = {
+      type: "WALLET_UPDATE",
+      familyId: existingAssignment.familyId,
+      reason: "TASK_DENIED",
+      timestamp: Date.now(),
+    };
+
+    broadcastToFamily(existingAssignment.familyId, event);
+
+    return res.json({
+      assignment: updatedAssignment,
+      denialReason: fullMessage,
+    });
+  } catch (err) {
+    console.error("denyAssignedBounty error:", err);
     return res.status(500).json({ error: "INTERNAL_SERVER_ERROR" });
   }
 };

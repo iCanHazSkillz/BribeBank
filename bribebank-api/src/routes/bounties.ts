@@ -10,6 +10,7 @@ import {
   acceptAssignedBounty,
   completeAssignedBounty,
   verifyAssignedBounty,
+  denyAssignedBounty,
   deleteAssignedBounty,
 } from "../controllers/bountyController.js";
 
@@ -27,6 +28,7 @@ router.post("/families/:familyId/bounty-assignments",authMiddleware,assignBounty
 router.post("/bounty-assignments/:id/accept", authMiddleware, acceptAssignedBounty);
 router.post("/bounty-assignments/:id/complete", authMiddleware, completeAssignedBounty);
 router.post("/bounty-assignments/:id/verify", authMiddleware, verifyAssignedBounty);
+router.post("/bounty-assignments/:id/deny", authMiddleware, denyAssignedBounty);
 router.delete("/bounty-assignments/:id", authMiddleware, deleteAssignedBounty);
 
 export default router;
