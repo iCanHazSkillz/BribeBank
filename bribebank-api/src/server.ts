@@ -14,6 +14,7 @@ import ticketRoutes from "./routes/tickets.js";
 import storeItemRoutes from "./routes/storeItems.js";
 import wheelRoutes from "./routes/wheel.js";
 import templateRoutes from "./routes/templates.js";
+import { startDeadlineMonitoring } from "./services/deadlineMonitor.js";
 
 const app = express();
 
@@ -47,4 +48,7 @@ app.get("/", (_req, res) => {
 
 app.listen(config.port, () => {
     console.log(`BribeBank API running on port ${config.port}`);
+    
+    // Start deadline monitoring service
+    startDeadlineMonitoring();
 });

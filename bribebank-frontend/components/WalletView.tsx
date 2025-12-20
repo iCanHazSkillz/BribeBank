@@ -3,7 +3,8 @@ import { AssignedPrize, PrizeStatus, PrizeTemplate, User, PrizeType, HistoryEven
 import { storageService } from '../services/storageService';
 import { API_BASE } from "../config";
 import { PrizeCard } from './PrizeCard';
-import { History, Ticket, Bell, X, CheckCircle, XCircle, ListTodo, Play, Trash2, ThumbsUp, ThumbsDown, gift, ShoppingBag, Link as LinkIcon, Image as ImageIcon, Settings, User as UserIcon, Search, ArrowUp, Sun, Moon } from 'lucide-react';
+import { DeadlineDisplay } from './DeadlineDisplay';
+import { History, Ticket, Bell, X, CheckCircle, XCircle, ListTodo, Play, Trash2, ThumbsUp, ThumbsDown, gift, ShoppingBag, Link as LinkIcon, Image as ImageIcon, Settings, User as UserIcon, Search, ArrowUp, Sun, Moon, Clock } from 'lucide-react';
 import { SseEvent } from "../types/sseEvents";
 import { useTheme } from '../contexts/ThemeContext';
 
@@ -762,6 +763,7 @@ const groupedPrizes: GroupedPrize[] = Object.values(
         'NOT_COMPLETED': 'Task not completed',
         'INSTRUCTIONS_NOT_FOLLOWED': 'Didn\'t follow the instructions',
         'LOW_EFFORT': 'Not enough effort / rushed',
+        'COMPLETED_AFTER_DEADLINE': 'Completed after the deadline',
       };
       const reasonText = reasonMessages[assignment.denialReason] || 'Task was denied';
       
@@ -1460,9 +1462,23 @@ const groupedPrizes: GroupedPrize[] = Object.values(
                     const t = bountyTemplates.find(temp => temp.id === b.bountyTemplateId);
                     if(!t) return null;
                     
+                    // Format deadline for description
+                    let deadlineText = '';
+                    if (t.deadlineHours) {
+                        const days = Math.floor(t.deadlineHours / 24);
+                        const hours = t.deadlineHours % 24;
+                        if (days > 0 && hours > 0) {
+                            deadlineText = ` • ${days}d ${hours}h deadline`;
+                        } else if (days > 0) {
+                            deadlineText = ` • ${days}d deadline`;
+                        } else {
+                            deadlineText = ` • ${hours}h deadline`;
+                        }
+                    }
+                    
                     const rewardDescription = t.rewardType === 'TICKETS' 
-                      ? `Reward: ${t.rewardValue} Tickets`
-                      : `Reward: ${t.rewardValue}`;
+                      ? `Reward: ${t.rewardValue} Tickets${deadlineText}`
+                      : `Reward: ${t.rewardValue}${deadlineText}`;
 
                     // Get just the reason text without notes for the card display
                     const getDenialReasonText = (): string | undefined => {
@@ -1473,6 +1489,7 @@ const groupedPrizes: GroupedPrize[] = Object.values(
                           'NOT_COMPLETED': 'Task not completed',
                           'INSTRUCTIONS_NOT_FOLLOWED': 'Didn\'t follow the instructions',
                           'LOW_EFFORT': 'Not enough effort / rushed',
+                          'COMPLETED_AFTER_DEADLINE': 'Completed after the deadline',
                         };
                         return reasonMessages[b.denialReason] || 'Task was denied';
                       }
@@ -1494,6 +1511,7 @@ const groupedPrizes: GroupedPrize[] = Object.values(
                                 variant="bounty"
                                 status={b.status}
                                 isFCFS={t.isFCFS}
+                                hasDeadline={!!t.deadlineHours}
                                 actionLabel={null} // We render custom buttons below
                                 onClick={undefined} // Remove click handler from card body
                                 disabled={b.status === BountyStatus.COMPLETED || b.status === BountyStatus.DENIED}
@@ -1504,6 +1522,14 @@ const groupedPrizes: GroupedPrize[] = Object.values(
                                 }
                                 customActions={
                                     <div className="flex flex-col gap-2 mt-2">
+                                        {/* Deadline Display - Show countdown for active tasks */}
+                                        {b.deadlineExpiresAt && b.status !== BountyStatus.VERIFIED && b.status !== BountyStatus.DENIED && b.status !== BountyStatus.OFFERED && (
+                                          <DeadlineDisplay 
+                                            deadlineExpiresAt={b.deadlineExpiresAt} 
+                                            completedAt={b.status === BountyStatus.COMPLETED ? b.completedAt : undefined}
+                                          />
+                                        )}
+                                        
                                         {(denialReasonText || b.denialNotes) && (
                                           <div className="text-sm text-red-600 dark:text-red-400 font-medium bg-red-50 dark:bg-red-900/20 p-2 rounded-lg">
                                             {denialReasonText && <div>❌ {denialReasonText}</div>}
@@ -1515,13 +1541,13 @@ const groupedPrizes: GroupedPrize[] = Object.values(
                                                 <>
                                                     <button 
                                                         onClick={(e) => { e.stopPropagation(); handleBountyAction(b.id, 'reject'); }} 
-                                                        className="flex-1 py-2 bg-red-50 text-red-600 font-bold rounded-xl hover:bg-red-100 flex items-center justify-center gap-1 text-sm"
+                                                        className="flex-1 py-2 bg-red-50 dark:bg-red-900/70 text-red-600 dark:text-red-400 font-bold rounded-xl hover:bg-red-100 dark:hover:bg-red-900/50 flex items-center justify-center gap-1 text-sm border border-red-200 dark:border-red-700"
                                                     >
                                                         <X size={16}/> Refuse
                                                     </button>
                                                     <button 
                                                         onClick={(e) => { e.stopPropagation(); handleBountyAction(b.id, 'start'); }} 
-                                                        className="flex-[2] py-2 bg-green-600 text-white font-bold rounded-xl shadow-md hover:bg-green-700 flex items-center justify-center gap-1 text-sm"
+                                                        className="flex-[2] py-2 bg-green-50 dark:bg-green-900/70 text-green-600 dark:text-green-400 font-bold rounded-xl hover:bg-green-100 dark:hover:bg-green-900/50 flex items-center justify-center gap-1 text-sm border border-green-200 dark:border-green-700"
                                                     >
                                                         <ThumbsUp size={16}/> Accept
                                                     </button>

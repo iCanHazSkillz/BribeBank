@@ -31,6 +31,7 @@ export enum DenialReason {
   NOT_COMPLETED_ADEQUATELY = 'NOT_COMPLETED_ADEQUATELY',
   TOO_OLD_NO_LONGER_REQUIRED = 'TOO_OLD_NO_LONGER_REQUIRED',
   NOT_COMPLETED = 'NOT_COMPLETED',
+  COMPLETED_AFTER_DEADLINE = 'COMPLETED_AFTER_DEADLINE',
 }
 
 // New interface for Family/Tenant isolation
@@ -94,6 +95,7 @@ export interface BountyTemplate {
   rewardTemplateId?: string; // Optional: if linked to an existing prize template
   isFCFS?: boolean; // First Come First Served
   themeColor?: string | null;
+  deadlineHours?: number | null; // Optional deadline in hours
 }
 
 export interface AssignedBounty {
@@ -109,6 +111,9 @@ export interface AssignedBounty {
   denialReason?: string | null;
   denialNotes?: string | null;
   deniedAt?: number | null;
+  deadlineStartedAt?: number | null;
+  deadlineExpiresAt?: number | null;
+  deadlineWarningNotified?: boolean;
 }
 
 // STORE INTERFACES

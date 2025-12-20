@@ -3,6 +3,7 @@ import { AssignedPrize, PrizeStatus, PrizeTemplate, User, PrizeType, UserRole, H
 import { storageService } from '../services/storageService';
 import { API_BASE } from "../config";
 import { PrizeCard } from './PrizeCard';
+import { DeadlineDisplay } from './DeadlineDisplay';
 import { Trash2, Check, X, Gift, Edit2, CheckCircle, AlertCircle, UserPlus, Shield, User as UserIcon, KeyRound, History, Plus, ListTodo, CircleDollarSign, Search, Zap, Bell, Settings, ShoppingBag, Link as Linkicon, Image as ImageIcon, Ticket, RotateCcw, Send, ArrowUp, Sun, Moon, ChevronDown, Download, Upload, HeartHandshake } from 'lucide-react';
 import { SseEvent } from "../types/sseEvents";
 import { useTheme } from '../contexts/ThemeContext';
@@ -91,6 +92,8 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, o
   const [bountyEmoji, setBountyEmoji] = useState('🧹');
   const [bountyFCFS, setBountyFCFS] = useState(false);
   const [bountyColor, setBountyColor] = useState(PASTEL_COLORS[6]);
+  const [bountyDeadlineDays, setBountyDeadlineDays] = useState('');
+  const [bountyDeadlineHours, setBountyDeadlineHours] = useState('');
   const [emojiPickerTarget, setEmojiPickerTarget] =
     useState<"prize" | "bounty" | null>(null);
   const [showPrizeEmojiPicker, setShowPrizeEmojiPicker] = useState(false);
@@ -145,8 +148,9 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, o
   // Denial Modal State
   const [showDenialModal, setShowDenialModal] = useState(false);
   const [denialAssignmentId, setDenialAssignmentId] = useState<string | null>(null);
-  const [selectedDenialReason, setSelectedDenialReason] = useState<'INSTRUCTIONS_NOT_FOLLOWED' | 'LOW_EFFORT' | 'NOT_COMPLETED'>('NOT_COMPLETED');
+  const [selectedDenialReason, setSelectedDenialReason] = useState<'INSTRUCTIONS_NOT_FOLLOWED' | 'LOW_EFFORT' | 'NOT_COMPLETED' | 'COMPLETED_AFTER_DEADLINE'>('NOT_COMPLETED');
   const [denialNotes, setDenialNotes] = useState('');
+  const [allowResubmit, setAllowResubmit] = useState(true);
 
   const confirm = (options: ConfirmOptions): Promise<boolean> => {
     return new Promise<boolean>((resolve) => {
@@ -361,7 +365,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, o
 
   const resetForms = () => {
     setPrizeTitle(''); setPrizeDesc(''); setPrizeEmoji('🎁'); setPrizeColor(PASTEL_COLORS[6]);
-    setBountyTitle(''); setBountyRewardType('TICKETS'); setBountyRewardValue(''); setBountyEmoji('🧹'); setBountyFCFS(false); setBountyColor(PASTEL_COLORS[6]);
+    setBountyTitle(''); setBountyRewardType('TICKETS'); setBountyRewardValue(''); setBountyEmoji('🧹'); setBountyFCFS(false); setBountyColor(PASTEL_COLORS[6]); setBountyDeadlineDays(''); setBountyDeadlineHours('');
     setStoreItemTitle(''); setStoreItemCost(''); setStoreItemImage(''); setStoreItemLink(''); setStoreItemDescription('');
     setEditingId(null);
     setEditingStoreItemId(null);
@@ -463,8 +467,12 @@ const handleBulkAssign = async () => {
 
         try {
           await storageService.saveTemplate(reward);
-          showToast("Reward template saved!", "success");
           await refreshData();
+          resetForms();
+          setEditingId(null);
+          setTab("assign");
+          setAssignSubTab("rewards");
+          showToast("Reward template saved!", "success");
         } catch (err) {
           console.error("Failed to save reward template", err);
           showToast("Failed to save reward", "error");
@@ -503,6 +511,33 @@ const handleBulkAssign = async () => {
           }
         }
 
+        // Validate and calculate deadline (days + hours)
+        let deadlineHoursValue: number | undefined;
+        const days = bountyDeadlineDays ? parseInt(bountyDeadlineDays) : 0;
+        const hours = bountyDeadlineHours ? parseInt(bountyDeadlineHours) : 0;
+        
+        if (bountyDeadlineDays || bountyDeadlineHours) {
+          if ((bountyDeadlineDays && isNaN(days)) || (bountyDeadlineHours && isNaN(hours))) {
+            showToast("Days and hours must be valid numbers", "error");
+            return;
+          }
+          if (days < 0 || hours < 0) {
+            showToast("Days and hours cannot be negative", "error");
+            return;
+          }
+          if (hours >= 24) {
+            showToast("Hours must be less than 24 (use days instead)", "error");
+            return;
+          }
+          
+          deadlineHoursValue = days * 24 + hours;
+          
+          if (deadlineHoursValue < 1) {
+            showToast("Deadline must be at least 1 hour or 1 day", "error");
+            return;
+          }
+        }
+
         const bounty: BountyTemplate = {
           id: editingId || Date.now().toString(), // numeric IDs = create
           familyId: currentUser.familyId,
@@ -513,28 +548,26 @@ const handleBulkAssign = async () => {
           rewardTemplateId: undefined, // not used yet
           isFCFS: bountyFCFS,
           themeColor: bountyColor,
+          deadlineHours: deadlineHoursValue,
         };
 
         try {
           await storageService.saveBountyTemplate(bounty);
-          showToast("Bounty template saved!", "success");
           await refreshData();
+          resetForms();
+          setEditingId(null);
+          setTab("assign");
+          setAssignSubTab("bounties");
+          showToast("Bounty template saved!", "success");
         } catch (err) {
           console.error("Failed to save bounty template", err);
           showToast("Failed to save bounty", "error");
           return;
         }
       }
-
-      // ------------------------------------
-      // CLEANUP
-      // ------------------------------------
-      resetForms();
-      setEditingId(null);
-      setTab("assign");
     } catch (err) {
-      console.error("Unexpected error in handleSaveTemplate:", err);
-      showToast("Something went wrong", "error");
+      console.error("Save template error:", err);
+      showToast("Failed to save template", "error");
     }
   };
 
@@ -614,6 +647,16 @@ const handleBulkAssign = async () => {
       setBountyEmoji(b.emoji);
       setBountyFCFS(!!b.isFCFS);
       setBountyColor(b.themeColor || PASTEL_COLORS[9]);
+      
+      // Convert total hours to days and hours for display
+      if (b.deadlineHours) {
+        const totalHours = b.deadlineHours;
+        const days = Math.floor(totalHours / 24);
+        const hours = totalHours % 24;
+        setBountyDeadlineDays(days > 0 ? String(days) : '');
+        setBountyDeadlineHours(hours > 0 ? String(hours) : '');
+      }
+      
       setTab('create');
   };
 
@@ -648,6 +691,7 @@ const handleBulkAssign = async () => {
       setDenialAssignmentId(assignmentId);
       setSelectedDenialReason('NOT_COMPLETED');
       setDenialNotes('');
+      setAllowResubmit(true);
       setShowDenialModal(true);
   };
 
@@ -655,9 +699,12 @@ const handleBulkAssign = async () => {
       if (!denialAssignmentId) return;
 
       try {
-          await storageService.denyBounty(denialAssignmentId, selectedDenialReason, denialNotes);
+          await storageService.denyBounty(denialAssignmentId, selectedDenialReason, denialNotes, allowResubmit);
           await refreshData();
-          showToast("Task denied. Child has been notified.", 'success');
+          const message = allowResubmit 
+            ? "Task denied. Child can resubmit." 
+            : "Task cancelled. No reward assigned.";
+          showToast(message, 'success');
           setShowDenialModal(false);
           setDenialAssignmentId(null);
       } catch (err) {
@@ -2170,26 +2217,47 @@ const handleBulkAssign = async () => {
                     </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pb-24">
                     {filteredBounties.length === 0 && <div className="col-span-2 text-center text-gray-400 dark:text-gray-500 py-8 italic">No task templates found.</div>}
-                    {filteredBounties.map(b => (
-                        <PrizeCard
-                            key={b.id}
-                            title={b.title}
-                            description={`Reward: ${b.rewardValue}${b.rewardType === 'TICKETS' ? ' Tickets' : ''}`}
-                            emoji={b.emoji}
-                            themeColor={b.themeColor || undefined}
-                            variant="bounty"
-                            isFCFS={b.isFCFS}
-                            highlight={selectedBountyTemplateIds.includes(b.id)}
-                            onClick={() =>
-                                setSelectedBountyTemplateIds(prev =>
-                                    prev.includes(b.id)
-                                        ? prev.filter(id => id !== b.id)
-                                        : [...prev, b.id]
-                                )
+                    {filteredBounties.map(b => {
+                        // Format deadline for display
+                        let deadlineText = '';
+                        if (b.deadlineHours) {
+                            const days = Math.floor(b.deadlineHours / 24);
+                            const hours = b.deadlineHours % 24;
+                            if (days > 0 && hours > 0) {
+                                deadlineText = `${days}d ${hours}h deadline`;
+                            } else if (days > 0) {
+                                deadlineText = `${days}d deadline`;
+                            } else {
+                                deadlineText = `${hours}h deadline`;
                             }
-                            onEdit={() => handleEditBounty(b)}
-                        />
-                    ))}
+                        }
+
+                        const description = b.deadlineHours 
+                            ? `Reward: ${b.rewardValue}${b.rewardType === 'TICKETS' ? ' Tickets' : ''} • ${deadlineText}`
+                            : `Reward: ${b.rewardValue}${b.rewardType === 'TICKETS' ? ' Tickets' : ''}`;
+
+                        return (
+                            <PrizeCard
+                                key={b.id}
+                                title={b.title}
+                                description={description}
+                                emoji={b.emoji}
+                                themeColor={b.themeColor || undefined}
+                                variant="bounty"
+                                isFCFS={b.isFCFS}
+                                hasDeadline={!!b.deadlineHours}
+                                highlight={selectedBountyTemplateIds.includes(b.id)}
+                                onClick={() =>
+                                    setSelectedBountyTemplateIds(prev =>
+                                        prev.includes(b.id)
+                                            ? prev.filter(id => id !== b.id)
+                                            : [...prev, b.id]
+                                    )
+                                }
+                                onEdit={() => handleEditBounty(b)}
+                            />
+                        );
+                    })}
                 </div>
                 </>
             ) : (
@@ -2358,6 +2426,18 @@ const handleBulkAssign = async () => {
                                         </div>
                                         <span className="text-2xl">{template.emoji}</span>
                                     </div>
+                                    
+                                    {/* Deadline Status */}
+                                    {b.deadlineExpiresAt && (
+                                      <div className="mt-3">
+                                        <DeadlineDisplay 
+                                          deadlineExpiresAt={b.deadlineExpiresAt} 
+                                          completedAt={b.completedAt}
+                                          compact 
+                                        />
+                                      </div>
+                                    )}
+                                    
                                     <div className="mt-3 pt-3 border-t border-green-50 dark:border-green-900 flex gap-3 justify-end">
                                         <button onClick={() => handleOpenDenialModal(b.id)} className="flex-1 py-2 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 font-bold rounded-xl hover:bg-red-100 dark:hover:bg-red-900/50 flex items-center justify-center gap-1 text-sm border border-red-200 dark:border-red-700">
                                             <X size={16}/> Deny
@@ -2968,6 +3048,41 @@ const handleBulkAssign = async () => {
                       </p>
                     </div>
                   </div>
+
+                  {/* ---------------- Deadline Input ---------------- */}
+                  <div className="space-y-2">
+                    <label className="block font-bold text-gray-700 dark:text-gray-300 text-sm">
+                      Deadline (Optional)
+                    </label>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <input
+                          type="number"
+                          placeholder="Days"
+                          value={bountyDeadlineDays}
+                          onChange={(e) => setBountyDeadlineDays(e.target.value)}
+                          min="0"
+                          className="w-full border border-gray-300 dark:border-gray-600 rounded-xl px-4 py-3 dark:bg-gray-700 dark:text-white"
+                        />
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Days (0-365)</p>
+                      </div>
+                      <div>
+                        <input
+                          type="number"
+                          placeholder="Hours"
+                          value={bountyDeadlineHours}
+                          onChange={(e) => setBountyDeadlineHours(e.target.value)}
+                          min="0"
+                          max="23"
+                          className="w-full border border-gray-300 dark:border-gray-600 rounded-xl px-4 py-3 dark:bg-gray-700 dark:text-white"
+                        />
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Hours (0-23)</p>
+                      </div>
+                    </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      Timer starts when child accepts the task. Minimum 1 day or 1 hour. Leave blank for no deadline.
+                    </p>
+                  </div>
                 </div>
               )}
 
@@ -3506,7 +3621,7 @@ const handleBulkAssign = async () => {
             </div>
 
             <p className="text-gray-600 dark:text-gray-300 mb-6">
-              Why are you denying this task? The child will be notified and can resubmit.
+              Why are you denying this task?
             </p>
 
             <div className="space-y-3 mb-6">
@@ -3551,7 +3666,57 @@ const handleBulkAssign = async () => {
                   Task not completed
                 </span>
               </label>
+
+              <label className="flex items-center p-3 border-2 border-gray-200 dark:border-gray-700 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                <input
+                  type="radio"
+                  name="denialReason"
+                  value="COMPLETED_AFTER_DEADLINE"
+                  checked={selectedDenialReason === 'COMPLETED_AFTER_DEADLINE'}
+                  onChange={() => setSelectedDenialReason('COMPLETED_AFTER_DEADLINE')}
+                  className="w-4 h-4"
+                />
+                <span className="ml-3 text-sm font-medium text-gray-800 dark:text-white">
+                  Completed after the deadline
+                </span>
+              </label>
             </div>
+            
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-3">
+                Can child resubmit this task?
+              </label>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setAllowResubmit(true)}
+                  className={`flex-1 py-3 px-4 rounded-lg border-2 font-medium transition-all ${
+                    allowResubmit
+                      ? 'bg-green-50 dark:bg-green-900/30 border-green-500 dark:border-green-600 text-green-700 dark:text-green-300'
+                      : 'border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                  }`}
+                >
+                  ✓ Yes, allow resubmit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAllowResubmit(false)}
+                  className={`flex-1 py-3 px-4 rounded-lg border-2 font-medium transition-all ${
+                    !allowResubmit
+                      ? 'bg-red-50 dark:bg-red-900/30 border-red-500 dark:border-red-600 text-red-700 dark:text-red-300'
+                      : 'border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                  }`}
+                >
+                  ✗ No, cancel task
+                </button>
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                {allowResubmit 
+                  ? 'Child can fix issues and resubmit for verification' 
+                  : 'Task will be removed, no reward will be given'}
+              </p>
+            </div>
+            
             <div className="mb-6">
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
                 Optional Notes

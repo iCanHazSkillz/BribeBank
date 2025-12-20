@@ -790,6 +790,7 @@ export const storageService = {
         rewardTemplateId: b.rewardTemplateId ?? undefined,
         isFCFS: !!b.isFCFS,
         themeColor: b.themeColor ?? null,
+        deadlineHours: b.deadlineHours ?? undefined,
       })
     );
   },
@@ -807,6 +808,7 @@ export const storageService = {
       rewardValue: template.rewardValue,
       isFCFS: !!template.isFCFS,
       themeColor: template.themeColor ?? null,
+      deadlineHours: template.deadlineHours ?? null,
       // rewardTemplateId: template.rewardTemplateId ?? null, // only if you wire this in UI
     };
 
@@ -933,6 +935,8 @@ export const storageService = {
         denialReason: a.denialReason || null,
         denialNotes: a.denialNotes || null,
         deniedAt: a.deniedAt ? new Date(a.deniedAt).getTime() : null,
+        deadlineStartedAt: a.deadlineStartedAt ? new Date(a.deadlineStartedAt).getTime() : undefined,
+        deadlineExpiresAt: a.deadlineExpiresAt ? new Date(a.deadlineExpiresAt).getTime() : undefined,
         // if your UI needs bounty/user nested data, you can also keep a.bounty / a.user
       })
     );
@@ -1039,7 +1043,7 @@ export const storageService = {
     }
   },
 
-  denyBounty: async (assignmentId: string, denialReason: string, denialNotes?: string): Promise<void> => {
+  denyBounty: async (assignmentId: string, denialReason: string, denialNotes?: string, allowResubmit: boolean = true): Promise<void> => {
     const token = getAuthToken();
     if (!token) throw new Error("Not authenticated");
 
@@ -1051,7 +1055,7 @@ export const storageService = {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ denialReason, denialNotes: denialNotes || '' })
+        body: JSON.stringify({ denialReason, denialNotes: denialNotes || '', allowResubmit })
       }
     );
 

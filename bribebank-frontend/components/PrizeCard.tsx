@@ -18,6 +18,7 @@ interface PrizeCardProps {
   highlight?: boolean;
   count?: number;
   isFCFS?: boolean;
+  hasDeadline?: boolean;
   assignedBy?: string;
   denialReason?: string; // Display denial reason on denied bounties
 }
@@ -144,8 +145,7 @@ export const PrizeCard: React.FC<PrizeCardProps> = ({
   variant = 'active',
   highlight = false,
   count,
-  isFCFS,
-  assignedBy,
+  isFCFS,  hasDeadline,  assignedBy,
   denialReason,
 }) => {
   const baseStyles = "relative flex flex-col p-4 rounded-2xl border-2 transition-all duration-200 shadow-sm overflow-hidden";
@@ -182,6 +182,14 @@ export const PrizeCard: React.FC<PrizeCardProps> = ({
         <div className="absolute -top-1 -left-1 px-2 py-1 bg-orange-500 dark:bg-orange-600 text-white rounded-br-xl rounded-tl-xl flex items-center gap-1 font-bold text-[10px] shadow-sm border-b border-r border-white dark:border-gray-800 z-20">
             <Zap size={10} fill="currentColor" />
             <span>FAST GRAB</span>
+        </div>
+      )}
+
+      {/* DEADLINE Badge */}
+      {hasDeadline && (
+        <div className={`absolute -top-1 ${isFCFS ? 'left-[85px] rounded-b-xl' : '-left-1 rounded-br-xl rounded-tl-xl'} px-2 py-1 bg-amber-500 dark:bg-amber-600 text-white flex items-center gap-1 font-bold text-[10px] shadow-sm border-b border-r border-white dark:border-gray-800 z-20`}>
+            <Clock size={10} />
+            <span>DEADLINE</span>
         </div>
       )}
 

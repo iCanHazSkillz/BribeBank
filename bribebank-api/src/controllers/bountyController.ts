@@ -47,13 +47,21 @@ export const getFamilyBounties = async (req: Request, res: Response) => {
  */
 export const createBounty = async (req: Request, res: Response) => {
   const { familyId } = req.params;
-  const { title, emoji, rewardType, rewardValue, isFCFS, rewardTemplateId, themeColor } = req.body;
+  const { title, emoji, rewardType, rewardValue, isFCFS, rewardTemplateId, themeColor, deadlineHours } = req.body;
 
   if (!familyId) {
     return res.status(400).json({ error: "MISSING_FAMILY_ID" });
   }
   if (!title || !emoji || !rewardValue) {
     return res.status(400).json({ error: "MISSING_FIELDS" });
+  }
+
+  // Validate deadline if provided
+  if (deadlineHours !== undefined && deadlineHours !== null) {
+    const hours = Number(deadlineHours);
+    if (isNaN(hours) || hours < 1) {
+      return res.status(400).json({ error: "INVALID_DEADLINE_HOURS" });
+    }
   }
 
   try {
@@ -70,6 +78,7 @@ export const createBounty = async (req: Request, res: Response) => {
         isFCFS: !!isFCFS,
         rewardTemplateId: rewardTemplateId ?? null,
         themeColor: themeColor ?? null,
+        deadlineHours: deadlineHours ? Number(deadlineHours) : null,
       },
     });
 
@@ -102,7 +111,7 @@ export const createBounty = async (req: Request, res: Response) => {
  */
 export const updateBounty = async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { title, emoji, rewardType, rewardValue, isFCFS, rewardTemplateId, themeColor } = req.body;
+  const { title, emoji, rewardType, rewardValue, isFCFS, rewardTemplateId, themeColor, deadlineHours } = req.body;
 
   if (!id) {
     return res.status(400).json({ error: "MISSING_BOUNTY_ID" });
@@ -120,6 +129,14 @@ export const updateBounty = async (req: Request, res: Response) => {
     const user = await assertFamilyMember(req, existing.familyId);
     assertParent(user);
     const familyId = existing.familyId;
+    
+    // Validate deadlineHours if provided
+    if (deadlineHours !== undefined && deadlineHours !== null) {
+      if (typeof deadlineHours !== 'number' || deadlineHours < 1) {
+        return res.status(400).json({ error: "DEADLINE_MUST_BE_AT_LEAST_1_HOUR" });
+      }
+    }
+    
     const updated = await prisma.bounty.update({
       where: { id },
       data: {
@@ -134,6 +151,7 @@ export const updateBounty = async (req: Request, res: Response) => {
             ? rewardTemplateId
             : existing.rewardTemplateId,
         themeColor: themeColor ?? undefined,
+        deadlineHours: deadlineHours !== undefined ? deadlineHours : existing.deadlineHours,
       },
     });
 
@@ -467,9 +485,20 @@ export const acceptAssignedBounty = async (req: Request, res: Response) => {
         }
       }
 
+      // Calculate deadline expiration if bounty has a deadline
+      const now = new Date();
+      let deadlineExpiresAt: Date | undefined;
+      if (bounty.deadlineHours) {
+        deadlineExpiresAt = new Date(now.getTime() + bounty.deadlineHours * 3600000);
+      }
+
       const updatedAssignment = await tx.bountyAssignment.update({
         where: { id },
-        data: { status: BountyStatus.IN_PROGRESS },
+        data: { 
+          status: BountyStatus.IN_PROGRESS,
+          deadlineStartedAt: bounty.deadlineHours ? now : undefined,
+          deadlineExpiresAt: deadlineExpiresAt,
+        },
       });
 
       await addHistoryEvent(
@@ -988,7 +1017,7 @@ export const verifyAssignedBounty = async (req: Request, res: Response) => {
 // POST /bounty-assignments/:id/deny
 export const denyAssignedBounty = async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { denialReason, denialNotes } = req.body;
+  const { denialReason, denialNotes, allowResubmit = true } = req.body;
 
   if (!id) {
     return res.status(400).json({ error: "MISSING_ASSIGNMENT_ID" });
@@ -1037,16 +1066,26 @@ export const denyAssignedBounty = async (req: Request, res: Response) => {
       return res.status(400).json({ error: "INVALID_STATUS" });
     }
 
-    // Update bounty assignment to DENIED status
-    const updatedAssignment = await prisma.bountyAssignment.update({
-      where: { id },
-      data: {
-        status: BountyStatus.DENIED,
-        denialReason,
-        denialNotes: denialNotes || null,
-        deniedAt: new Date(),
-      },
-    });
+    let updatedAssignment;
+    
+    if (allowResubmit) {
+      // Update bounty assignment to DENIED status (child can resubmit)
+      updatedAssignment = await prisma.bountyAssignment.update({
+        where: { id },
+        data: {
+          status: BountyStatus.DENIED,
+          denialReason,
+          denialNotes: denialNotes || null,
+          deniedAt: new Date(),
+        },
+      });
+    } else {
+      // Delete the assignment entirely (task cancelled, no resubmit)
+      updatedAssignment = existingAssignment;
+      await prisma.bountyAssignment.delete({
+        where: { id },
+      });
+    }
 
     const parentName = parent.displayName || parent.username || "Parent";
     const childName = child.displayName || child.username || "Child";
@@ -1058,6 +1097,7 @@ export const denyAssignedBounty = async (req: Request, res: Response) => {
       [DenialReason.NOT_COMPLETED]: "Task not completed",
       [DenialReason.INSTRUCTIONS_NOT_FOLLOWED]: "Didn't follow the instructions",
       [DenialReason.LOW_EFFORT]: "Not enough effort / rushed",
+      [DenialReason.COMPLETED_AFTER_DEADLINE]: "Completed after the deadline",
     };
 
     const reasonMessage = reasonMessages[denialReason as DenialReason];
@@ -1083,10 +1123,14 @@ export const denyAssignedBounty = async (req: Request, res: Response) => {
       );
 
       // Add notification to child
+      const notificationMessage = allowResubmit
+        ? `Task "${bounty.title}" was denied: ${fullMessage}. Please try again!`
+        : `Task "${bounty.title}" was cancelled: ${fullMessage}.`;
+      
       await addNotification(
         {
           userId: existingAssignment.userId,
-          message: `Task "${bounty.title}" was denied: ${fullMessage}. Please try again!`,
+          message: notificationMessage,
         },
         tx
       );
@@ -1094,9 +1138,14 @@ export const denyAssignedBounty = async (req: Request, res: Response) => {
 
     // Send push notification
     try {
+      const pushTitle = allowResubmit ? "Task Denied ❌" : "Task Cancelled 🚫";
+      const pushBody = allowResubmit
+        ? `${parentName} denied: ${bounty.title}. ${fullMessage}.`
+        : `${parentName} cancelled: ${bounty.title}. ${fullMessage}.`;
+      
       await sendPushToUser(child.id, {
-        title: "Task Denied ❌",
-        body: `${parentName} denied: ${bounty.title}. ${fullMessage}.`,
+        title: pushTitle,
+        body: pushBody,
         tag: "task-denied",
         type: "TASK_DENIED",
         familyId: existingAssignment.familyId,
