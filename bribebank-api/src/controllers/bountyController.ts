@@ -7,6 +7,7 @@ import { sendPushToUser } from "../services/pushService.js";
 import { SseEvent } from "../types/sseEvents";
 import { addHistoryEvent } from "../services/historyService.js";
 import { addNotification } from "../services/notificationService.js";
+import { processTaskPhoto } from "../lib/imageProcessor.js";
 
 /**
  * GET /families/:familyId/bounties
@@ -47,7 +48,7 @@ export const getFamilyBounties = async (req: Request, res: Response) => {
  */
 export const createBounty = async (req: Request, res: Response) => {
   const { familyId } = req.params;
-  const { title, emoji, rewardType, rewardValue, isFCFS, rewardTemplateId, themeColor, deadlineHours } = req.body;
+  const { title, emoji, rewardType, rewardValue, isFCFS, rewardTemplateId, themeColor, deadlineHours, requiresPhoto } = req.body;
 
   if (!familyId) {
     return res.status(400).json({ error: "MISSING_FAMILY_ID" });
@@ -79,6 +80,7 @@ export const createBounty = async (req: Request, res: Response) => {
         rewardTemplateId: rewardTemplateId ?? null,
         themeColor: themeColor ?? null,
         deadlineHours: deadlineHours ? Number(deadlineHours) : null,
+        requiresPhoto: !!requiresPhoto,
       },
     });
 
@@ -111,7 +113,7 @@ export const createBounty = async (req: Request, res: Response) => {
  */
 export const updateBounty = async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { title, emoji, rewardType, rewardValue, isFCFS, rewardTemplateId, themeColor, deadlineHours } = req.body;
+  const { title, emoji, rewardType, rewardValue, isFCFS, rewardTemplateId, themeColor, deadlineHours, requiresPhoto } = req.body;
 
   if (!id) {
     return res.status(400).json({ error: "MISSING_BOUNTY_ID" });
@@ -152,6 +154,7 @@ export const updateBounty = async (req: Request, res: Response) => {
             : existing.rewardTemplateId,
         themeColor: themeColor ?? undefined,
         deadlineHours: deadlineHours !== undefined ? deadlineHours : existing.deadlineHours,
+        requiresPhoto: typeof requiresPhoto === "boolean" ? requiresPhoto : existing.requiresPhoto,
       },
     });
 
@@ -622,6 +625,7 @@ export const acceptAssignedBounty = async (req: Request, res: Response) => {
 // POST /bounty-assignments/:id/complete
 export const completeAssignedBounty = async (req: Request, res: Response) => {
   const { id } = req.params;
+  let { photoUrl } = req.body;
 
   if (!id) {
     return res.status(400).json({ error: "MISSING_ASSIGNMENT_ID" });
@@ -653,6 +657,16 @@ export const completeAssignedBounty = async (req: Request, res: Response) => {
       return res.status(403).json({ error: "ONLY_ASSIGNEE_CAN_COMPLETE" });
     }
 
+    // Validate photo requirement
+    if (bounty.requiresPhoto && !photoUrl) {
+      return res.status(400).json({ error: "PHOTO_REQUIRED" });
+    }
+
+    // Process photo if provided (resize and compress)
+    if (photoUrl && photoUrl.startsWith('data:image/')) {
+      photoUrl = await processTaskPhoto(photoUrl);
+    }
+
     // Allow completion from IN_PROGRESS or DENIED (resubmission after denial)
     if (assignment.status !== BountyStatus.IN_PROGRESS && assignment.status !== BountyStatus.DENIED) {
       return res.status(400).json({ error: "INVALID_STATUS" });
@@ -671,6 +685,7 @@ export const completeAssignedBounty = async (req: Request, res: Response) => {
         data: {
           status: BountyStatus.COMPLETED,
           completedAt: now,
+          photoUrl: photoUrl ?? null,
           // Clear denial reason and notes if resubmitting after denial
           denialReason: null,
           denialNotes: null,
@@ -925,7 +940,7 @@ export const verifyAssignedBounty = async (req: Request, res: Response) => {
         snapshotEmoji = "🎀";
         snapshotDescription = `Reward for completing: ${bounty.title}`;
         snapshotType = PrizeType.PRIVILEGE;
-        snapshotThemeColor = "#22c55e";
+        snapshotThemeColor = "bg-green-100 text-green-800 border-green-200";
       }
     } else {
       // Bounty-based reward only
@@ -933,7 +948,7 @@ export const verifyAssignedBounty = async (req: Request, res: Response) => {
       snapshotEmoji = "🎀";
       snapshotDescription = `Reward for completing: ${bounty.title}`;
       snapshotType = PrizeType.PRIVILEGE;
-      snapshotThemeColor = "#22c55e";
+      snapshotThemeColor = "bg-green-100 text-green-800 border-green-200";
     }
 
     // 4) Transaction: create prize, log history, notify child

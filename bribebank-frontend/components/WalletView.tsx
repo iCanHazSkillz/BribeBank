@@ -49,6 +49,10 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab,
   const [ticketBalance, setTicketBalance] = useState(currentUser.ticketBalance);
   const [toast, setToast] = useState<{message: string, type: 'info' | 'success' | 'error' } | null>(null);
 
+  // Photo upload state
+  const [photoUploadModal, setPhotoUploadModal] = useState<{assignmentId: string, templateTitle: string} | null>(null);
+  const [uploadedPhoto, setUploadedPhoto] = useState<string | null>(null);
+
   // Wheel State
   const [wheelSegments, setWheelSegments] = useState<Array<{label: string, color: string, prob: number}>>([]);
   const [wheelSpinCost, setWheelSpinCost] = useState(1);
@@ -335,7 +339,8 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab,
   const handleBountyAction = async (
     assignmentId: string,
     action: 'start' | 'finish' | 'reject',
-    isDenied: boolean = false
+    isDenied: boolean = false,
+    requiresPhoto: boolean = false
   ) => {
     try {
       if (action === 'start') {
@@ -345,6 +350,19 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab,
         );
         setToast({ message: "Task started!", type: 'info' });
       } else if (action === 'finish') {
+        // If photo is required, open photo upload modal
+        if (requiresPhoto) {
+          const template = bountyTemplates.find(t => {
+            const assignment = myBounties.find(b => b.id === assignmentId);
+            return assignment && t.id === assignment.bountyTemplateId;
+          });
+          setPhotoUploadModal({
+            assignmentId,
+            templateTitle: template?.title || 'Task'
+          });
+          return; // Don't complete yet, wait for photo
+        }
+        
         await storageService.updateBountyStatus(
           assignmentId,
           BountyStatus.COMPLETED
@@ -378,6 +396,52 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab,
     } catch (err) {
       console.error("handleBountyAction error:", err);
       setToast({ message: "Something went wrong with this task.", type: 'error' });
+    }
+  };
+
+  const handlePhotoSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      setToast({ message: "Please select an image file", type: 'error' });
+      return;
+    }
+
+    // Convert to base64
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setUploadedPhoto(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSubmitWithPhoto = async () => {
+    if (!photoUploadModal || !uploadedPhoto) return;
+
+    try {
+      await storageService.updateBountyStatus(
+        photoUploadModal.assignmentId,
+        BountyStatus.COMPLETED,
+        uploadedPhoto
+      );
+      
+      setToast({
+        message: "Task completed with photo! Waiting for verification.",
+        type: 'success',
+      });
+      
+      setPhotoUploadModal(null);
+      setUploadedPhoto(null);
+      
+      await refreshData();
+      if (onUserUpdate) {
+        await onUserUpdate();
+      }
+    } catch (err) {
+      console.error("handleSubmitWithPhoto error:", err);
+      setToast({ message: "Failed to submit task", type: 'error' });
     }
   };
 
@@ -1239,6 +1303,76 @@ const groupedPrizes: GroupedPrize[] = Object.values(
           </div>
         )}
 
+        {/* Photo Upload Modal */}
+        {photoUploadModal && (
+          <div className="fixed inset-0 bg-black/80 z-[70] flex items-center justify-center p-4" onClick={() => setPhotoUploadModal(null)}>
+            <div className="bg-white dark:bg-gray-800 rounded-3xl p-6 max-w-md w-full" onClick={e => e.stopPropagation()}>
+              <h3 className="text-xl font-bold text-center mb-4 dark:text-white">
+                📸 Photo Required
+              </h3>
+              <p className="text-center text-gray-600 dark:text-gray-300 mb-6">
+                Please upload a photo of your completed task: <span className="font-semibold">{photoUploadModal.templateTitle}</span>
+              </p>
+              
+              {/* Photo Preview */}
+              {uploadedPhoto && (
+                <div className="mb-4 relative">
+                  <img 
+                    src={uploadedPhoto} 
+                    alt="Task proof" 
+                    className="w-full h-64 object-cover rounded-xl border-2 border-gray-200 dark:border-gray-600"
+                  />
+                  <button
+                    onClick={() => setUploadedPhoto(null)}
+                    className="absolute top-2 right-2 p-2 bg-red-500 text-white rounded-full hover:bg-red-600"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              )}
+
+              {/* File Input */}
+              <div className="mb-6">
+                <label className="block w-full">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handlePhotoSelect}
+                    className="hidden"
+                    id="photo-upload"
+                  />
+                  <div className="w-full py-3 px-4 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-xl border-2 border-dashed border-indigo-300 dark:border-indigo-700 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 cursor-pointer text-center font-medium transition-colors">
+                    {uploadedPhoto ? 'Change Photo' : 'Choose Photo'}
+                  </div>
+                </label>
+                <p className="text-xs text-gray-500 dark:text-gray-400 text-center mt-2">
+                  JPG, PNG, or other image formats • Images are automatically optimized
+                </p>
+              </div>
+
+              {/* Actions */}
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    setPhotoUploadModal(null);
+                    setUploadedPhoto(null);
+                  }}
+                  className="flex-1 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSubmitWithPhoto}
+                  disabled={!uploadedPhoto}
+                  className="flex-[2] py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Submit Task
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {confirmState && (
           <div
             className="fixed inset-0 bg-black/60 z-[80] flex items-center justify-center"
@@ -1512,6 +1646,7 @@ const groupedPrizes: GroupedPrize[] = Object.values(
                                 status={b.status}
                                 isFCFS={t.isFCFS}
                                 hasDeadline={!!t.deadlineHours}
+                                requiresPhoto={t.requiresPhoto}
                                 actionLabel={null} // We render custom buttons below
                                 onClick={undefined} // Remove click handler from card body
                                 disabled={b.status === BountyStatus.COMPLETED || b.status === BountyStatus.DENIED}
@@ -1554,7 +1689,11 @@ const groupedPrizes: GroupedPrize[] = Object.values(
                                                 </>
                                             ) : b.status === BountyStatus.IN_PROGRESS ? (
                                                 <button 
-                                                    onClick={(e) => { e.stopPropagation(); handleBountyAction(b.id, 'finish'); }} 
+                                                    onClick={(e) => { 
+                                                        e.stopPropagation(); 
+                                                        const template = bountyTemplates.find(t => t.id === b.bountyTemplateId);
+                                                        handleBountyAction(b.id, 'finish', false, !!template?.requiresPhoto); 
+                                                    }} 
                                                     className="w-full py-2 bg-indigo-600 text-white font-bold rounded-xl shadow-md hover:bg-indigo-700 flex items-center justify-center gap-1 text-sm"
                                                 >
                                                     <CheckCircle size={16}/> Mark Complete
@@ -1568,7 +1707,11 @@ const groupedPrizes: GroupedPrize[] = Object.values(
                                                         <X size={16}/> Reject
                                                     </button>
                                                     <button 
-                                                        onClick={(e) => { e.stopPropagation(); handleBountyAction(b.id, 'finish'); }} 
+                                                        onClick={(e) => { 
+                                                            e.stopPropagation(); 
+                                                            const template = bountyTemplates.find(t => t.id === b.bountyTemplateId);
+                                                            handleBountyAction(b.id, 'finish', false, !!template?.requiresPhoto); 
+                                                        }} 
                                                         className="flex-[2] py-2 bg-orange-600 text-white font-bold rounded-xl shadow-md hover:bg-orange-700 flex items-center justify-center gap-1 text-sm"
                                                     >
                                                         <CheckCircle size={16}/> Re-submit for Review
@@ -1697,21 +1840,45 @@ const groupedPrizes: GroupedPrize[] = Object.values(
         {tab === 'history' && (
             <div className="space-y-3">
                 {historyEvents.length === 0 && <p className="text-center text-gray-400 py-10">Nothing here yet.</p>}
-                {historyEvents.map(event => (
-                  <div key={event.id} className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 flex items-center gap-4 opacity-80 grayscale-[0.2]">
-                      <span className="text-3xl">{event.emoji}</span>
-                      <div className="flex-1">
-                          <h4 className="font-bold text-gray-800 dark:text-white">{event.title}</h4>
-                          <p className="text-xs text-gray-500 dark:text-gray-400">
-                             {new Date(event.timestamp).toLocaleDateString()} • {event.action.replace('_', ' ')}
-                             <span className="block text-[10px] text-indigo-500">By {event.assignerName}</span>
-                          </p>
-                      </div>
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${event.action.includes('APPROVED') || event.action.includes('VERIFIED') || event.action.includes('EARNED') || event.action.includes('SPIN_WON') || event.action.includes('RECEIVED') || event.action.includes('ASSIGNED') || event.action.includes('ACCEPTED') || event.action.includes('COMPLETED') || event.action.includes('CLAIMED') ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-500'}`}>
-                          {event.action.includes('APPROVED') || event.action.includes('VERIFIED') || event.action.includes('ASSIGNED') || event.action.includes('ACCEPTED') || event.action.includes('EARNED') || event.action.includes('SPIN_WON') || event.action.includes('RECEIVED') || event.action.includes('COMPLETED') || event.action.includes('CLAIMED') ? <CheckCircle size={18}/> : <XCircle size={18}/>}
-                      </div>
-                  </div>
-                ))}
+                {historyEvents.map(event => {
+                  // Use gradient card styling for task completion rewards
+                  const isTaskReward = event.action === 'TASK_COMPLETED';
+                  
+                  if (isTaskReward) {
+                    // Find matching reward template to get theme color
+                    const matchingTemplate = templates.find(t => t.title === event.title);
+                    const themeColor = matchingTemplate?.themeColor || 'bg-indigo-100 text-indigo-800 border-indigo-200';
+                    
+                    return (
+                      <PrizeCard 
+                        key={event.id}
+                        title={event.title}
+                        description={`${new Date(event.timestamp).toLocaleDateString()} • Reward earned from task completion`}
+                        emoji={event.emoji}
+                        themeColor={themeColor}
+                        variant="history"
+                        assignedBy={`By ${event.assignerName}`}
+                      />
+                    );
+                  }
+                  
+                  // Regular history event styling for non-task-reward events
+                  return (
+                    <div key={event.id} className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 flex items-center gap-4 opacity-80 grayscale-[0.2]">
+                        <span className="text-3xl">{event.emoji}</span>
+                        <div className="flex-1">
+                            <h4 className="font-bold text-gray-800 dark:text-white">{event.title}</h4>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                               {new Date(event.timestamp).toLocaleDateString()} • {event.action.replace('_', ' ')}
+                               <span className="block text-[10px] text-indigo-500">By {event.assignerName}</span>
+                            </p>
+                        </div>
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center ${event.action.includes('APPROVED') || event.action.includes('VERIFIED') || event.action.includes('EARNED') || event.action.includes('SPIN_WON') || event.action.includes('RECEIVED') || event.action.includes('ASSIGNED') || event.action.includes('ACCEPTED') || event.action.includes('COMPLETED') || event.action.includes('CLAIMED') ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-500'}`}>
+                            {event.action.includes('APPROVED') || event.action.includes('VERIFIED') || event.action.includes('ASSIGNED') || event.action.includes('ACCEPTED') || event.action.includes('EARNED') || event.action.includes('SPIN_WON') || event.action.includes('RECEIVED') || event.action.includes('COMPLETED') || event.action.includes('CLAIMED') ? <CheckCircle size={18}/> : <XCircle size={18}/>}
+                        </div>
+                    </div>
+                  );
+                })}
             </div>
         )}
       </div>

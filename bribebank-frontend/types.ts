@@ -96,6 +96,7 @@ export interface BountyTemplate {
   isFCFS?: boolean; // First Come First Served
   themeColor?: string | null;
   deadlineHours?: number | null; // Optional deadline in hours
+  requiresPhoto?: boolean; // Whether photo proof is required
 }
 
 export interface AssignedBounty {
@@ -114,6 +115,7 @@ export interface AssignedBounty {
   deadlineStartedAt?: number | null;
   deadlineExpiresAt?: number | null;
   deadlineWarningNotified?: boolean;
+  photoUrl?: string | null; // Base64 image data or URL of uploaded photo proof
 }
 
 // STORE INTERFACES

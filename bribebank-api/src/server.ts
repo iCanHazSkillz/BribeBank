@@ -28,7 +28,7 @@ process.on("unhandledRejection", (reason) => {
 
 app.use(helmet());
 app.use(cors());
-app.use(express.json({ limit: '10mb' })); // Increased limit for base64 avatar images
+app.use(express.json({ limit: '25mb' })); // Increased limit for base64 images (avatars + task photos)
 app.use("/auth", authRoutes);
 app.use(rewardRoutes);
 app.use(bountyRoutes);

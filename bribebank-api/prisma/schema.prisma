@@ -139,6 +139,7 @@ model Bounty {
 
   isFCFS     Boolean   @default(false)
   deadlineHours Int?   // Optional deadline in hours (minimum 1)
+  requiresPhoto Boolean @default(false) // Whether photo proof is required before completion
 
   createdAt  DateTime  @default(now())
 
@@ -250,6 +251,7 @@ model BountyAssignment {
   deadlineStartedAt DateTime?  // When the deadline timer started (when task was accepted)
   deadlineExpiresAt DateTime?  // Calculated deadline expiry time
   deadlineWarningNotified Boolean @default(false) // Track if 1-hour warning notification sent
+  photoUrl      String?     @db.Text // Base64 image data or URL of uploaded photo proof
 
   @@index([familyId, userId])
   @@index([familyId, status])

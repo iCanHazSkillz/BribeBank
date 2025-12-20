@@ -1,6 +1,6 @@
 import React from 'react';
 import { PrizeStatus, PrizeTemplate, PrizeType, BountyStatus } from '../types';
-import { Clock, CheckCircle, Gift, Edit2, CheckSquare, Wallet, Zap, FerrisWheel, HeartHandshake } from 'lucide-react';
+import { Clock, CheckCircle, Gift, Edit2, CheckSquare, Wallet, Zap, FerrisWheel, HeartHandshake, Camera } from 'lucide-react';
 
 interface PrizeCardProps {
   title: string;
@@ -19,6 +19,7 @@ interface PrizeCardProps {
   count?: number;
   isFCFS?: boolean;
   hasDeadline?: boolean;
+  requiresPhoto?: boolean;
   assignedBy?: string;
   denialReason?: string; // Display denial reason on denied bounties
 }
@@ -145,7 +146,10 @@ export const PrizeCard: React.FC<PrizeCardProps> = ({
   variant = 'active',
   highlight = false,
   count,
-  isFCFS,  hasDeadline,  assignedBy,
+  isFCFS,
+  hasDeadline,
+  requiresPhoto,
+  assignedBy,
   denialReason,
 }) => {
   const baseStyles = "relative flex flex-col p-4 rounded-2xl border-2 transition-all duration-200 shadow-sm overflow-hidden";
@@ -190,6 +194,14 @@ export const PrizeCard: React.FC<PrizeCardProps> = ({
         <div className={`absolute -top-1 ${isFCFS ? 'left-[85px] rounded-b-xl' : '-left-1 rounded-br-xl rounded-tl-xl'} px-2 py-1 bg-amber-500 dark:bg-amber-600 text-white flex items-center gap-1 font-bold text-[10px] shadow-sm border-b border-r border-white dark:border-gray-800 z-20`}>
             <Clock size={10} />
             <span>DEADLINE</span>
+        </div>
+      )}
+
+      {/* PHOTO Badge */}
+      {requiresPhoto && (
+        <div className={`absolute -top-1 ${isFCFS && hasDeadline ? 'left-[169px] rounded-b-xl' : isFCFS || hasDeadline ? 'left-[85px] rounded-b-xl' : '-left-1 rounded-br-xl rounded-tl-xl'} px-2 py-1 bg-blue-500 dark:bg-blue-600 text-white flex items-center gap-1 font-bold text-[10px] shadow-sm border-b border-r border-white dark:border-gray-800 z-20`}>
+            <Camera size={10} />
+            <span>PHOTO</span>
         </div>
       )}
 

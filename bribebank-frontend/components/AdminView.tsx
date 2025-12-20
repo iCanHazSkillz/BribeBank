@@ -91,6 +91,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, o
   const [bountyRewardValue, setBountyRewardValue] = useState('');
   const [bountyEmoji, setBountyEmoji] = useState('🧹');
   const [bountyFCFS, setBountyFCFS] = useState(false);
+  const [bountyRequiresPhoto, setBountyRequiresPhoto] = useState(false);
   const [bountyColor, setBountyColor] = useState(PASTEL_COLORS[6]);
   const [bountyDeadlineDays, setBountyDeadlineDays] = useState('');
   const [bountyDeadlineHours, setBountyDeadlineHours] = useState('');
@@ -365,7 +366,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, o
 
   const resetForms = () => {
     setPrizeTitle(''); setPrizeDesc(''); setPrizeEmoji('🎁'); setPrizeColor(PASTEL_COLORS[6]);
-    setBountyTitle(''); setBountyRewardType('TICKETS'); setBountyRewardValue(''); setBountyEmoji('🧹'); setBountyFCFS(false); setBountyColor(PASTEL_COLORS[6]); setBountyDeadlineDays(''); setBountyDeadlineHours('');
+    setBountyTitle(''); setBountyRewardType('TICKETS'); setBountyRewardValue(''); setBountyEmoji('🧹'); setBountyFCFS(false); setBountyRequiresPhoto(false); setBountyColor(PASTEL_COLORS[6]); setBountyDeadlineDays(''); setBountyDeadlineHours('');
     setStoreItemTitle(''); setStoreItemCost(''); setStoreItemImage(''); setStoreItemLink(''); setStoreItemDescription('');
     setEditingId(null);
     setEditingStoreItemId(null);
@@ -547,6 +548,7 @@ const handleBulkAssign = async () => {
           rewardValue: bountyRewardValue,
           rewardTemplateId: undefined, // not used yet
           isFCFS: bountyFCFS,
+          requiresPhoto: bountyRequiresPhoto,
           themeColor: bountyColor,
           deadlineHours: deadlineHoursValue,
         };
@@ -646,6 +648,7 @@ const handleBulkAssign = async () => {
       setBountyRewardValue(b.rewardValue);
       setBountyEmoji(b.emoji);
       setBountyFCFS(!!b.isFCFS);
+      setBountyRequiresPhoto(!!b.requiresPhoto);
       setBountyColor(b.themeColor || PASTEL_COLORS[9]);
       
       // Convert total hours to days and hours for display
@@ -2246,6 +2249,7 @@ const handleBulkAssign = async () => {
                                 variant="bounty"
                                 isFCFS={b.isFCFS}
                                 hasDeadline={!!b.deadlineHours}
+                                requiresPhoto={b.requiresPhoto}
                                 highlight={selectedBountyTemplateIds.includes(b.id)}
                                 onClick={() =>
                                     setSelectedBountyTemplateIds(prev =>
@@ -2434,6 +2438,19 @@ const handleBulkAssign = async () => {
                                           deadlineExpiresAt={b.deadlineExpiresAt} 
                                           completedAt={b.completedAt}
                                           compact 
+                                        />
+                                      </div>
+                                    )}
+                                    
+                                    {/* Photo Proof */}
+                                    {b.photoUrl && (
+                                      <div className="mt-3">
+                                        <p className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-2">Photo Proof:</p>
+                                        <img 
+                                          src={b.photoUrl} 
+                                          alt="Task completion proof" 
+                                          className="w-full h-48 object-cover rounded-xl border-2 border-green-200 dark:border-green-700 cursor-pointer hover:opacity-90 transition-opacity"
+                                          onClick={() => window.open(b.photoUrl!, '_blank')}
                                         />
                                       </div>
                                     )}
@@ -3045,6 +3062,30 @@ const handleBulkAssign = async () => {
                       </p>
                       <p className="text-xs text-gray-500 dark:text-gray-400">
                         If one child claims this task, it disappears for others.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* ---------------- Requires Photo Toggle ---------------- */}
+                  <div
+                    className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-700 rounded-xl border border-gray-200 dark:border-gray-600 cursor-pointer"
+                    onClick={() => setBountyRequiresPhoto(!bountyRequiresPhoto)}
+                  >
+                    <div
+                      className={`w-6 h-6 rounded-md flex items-center justify-center border transition-all ${
+                        bountyRequiresPhoto
+                          ? "bg-indigo-600 dark:bg-indigo-500 border-indigo-600 dark:border-indigo-500"
+                          : "bg-white dark:bg-gray-600 border-gray-300 dark:border-gray-500"
+                      }`}
+                    >
+                      {bountyRequiresPhoto && <Check size={16} className="text-white" />}
+                    </div>
+                    <div>
+                      <p className="font-bold text-gray-800 dark:text-white text-sm">
+                        📸 Requires Photo Proof
+                      </p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        Child must upload a photo before completing the task.
                       </p>
                     </div>
                   </div>

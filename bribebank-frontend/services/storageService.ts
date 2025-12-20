@@ -789,6 +789,7 @@ export const storageService = {
         rewardValue: b.rewardValue,
         rewardTemplateId: b.rewardTemplateId ?? undefined,
         isFCFS: !!b.isFCFS,
+        requiresPhoto: !!b.requiresPhoto,
         themeColor: b.themeColor ?? null,
         deadlineHours: b.deadlineHours ?? undefined,
       })
@@ -807,6 +808,7 @@ export const storageService = {
       rewardType: template.rewardType ?? 'CUSTOM',
       rewardValue: template.rewardValue,
       isFCFS: !!template.isFCFS,
+      requiresPhoto: !!template.requiresPhoto,
       themeColor: template.themeColor ?? null,
       deadlineHours: template.deadlineHours ?? null,
       // rewardTemplateId: template.rewardTemplateId ?? null, // only if you wire this in UI
@@ -937,6 +939,7 @@ export const storageService = {
         deniedAt: a.deniedAt ? new Date(a.deniedAt).getTime() : null,
         deadlineStartedAt: a.deadlineStartedAt ? new Date(a.deadlineStartedAt).getTime() : undefined,
         deadlineExpiresAt: a.deadlineExpiresAt ? new Date(a.deadlineExpiresAt).getTime() : undefined,
+        photoUrl: a.photoUrl || null,
         // if your UI needs bounty/user nested data, you can also keep a.bounty / a.user
       })
     );
@@ -944,17 +947,22 @@ export const storageService = {
 
   updateBountyStatus: async (
     assignmentId: string,
-    status: BountyStatus
+    status: BountyStatus,
+    photoUrl?: string
   ): Promise<void> => {
     const token = getAuthToken();
     if (!token) throw new Error("Not authenticated");
 
     let endpoint = "";
+    let bodyData: any = {};
 
     if (status === BountyStatus.IN_PROGRESS) {
       endpoint = `/bounty-assignments/${assignmentId}/accept`;
     } else if (status === BountyStatus.COMPLETED) {
       endpoint = `/bounty-assignments/${assignmentId}/complete`;
+      if (photoUrl) {
+        bodyData.photoUrl = photoUrl;
+      }
     } else {
       throw new Error("Unsupported bounty status transition");
     }
@@ -962,8 +970,10 @@ export const storageService = {
     const res = await fetch(apiUrl(endpoint), {
       method: "POST",
       headers: {
+        "Content-Type": "application/json",
         Authorization: `Bearer ${token}`
-      }
+      },
+      body: Object.keys(bodyData).length > 0 ? JSON.stringify(bodyData) : undefined
     });
 
     // if(status === BountyStatus.COMPLETED) {
