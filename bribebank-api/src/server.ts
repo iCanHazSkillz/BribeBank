@@ -27,8 +27,30 @@ process.on("unhandledRejection", (reason) => {
 });
 
 app.use(helmet());
-app.use(cors());
+app.use(cors({
+  origin: [
+    'https://bribebank.homeflixlab.com',
+    'http://localhost:3000',  // Keep for local dev
+    'null'  // TWA may send null origin
+  ],
+  credentials: true
+}));
 app.use(express.json({ limit: '25mb' })); // Increased limit for base64 images (avatars + task photos)
+
+// Digital Asset Links for TWA verification
+app.get('/.well-known/assetlinks.json', (_req, res) => {
+  res.json([{
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.bribebank.app",
+      "sha256_cert_fingerprints": [
+        "PLACEHOLDER_WILL_BE_GENERATED_BY_BUBBLEWRAP"
+      ]
+    }
+  }]);
+});
+
 app.use("/auth", authRoutes);
 app.use(rewardRoutes);
 app.use(bountyRoutes);
