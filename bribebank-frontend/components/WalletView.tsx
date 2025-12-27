@@ -1142,14 +1142,14 @@ const groupedPrizes: GroupedPrize[] = Object.values(
         {/* Wheel Spin Modal */}
         {showWheel && (
           <div className="fixed inset-0 bg-black/80 z-[70] flex items-center justify-center p-4" onClick={() => !isSpinning && setShowWheel(false)}>
-            <div className="bg-white dark:bg-gray-800 rounded-3xl p-8 max-w-md w-full" onClick={e => e.stopPropagation()}>
+            <div className="bg-white dark:bg-gray-800 rounded-3xl p-4 sm:p-8 max-w-md w-full" onClick={e => e.stopPropagation()}>
               <h3 className="text-2xl font-bold text-center mb-6 flex items-center justify-center gap-2 dark:text-white">
                 <span className="text-3xl">🎡</span>
                 Prize Wheel
               </h3>
               
               {/* Wheel Container */}
-              <div className="relative w-80 h-80 mx-auto mb-6">
+              <div className="relative w-full aspect-square max-w-sm mx-auto mb-6">
                 {/* Pointer Triangle at Top */}
                 <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-3 z-20">
                   <div className="w-0 h-0 border-l-[20px] border-l-transparent border-r-[20px] border-r-transparent border-t-[30px]" style={{ borderTopColor: '#e50078' }}></div>
