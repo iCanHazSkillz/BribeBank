@@ -36,21 +36,6 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json({ limit: '25mb' })); // Increased limit for base64 images (avatars + task photos)
-
-// Digital Asset Links for TWA verification
-app.get('/.well-known/assetlinks.json', (_req, res) => {
-  res.json([{
-    "relation": ["delegate_permission/common.handle_all_urls"],
-    "target": {
-      "namespace": "android_app",
-      "package_name": "com.bribebank.app",
-      "sha256_cert_fingerprints": [
-        "60:57:D3:9F:DD:10:A0:6A:D2:44:7A:C8:15:E5:EF:44:91:67:DB:07:AA:81:D9:DF:70:62:AF:E7:C9:1A:6B:0B"
-      ]
-    }
-  }]);
-});
-
 app.use("/auth", authRoutes);
 app.use(rewardRoutes);
 app.use(bountyRoutes);
