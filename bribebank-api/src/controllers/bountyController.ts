@@ -19,6 +19,7 @@ type TaskLifecycleMetadata = {
   rewardValue?: string;
   linkedAction?: string;
   denialMessage?: string;
+  allowResubmit?: boolean;
 };
 
 const buildTaskLifecycleMetadata = (
@@ -1223,6 +1224,7 @@ export const denyAssignedBounty = async (req: Request, res: Response) => {
             rewardValue: bounty.rewardValue,
             linkedAction: "DENIED_TASK",
             denialMessage: fullMessage,
+            allowResubmit,
           }),
         },
         tx
