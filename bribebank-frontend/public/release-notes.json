@@ -16,6 +16,7 @@
     "fixes": [
       "Password changes now immediately invalidate stale sessions so old tokens can no longer be used.",
       "Users are now automatically returned to login as soon as a stale session is detected.",
+      "Fixed mobile update modal clipping by making update dialogs viewport-safe and scrollable.",
       "Corrected task lifecycle status handling for denied-without-resubmit outcomes in wallet history.",
       "Added a self-hoster emergency CLI recovery path when no family recovery key is available.",
       "Stabilized update delivery by replacing manual update confirmation with immediate automatic refresh."
@@ -39,6 +40,7 @@
       "fixes": [
         "Password changes now immediately invalidate stale sessions so old tokens can no longer be used.",
         "Users are now automatically returned to login as soon as a stale session is detected.",
+        "Fixed mobile update modal clipping by making update dialogs viewport-safe and scrollable.",
         "Corrected task lifecycle status handling for denied-without-resubmit outcomes in wallet history.",
         "Added a self-hoster emergency CLI recovery path when no family recovery key is available.",
         "Stabilized update delivery by replacing manual update confirmation with immediate automatic refresh."

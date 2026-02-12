@@ -513,8 +513,8 @@ const App: React.FC = () => {
   }, [currentUser?.id, currentUser?.role]);
 
   const updateModal = showUpdateModal ? (
-    <div className="fixed inset-0 z-[110] bg-black/60 flex items-center justify-center p-4">
-      <div className="w-full max-w-xl bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+    <div className="fixed inset-0 z-[110] bg-black/60 flex items-start lg:items-center justify-center p-3 sm:p-4 h-[100dvh] overflow-y-auto">
+      <div className="w-full max-w-xl my-4 bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden max-h-[calc(100dvh-2rem)] flex flex-col">
         <div className="bg-gradient-to-r from-emerald-500 to-teal-600 px-6 py-5 text-white">
           <h2 className="text-2xl font-bold">BribeBank was updated</h2>
           <p className="mt-1 text-emerald-50 text-sm">
@@ -522,7 +522,7 @@ const App: React.FC = () => {
             {releaseNotes.date ? ` (${releaseNotes.date})` : ""}
           </p>
         </div>
-        <div className="p-6 space-y-5">
+        <div className="p-6 space-y-5 overflow-y-auto">
           <section>
             <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-200 mb-2">New Features</h3>
             <ul className="space-y-2 text-sm text-gray-700 dark:text-gray-300">
@@ -689,15 +689,15 @@ const App: React.FC = () => {
       
       {updateModal}
       {showRecoverySetupModal && (
-        <div className="fixed inset-0 z-[120] bg-black/70 flex items-center justify-center p-4">
-          <div className="w-full max-w-xl bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+        <div className="fixed inset-0 z-[120] bg-black/70 flex items-start lg:items-center justify-center p-3 sm:p-4 h-[100dvh] overflow-y-auto">
+          <div className="w-full max-w-xl my-4 bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden max-h-[calc(100dvh-2rem)] flex flex-col">
             <div className="bg-gradient-to-r from-amber-500 to-orange-600 px-6 py-5 text-white">
               <h2 className="text-2xl font-bold">Set Up Family Recovery Key</h2>
               <p className="mt-1 text-amber-50 text-sm">
                 Required before continuing. This key is needed if a parent forgets their password.
               </p>
             </div>
-            <div className="p-6 space-y-4">
+            <div className="p-6 space-y-4 overflow-y-auto">
               {!generatedRecoveryKey ? (
                 <>
                   <p className="text-sm text-gray-700 dark:text-gray-300">
