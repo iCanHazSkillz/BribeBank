@@ -11,10 +11,10 @@ import { SseEvent } from "./types/sseEvents";
 import { API_BASE } from "./config";
 
 type View = "wallet" | "admin" | "login";
-type WalletTab = "wallet" | "tasks" | "history";
+type WalletTab = "wallet" | "tasks" | "store" | "history";
 
 const isWalletTab = (v: string | null): v is WalletTab =>
-  v === "wallet" || v === "tasks" || v === "history";
+  v === "wallet" || v === "tasks" || v === "store" || v === "history";
 
 const App: React.FC = () => {
   const { theme, toggleTheme } = useTheme();

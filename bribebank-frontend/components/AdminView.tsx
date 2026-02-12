@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { AssignedPrize, PrizeStatus, PrizeTemplate, User, PrizeType, UserRole, HistoryEvent, BountyTemplate, AssignedBounty, BountyStatus, AppNotification, StoreItem, WheelSegment } from '../types';
+import { AssignedPrize, PrizeStatus, PrizeTemplate, User, PrizeType, UserRole, HistoryEvent, BountyTemplate, AssignedBounty, BountyStatus, AppNotification, StoreItem, WheelSegment, Family } from '../types';
 import { storageService } from '../services/storageService';
 import { API_BASE } from "../config";
 import { PrizeCard } from './PrizeCard';
@@ -17,6 +17,73 @@ interface AdminViewProps {
   desktopShowNotifications?: boolean;
   onDesktopNotificationsToggle?: () => void;
 }
+
+type ParsedTaskLifecycleMetadata = {
+  version: 1;
+  lifecycleType: "TASK";
+  bountyAssignmentId: string;
+  bountyId?: string;
+  rewardAssignmentId?: string;
+  rewardType?: "TICKETS" | "CUSTOM";
+  rewardValue?: string;
+  linkedAction?: string;
+  denialMessage?: string;
+};
+
+const parseTaskLifecycleMetadata = (
+  metadata: string | null | undefined
+): ParsedTaskLifecycleMetadata | null => {
+  if (!metadata) return null;
+  try {
+    const parsed = JSON.parse(metadata);
+    if (
+      parsed &&
+      parsed.version === 1 &&
+      parsed.lifecycleType === "TASK" &&
+      typeof parsed.bountyAssignmentId === "string"
+    ) {
+      return parsed as ParsedTaskLifecycleMetadata;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+};
+
+const TASK_LIFECYCLE_LIMIT = 8;
+
+const TASK_ACTION_LABELS: Record<string, string> = {
+  TASK_ASSIGNED: "Task assigned",
+  TASK_ACCEPTED: "Task accepted",
+  TASK_COMPLETED: "Marked complete",
+  VERIFIED_TASK: "Task verified",
+  DENIED_TASK: "Task denied",
+  TASK_REFUSED: "Task refused",
+  TASK_REJECTED_AFTER_DENIAL: "Denied task rejected",
+  EARNED_TICKETS: "Tickets awarded",
+  TASK_REWARD_GRANTED: "Reward granted",
+};
+
+const getTaskLifecycleStatus = (action: string): string => {
+  switch (action) {
+    case "VERIFIED_TASK":
+    case "TASK_REWARD_GRANTED":
+    case "EARNED_TICKETS":
+      return "Verified";
+    case "DENIED_TASK":
+      return "Denied";
+    case "TASK_COMPLETED":
+      return "Awaiting review";
+    case "TASK_ACCEPTED":
+      return "In progress";
+    case "TASK_REFUSED":
+    case "TASK_REJECTED_AFTER_DENIAL":
+      return "Cancelled";
+    case "TASK_ASSIGNED":
+    default:
+      return "Assigned";
+  }
+};
 
 const QUICK_EMOJI_OPTIONS = ['🎁', '🧹', '🍕', '💵', '📱'];
 const AVATAR_COLORS = ['bg-pink-400', 'bg-teal-400', 'bg-blue-500', 'bg-purple-500', 'bg-orange-400', 'bg-green-500', 'bg-red-400', 'bg-indigo-500'];
@@ -62,6 +129,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, o
   const [storeItemImage, setStoreItemImage] = useState('');
   const [storeItemLink, setStoreItemLink] = useState('');
   const [storeItemDescription, setStoreItemDescription] = useState('');
+  const [storeItemNotifyUserIds, setStoreItemNotifyUserIds] = useState<string[]>([]);
   const [editingStoreItemId, setEditingStoreItemId] = useState<string | null>(null);
   const [showStoreItemModal, setShowStoreItemModal] = useState(false);
   
@@ -93,6 +161,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, o
   const [bountyFCFS, setBountyFCFS] = useState(false);
   const [bountyRequiresPhoto, setBountyRequiresPhoto] = useState(false);
   const [bountyColor, setBountyColor] = useState(PASTEL_COLORS[6]);
+  const [bountyDeadlineEnabled, setBountyDeadlineEnabled] = useState(false);
   const [bountyDeadlineDays, setBountyDeadlineDays] = useState('');
   const [bountyDeadlineHours, setBountyDeadlineHours] = useState('');
   const [emojiPickerTarget, setEmojiPickerTarget] =
@@ -364,10 +433,24 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, o
       setToast({ message, type });
   };
 
+  const toggleBountyDeadline = () => {
+    const nextEnabled = !bountyDeadlineEnabled;
+    setBountyDeadlineEnabled(nextEnabled);
+
+    if (nextEnabled) {
+      setBountyDeadlineDays((prev) => prev || '1');
+      setBountyDeadlineHours((prev) => prev || '0');
+    } else {
+      setBountyDeadlineDays('');
+      setBountyDeadlineHours('');
+    }
+  };
+
   const resetForms = () => {
     setPrizeTitle(''); setPrizeDesc(''); setPrizeEmoji('🎁'); setPrizeColor(PASTEL_COLORS[6]);
-    setBountyTitle(''); setBountyRewardType('TICKETS'); setBountyRewardValue(''); setBountyEmoji('🧹'); setBountyFCFS(false); setBountyRequiresPhoto(false); setBountyColor(PASTEL_COLORS[6]); setBountyDeadlineDays(''); setBountyDeadlineHours('');
+    setBountyTitle(''); setBountyRewardType('TICKETS'); setBountyRewardValue(''); setBountyEmoji('🧹'); setBountyFCFS(false); setBountyRequiresPhoto(false); setBountyColor(PASTEL_COLORS[6]); setBountyDeadlineEnabled(false); setBountyDeadlineDays(''); setBountyDeadlineHours('');
     setStoreItemTitle(''); setStoreItemCost(''); setStoreItemImage(''); setStoreItemLink(''); setStoreItemDescription('');
+    setStoreItemNotifyUserIds([]);
     setEditingId(null);
     setEditingStoreItemId(null);
     setTicketAmount('');
@@ -513,12 +596,15 @@ const handleBulkAssign = async () => {
         }
 
         // Validate and calculate deadline (days + hours)
-        let deadlineHoursValue: number | undefined;
-        const days = bountyDeadlineDays ? parseInt(bountyDeadlineDays) : 0;
-        const hours = bountyDeadlineHours ? parseInt(bountyDeadlineHours) : 0;
-        
-        if (bountyDeadlineDays || bountyDeadlineHours) {
-          if ((bountyDeadlineDays && isNaN(days)) || (bountyDeadlineHours && isNaN(hours))) {
+        let deadlineHoursValue: number | null = null;
+
+        if (bountyDeadlineEnabled) {
+          const normalizedDays = bountyDeadlineDays || '1';
+          const normalizedHours = bountyDeadlineHours || '0';
+          const days = parseInt(normalizedDays);
+          const hours = parseInt(normalizedHours);
+
+          if (isNaN(days) || isNaN(hours)) {
             showToast("Days and hours must be valid numbers", "error");
             return;
           }
@@ -530,11 +616,11 @@ const handleBulkAssign = async () => {
             showToast("Hours must be less than 24 (use days instead)", "error");
             return;
           }
-          
+
           deadlineHoursValue = days * 24 + hours;
-          
+
           if (deadlineHoursValue < 1) {
-            showToast("Deadline must be at least 1 hour or 1 day", "error");
+            showToast("Deadline must be at least 1 hour", "error");
             return;
           }
         }
@@ -656,8 +742,13 @@ const handleBulkAssign = async () => {
         const totalHours = b.deadlineHours;
         const days = Math.floor(totalHours / 24);
         const hours = totalHours % 24;
+        setBountyDeadlineEnabled(true);
         setBountyDeadlineDays(days > 0 ? String(days) : '');
         setBountyDeadlineHours(hours > 0 ? String(hours) : '');
+      } else {
+        setBountyDeadlineEnabled(false);
+        setBountyDeadlineDays('');
+        setBountyDeadlineHours('');
       }
       
       setTab('create');
@@ -1194,6 +1285,7 @@ const handleBulkAssign = async () => {
       setStoreItemImage(item.imageUrl || '');
       setStoreItemLink(item.productUrl || '');
       setStoreItemDescription(item.description || '');
+      setStoreItemNotifyUserIds([]);
     } else {
       // Adding new item
       resetForms();
@@ -1224,7 +1316,10 @@ const handleBulkAssign = async () => {
         productUrl: storeItemLink || undefined,
       };
 
-      await storageService.saveStoreItem(item);
+      await storageService.saveStoreItem(
+        item,
+        editingStoreItemId ? [] : storeItemNotifyUserIds
+      );
       showToast("Store item saved!", "success");
       setShowStoreItemModal(false);
       resetForms();
@@ -1322,6 +1417,7 @@ const handleBulkAssign = async () => {
 
   const totalPending = pendingApprovals.length + pendingBounties.length;
   const assignableUsers = users.filter(u => u.id !== currentUser.id);
+  const storeNotifyUsers = assignableUsers;
 
   const filteredTemplates = templates.filter(t => t.title.toLowerCase().includes(searchTerm.toLowerCase()));
   const filteredBounties = bountyTemplates.filter(b => b.title.toLowerCase().includes(searchTerm.toLowerCase()));
@@ -1329,6 +1425,92 @@ const handleBulkAssign = async () => {
     item.title.toLowerCase().includes(searchTerm.toLowerCase()) || 
     (item.description?.toLowerCase().includes(searchTerm.toLowerCase()) ?? false)
   );
+
+  const taskLifecycleBuckets = new Map<
+    string,
+    {
+      bountyAssignmentId: string;
+      bountyId?: string;
+      rewardAssignmentId?: string;
+      events: Array<HistoryEvent & { parsedMetadata: ParsedTaskLifecycleMetadata }>;
+    }
+  >();
+  const legacyHistoryEvents: HistoryEvent[] = [];
+
+  history.forEach((event) => {
+    const parsedMetadata = parseTaskLifecycleMetadata(event.metadata);
+    if (!parsedMetadata) {
+      legacyHistoryEvents.push(event);
+      return;
+    }
+
+    const existing = taskLifecycleBuckets.get(parsedMetadata.bountyAssignmentId);
+    if (!existing) {
+      taskLifecycleBuckets.set(parsedMetadata.bountyAssignmentId, {
+        bountyAssignmentId: parsedMetadata.bountyAssignmentId,
+        bountyId: parsedMetadata.bountyId,
+        rewardAssignmentId: parsedMetadata.rewardAssignmentId,
+        events: [{ ...event, parsedMetadata }],
+      });
+      return;
+    }
+
+    existing.events.push({ ...event, parsedMetadata });
+    if (!existing.rewardAssignmentId && parsedMetadata.rewardAssignmentId) {
+      existing.rewardAssignmentId = parsedMetadata.rewardAssignmentId;
+    }
+  });
+
+  const recentTaskLifecycles = Array.from(taskLifecycleBuckets.values())
+    .map((bucket) => {
+      const events = [...bucket.events].sort((a, b) => a.timestamp - b.timestamp);
+      const latestEvent = events[events.length - 1];
+
+      const rewardEvent =
+        [...events]
+          .reverse()
+          .find(
+            (event) =>
+              event.action === "TASK_REWARD_GRANTED" ||
+              event.action === "EARNED_TICKETS" ||
+              (event.action === "VERIFIED_TASK" &&
+                !!event.parsedMetadata.rewardType &&
+                !!event.parsedMetadata.rewardValue)
+          ) || null;
+
+      let rewardSummary: string | null = null;
+      if (rewardEvent?.parsedMetadata.rewardType === "TICKETS") {
+        rewardSummary = `+${rewardEvent.parsedMetadata.rewardValue || "0"} tickets`;
+      } else if (rewardEvent?.parsedMetadata.rewardType === "CUSTOM") {
+        rewardSummary = `Reward granted: ${rewardEvent.parsedMetadata.rewardValue || rewardEvent.title}`;
+      }
+
+      const expectedRewardMeta = events.find((event) => !!event.parsedMetadata.rewardValue)?.parsedMetadata;
+      const expectedReward =
+        expectedRewardMeta?.rewardType === "TICKETS"
+          ? `${expectedRewardMeta.rewardValue || "0"} tickets`
+          : expectedRewardMeta?.rewardValue || null;
+
+      return {
+        ...bucket,
+        events,
+        latestTimestamp: latestEvent?.timestamp || 0,
+        latestStatus: getTaskLifecycleStatus(latestEvent?.action || "TASK_ASSIGNED"),
+        taskTitle:
+          events.find((event) => event.action !== "EARNED_TICKETS" && event.action !== "TASK_REWARD_GRANTED")?.title ||
+          latestEvent?.title ||
+          "Task",
+        taskEmoji:
+          events.find((event) => event.action !== "EARNED_TICKETS" && event.action !== "TASK_REWARD_GRANTED")?.emoji ||
+          latestEvent?.emoji ||
+          "🧹",
+        childName: latestEvent?.userName || "Child",
+        rewardSummary,
+        expectedReward,
+      };
+    })
+    .sort((a, b) => b.latestTimestamp - a.latestTimestamp)
+    .slice(0, TASK_LIFECYCLE_LIMIT);
 
   // IconPicker helper
   const IconPicker: React.FC<{
@@ -1791,6 +1973,70 @@ const handleBulkAssign = async () => {
                   <Linkicon size={20} className="absolute left-3 top-3.5 text-gray-400 dark:text-gray-500" />
                 </div>
               </div>
+
+              {!editingStoreItemId && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
+                    Notify Family Members (Optional)
+                  </label>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                    Selected users get a push notification when this item is created.
+                  </p>
+                  <div className="overflow-x-auto no-scrollbar">
+                    <div className="flex gap-3 px-1 py-1">
+                      {storeNotifyUsers.map((user) => {
+                        const isSelected = storeItemNotifyUserIds.includes(user.id);
+
+                        return (
+                          <button
+                            key={user.id}
+                            onClick={() =>
+                              setStoreItemNotifyUserIds((prev) =>
+                                prev.includes(user.id)
+                                  ? prev.filter((id) => id !== user.id)
+                                  : [...prev, user.id]
+                              )
+                            }
+                            className={`flex items-center gap-2 px-4 py-2 rounded-full border text-sm font-medium transition-all shadow-sm ${
+                              isSelected
+                                ? "bg-indigo-50 dark:bg-indigo-900/30 ring-2 ring-indigo-200 dark:ring-indigo-700"
+                                : "border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800"
+                            }`}
+                          >
+                            {user.avatarUrl ? (
+                              <div className="relative w-8 h-8">
+                                <img
+                                  src={user.avatarUrl}
+                                  alt={user.name}
+                                  className="w-8 h-8 rounded-full object-cover"
+                                />
+                                {isSelected && (
+                                  <div className="absolute inset-0 bg-indigo-600/80 rounded-full flex items-center justify-center">
+                                    <Check size={16} className="text-white" />
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <div
+                                className={`w-8 h-8 rounded-full ${user.avatarColor} flex items-center justify-center`}
+                              >
+                                {isSelected && <Check size={16} className="text-white" />}
+                              </div>
+                            )}
+                            <span
+                              className={`font-semibold ${
+                                isSelected ? "text-indigo-700 dark:text-indigo-300" : "text-gray-700 dark:text-gray-300"
+                              }`}
+                            >
+                              {user.name}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="flex gap-3 pt-4">
                 <button
@@ -2550,23 +2796,115 @@ const handleBulkAssign = async () => {
                 </div>
             )}
 
-            
-            <div className="pt-6 border-t border-gray-200 dark:border-gray-700">
-                <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-4 flex items-center gap-2"><History size={18} /> Recent History</h3>
-                <div className="space-y-2 opacity-70">
-                    {history.slice(0, 5).map(event => (
-                        <div key={event.id} className="bg-white dark:bg-gray-800 p-3 rounded-xl border border-gray-100 dark:border-gray-700 flex items-center gap-3">
-                            <span className="text-xl">{event.emoji}</span>
-                            <div className="flex-1">
-                                <p className="text-sm font-semibold text-gray-800 dark:text-white">{event.title}</p>
+            <div className="pt-6 border-t border-gray-200 dark:border-gray-700 space-y-6">
+              <div>
+                <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-4 flex items-center gap-2">
+                  <History size={18} /> Recent Task Lifecycles
+                </h3>
+                {recentTaskLifecycles.length === 0 ? (
+                  <div className="bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-100 dark:border-gray-700 text-sm text-gray-500 dark:text-gray-400">
+                    No task lifecycle history yet.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {recentTaskLifecycles.map((lifecycle) => (
+                      <div
+                        key={lifecycle.bountyAssignmentId}
+                        className="bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-100 dark:border-gray-700"
+                      >
+                        <div className="flex items-start justify-between gap-3 mb-3">
+                          <div className="flex items-start gap-3">
+                            <span className="text-2xl">{lifecycle.taskEmoji}</span>
+                            <div>
+                              <p className="text-sm font-bold text-gray-800 dark:text-white">{lifecycle.taskTitle}</p>
+                              <p className="text-xs text-gray-500 dark:text-gray-400">
+                                Child: <span className="font-semibold">{lifecycle.childName}</span>
+                              </p>
+                              {lifecycle.expectedReward && (
                                 <p className="text-xs text-gray-500 dark:text-gray-400">
-                                    <span className="font-medium">{event.userName}</span> • {new Date(event.timestamp).toLocaleDateString()}
-                                    <span className="block text-[10px] text-indigo-500">{event.action.replace('_', ' ')} by {event.assignerName}</span>
+                                  Reward target: <span className="font-semibold">{lifecycle.expectedReward}</span>
                                 </p>
+                              )}
                             </div>
+                          </div>
+                          <span className="px-2 py-1 rounded-full text-[11px] font-bold bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300">
+                            {lifecycle.latestStatus}
+                          </span>
                         </div>
+
+                        <div className="space-y-2 mb-3">
+                          {lifecycle.events.map((event) => (
+                            <div
+                              key={event.id}
+                              className="flex items-start gap-2 text-xs text-gray-600 dark:text-gray-300"
+                            >
+                              <span className="mt-1 w-2 h-2 rounded-full bg-indigo-300 dark:bg-indigo-600 shrink-0"></span>
+                              <div className="flex-1">
+                                <p className="font-semibold text-gray-800 dark:text-gray-100">
+                                  {TASK_ACTION_LABELS[event.action] || event.action.replaceAll("_", " ")}
+                                </p>
+                                <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                                  {new Date(event.timestamp).toLocaleString()} by {event.assignerName}
+                                </p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {lifecycle.rewardSummary && (
+                          <div className="mb-3 px-3 py-2 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-xs font-semibold text-green-700 dark:text-green-300">
+                            {lifecycle.rewardSummary}
+                          </div>
+                        )}
+
+                        <div className="flex flex-wrap gap-2">
+                          <span
+                            title={lifecycle.bountyAssignmentId}
+                            className="px-2 py-1 rounded-full text-[11px] bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300"
+                          >
+                            Task Ref: {lifecycle.bountyAssignmentId.slice(0, 8)}
+                          </span>
+                          {lifecycle.rewardAssignmentId && (
+                            <span
+                              title={lifecycle.rewardAssignmentId}
+                              className="px-2 py-1 rounded-full text-[11px] bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300"
+                            >
+                              Reward Ref: {lifecycle.rewardAssignmentId.slice(0, 8)}
+                            </span>
+                          )}
+                        </div>
+                      </div>
                     ))}
-                </div>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <h4 className="text-sm font-bold text-gray-700 dark:text-gray-200 mb-2">Legacy Events</h4>
+                {legacyHistoryEvents.length === 0 ? (
+                  <div className="text-xs text-gray-500 dark:text-gray-400">No legacy events.</div>
+                ) : (
+                  <div className="space-y-2 opacity-80">
+                    {legacyHistoryEvents.slice(0, 5).map((event) => (
+                      <div
+                        key={event.id}
+                        className="bg-white dark:bg-gray-800 p-3 rounded-xl border border-gray-100 dark:border-gray-700 flex items-center gap-3"
+                      >
+                        <span className="text-xl">{event.emoji}</span>
+                        <div className="flex-1">
+                          <p className="text-sm font-semibold text-gray-800 dark:text-white">{event.title}</p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">
+                            <span className="font-medium">{event.userName}</span> • {new Date(event.timestamp).toLocaleDateString()}
+                            <span className="block text-[10px] text-indigo-500">
+                              {(TASK_ACTION_LABELS[event.action] || event.action.replaceAll("_", " "))} by {event.assignerName}
+                            </span>
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -3091,38 +3429,62 @@ const handleBulkAssign = async () => {
                   </div>
 
                   {/* ---------------- Deadline Input ---------------- */}
-                  <div className="space-y-2">
-                    <label className="block font-bold text-gray-700 dark:text-gray-300 text-sm">
-                      Deadline (Optional)
-                    </label>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <input
-                          type="number"
-                          placeholder="Days"
-                          value={bountyDeadlineDays}
-                          onChange={(e) => setBountyDeadlineDays(e.target.value)}
-                          min="0"
-                          className="w-full border border-gray-300 dark:border-gray-600 rounded-xl px-4 py-3 dark:bg-gray-700 dark:text-white"
-                        />
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Days (0-365)</p>
+                  <div className="space-y-3">
+                    <div
+                      className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-700 rounded-xl border border-gray-200 dark:border-gray-600 cursor-pointer"
+                      onClick={toggleBountyDeadline}
+                    >
+                      <div
+                        className={`w-6 h-6 rounded-md flex items-center justify-center border transition-all ${
+                          bountyDeadlineEnabled
+                            ? "bg-indigo-600 dark:bg-indigo-500 border-indigo-600 dark:border-indigo-500"
+                            : "bg-white dark:bg-gray-600 border-gray-300 dark:border-gray-500"
+                        }`}
+                      >
+                        {bountyDeadlineEnabled && <Check size={16} className="text-white" />}
                       </div>
                       <div>
-                        <input
-                          type="number"
-                          placeholder="Hours"
-                          value={bountyDeadlineHours}
-                          onChange={(e) => setBountyDeadlineHours(e.target.value)}
-                          min="0"
-                          max="23"
-                          className="w-full border border-gray-300 dark:border-gray-600 rounded-xl px-4 py-3 dark:bg-gray-700 dark:text-white"
-                        />
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Hours (0-23)</p>
+                        <p className="font-bold text-gray-800 dark:text-white text-sm">
+                          Enable deadline
+                        </p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                          Adds a countdown once the child accepts the task.
+                        </p>
                       </div>
                     </div>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">
-                      Timer starts when child accepts the task. Minimum 1 day or 1 hour. Leave blank for no deadline.
-                    </p>
+
+                    {bountyDeadlineEnabled && (
+                      <>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <input
+                              type="number"
+                              placeholder="Days"
+                              value={bountyDeadlineDays}
+                              onChange={(e) => setBountyDeadlineDays(e.target.value)}
+                              min="0"
+                              className="w-full border border-gray-300 dark:border-gray-600 rounded-xl px-4 py-3 dark:bg-gray-700 dark:text-white"
+                            />
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Days (0-365)</p>
+                          </div>
+                          <div>
+                            <input
+                              type="number"
+                              placeholder="Hours"
+                              value={bountyDeadlineHours}
+                              onChange={(e) => setBountyDeadlineHours(e.target.value)}
+                              min="0"
+                              max="23"
+                              className="w-full border border-gray-300 dark:border-gray-600 rounded-xl px-4 py-3 dark:bg-gray-700 dark:text-white"
+                            />
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Hours (0-23)</p>
+                          </div>
+                        </div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                          Timer starts when child accepts the task.
+                        </p>
+                      </>
+                    )}
                   </div>
                 </div>
               )}

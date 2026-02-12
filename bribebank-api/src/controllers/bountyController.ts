@@ -9,6 +9,27 @@ import { addHistoryEvent } from "../services/historyService.js";
 import { addNotification } from "../services/notificationService.js";
 import { processTaskPhoto } from "../lib/imageProcessor.js";
 
+type TaskLifecycleMetadata = {
+  version: 1;
+  lifecycleType: "TASK";
+  bountyAssignmentId: string;
+  bountyId?: string;
+  rewardAssignmentId?: string;
+  rewardType?: "TICKETS" | "CUSTOM";
+  rewardValue?: string;
+  linkedAction?: string;
+  denialMessage?: string;
+};
+
+const buildTaskLifecycleMetadata = (
+  data: Omit<TaskLifecycleMetadata, "version" | "lifecycleType">
+) =>
+  JSON.stringify({
+    version: 1,
+    lifecycleType: "TASK",
+    ...data,
+  } satisfies TaskLifecycleMetadata);
+
 /**
  * GET /families/:familyId/bounties
  * List all bounty templates for a family
@@ -370,6 +391,13 @@ export const assignBounty = async (req: Request, res: Response) => {
           emoji,
           action: "TASK_ASSIGNED", // keep your naming consistent across app
           assignerName: parentName,
+          metadata: buildTaskLifecycleMetadata({
+            bountyAssignmentId: created.id,
+            bountyId: bounty.id,
+            rewardType: bounty.rewardType === "TICKETS" ? "TICKETS" : "CUSTOM",
+            rewardValue: bounty.rewardValue,
+            linkedAction: "TASK_ASSIGNED",
+          }),
         },
         tx
       );
@@ -513,6 +541,13 @@ export const acceptAssignedBounty = async (req: Request, res: Response) => {
           emoji,
           action: "TASK_ACCEPTED", // keep your action string for consistency
           assignerName: childName, // actor is the child
+          metadata: buildTaskLifecycleMetadata({
+            bountyAssignmentId: assignment.id,
+            bountyId: bounty.id,
+            rewardType: bounty.rewardType === "TICKETS" ? "TICKETS" : "CUSTOM",
+            rewardValue: bounty.rewardValue,
+            linkedAction: "TASK_ACCEPTED",
+          }),
         },
         tx
       );
@@ -702,6 +737,13 @@ export const completeAssignedBounty = async (req: Request, res: Response) => {
           emoji,
           action: "TASK_COMPLETED",
           assignerName: childName, // actor is the child
+          metadata: buildTaskLifecycleMetadata({
+            bountyAssignmentId: assignment.id,
+            bountyId: bounty.id,
+            rewardType: bounty.rewardType === "TICKETS" ? "TICKETS" : "CUSTOM",
+            rewardValue: bounty.rewardValue,
+            linkedAction: "TASK_COMPLETED",
+          }),
         },
         tx
       );
@@ -857,6 +899,13 @@ export const verifyAssignedBounty = async (req: Request, res: Response) => {
             emoji: bounty.emoji || "🧹",
             action: "VERIFIED_TASK",
             assignerName: parentName,
+            metadata: buildTaskLifecycleMetadata({
+              bountyAssignmentId: existingAssignment.id,
+              bountyId: bounty.id,
+              rewardType: "TICKETS",
+              rewardValue: String(ticketAmount),
+              linkedAction: "VERIFIED_TASK",
+            }),
           },
           tx
         );
@@ -871,6 +920,13 @@ export const verifyAssignedBounty = async (req: Request, res: Response) => {
             emoji: "🎟️",
             action: "EARNED_TICKETS",
             assignerName: parentName,
+            metadata: buildTaskLifecycleMetadata({
+              bountyAssignmentId: existingAssignment.id,
+              bountyId: bounty.id,
+              rewardType: "TICKETS",
+              rewardValue: String(ticketAmount),
+              linkedAction: "EARNED_TICKETS",
+            }),
           },
           tx
         );
@@ -978,6 +1034,34 @@ export const verifyAssignedBounty = async (req: Request, res: Response) => {
           emoji: bounty.emoji || "🧹",
           action: "VERIFIED_TASK",
           assignerName: parentName,
+          metadata: buildTaskLifecycleMetadata({
+            bountyAssignmentId: existingAssignment.id,
+            bountyId: bounty.id,
+            rewardType: "CUSTOM",
+            rewardValue: snapshotTitle,
+            linkedAction: "VERIFIED_TASK",
+          }),
+        },
+        tx
+      );
+
+      await addHistoryEvent(
+        {
+          familyId: existingAssignment.familyId,
+          userId: existingAssignment.userId,
+          userName: childName,
+          title: snapshotTitle,
+          emoji: snapshotEmoji,
+          action: "TASK_REWARD_GRANTED",
+          assignerName: parentName,
+          metadata: buildTaskLifecycleMetadata({
+            bountyAssignmentId: existingAssignment.id,
+            bountyId: bounty.id,
+            rewardAssignmentId: prize.id,
+            rewardType: "CUSTOM",
+            rewardValue: snapshotTitle,
+            linkedAction: "TASK_REWARD_GRANTED",
+          }),
         },
         tx
       );
@@ -1132,7 +1216,14 @@ export const denyAssignedBounty = async (req: Request, res: Response) => {
           emoji: bounty.emoji || "🧹",
           action: "DENIED_TASK",
           assignerName: parentName,
-          metadata: fullMessage,
+          metadata: buildTaskLifecycleMetadata({
+            bountyAssignmentId: existingAssignment.id,
+            bountyId: bounty.id,
+            rewardType: bounty.rewardType === "TICKETS" ? "TICKETS" : "CUSTOM",
+            rewardValue: bounty.rewardValue,
+            linkedAction: "DENIED_TASK",
+            denialMessage: fullMessage,
+          }),
         },
         tx
       );
@@ -1252,6 +1343,13 @@ export const deleteAssignedBounty = async (req: Request, res: Response) => {
           emoji: bounty.emoji,
           action,
           assignerName: childName,
+          metadata: buildTaskLifecycleMetadata({
+            bountyAssignmentId: assignment.id,
+            bountyId: bounty.id,
+            rewardType: bounty.rewardType === "TICKETS" ? "TICKETS" : "CUSTOM",
+            rewardValue: bounty.rewardValue,
+            linkedAction: action,
+          }),
         });
 
         // Notify all parents in the family

@@ -1133,7 +1133,7 @@ export const storageService = {
     return await res.json();
   },
 
-  saveStoreItem: async (item: StoreItem): Promise<void> => {
+  saveStoreItem: async (item: StoreItem, notifyUserIds: string[] = []): Promise<void> => {
     const token = getAuthToken();
     if (!token) throw new Error("Not authenticated");
 
@@ -1149,7 +1149,10 @@ export const storageService = {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify(item),
+      body: JSON.stringify({
+        ...item,
+        notifyUserIds: isLocalId ? notifyUserIds : undefined,
+      }),
     });
 
     if (!res.ok) {
@@ -1237,6 +1240,7 @@ export const storageService = {
         emoji: h.emoji,
         action: h.action,
         assignerName: h.assignerName,
+        metadata: h.metadata ?? null,
         // Frontend expects `timestamp` as number
         timestamp:
           typeof h.timestamp === "number"
@@ -1286,6 +1290,7 @@ export const storageService = {
         emoji: h.emoji,
         action: h.action,
         assignerName: h.assignerName,
+        metadata: h.metadata ?? null,
         timestamp:
           typeof h.timestamp === "number"
             ? h.timestamp
@@ -1398,32 +1403,71 @@ export const storageService = {
 
   registerPushNotifications: async (): Promise<void> => {
     try {
+      // Detect TWA environment
+      const isTWA = document.referrer.includes("android-app://");
+      const isStandalone = window.matchMedia("(display-mode: standalone)").matches || 
+                           (window.navigator as any).standalone;
+      
+      console.log("[push] Starting registration...");
+      console.log("[push] Environment:", {
+        isTWA,
+        isStandalone,
+        referrer: document.referrer,
+        userAgent: navigator.userAgent.substring(0, 100)
+      });
+
       // Basic capability check
-      if (
-        !("serviceWorker" in navigator) ||
-        !("PushManager" in window) ||
-        !("Notification" in window)
-      ) {
+      const hasServiceWorker = "serviceWorker" in navigator;
+      const hasPushManager = "PushManager" in window;
+      const hasNotification = "Notification" in window;
+      
+      console.log("[push] Capabilities:", {
+        serviceWorker: hasServiceWorker,
+        pushManager: hasPushManager,
+        notification: hasNotification,
+        currentPermission: hasNotification ? Notification.permission : "N/A"
+      });
+
+      if (!hasServiceWorker || !hasPushManager || !hasNotification) {
         console.log("[push] Push or SW not supported in this browser");
         return;
       }
 
+      console.log("[push] Requesting notification permission...");
       const permission = await Notification.requestPermission();
+      console.log("[push] Permission result:", permission);
+      
       if (permission !== "granted") {
         console.log("[push] Notification permission not granted");
         return;
       }
 
+      console.log("[push] Fetching VAPID public key...");
       const publicKey = await fetchPushPublicKey();
       if (!publicKey) {
         console.warn("[push] No VAPID public key available");
         return;
       }
+      console.log("[push] VAPID key received:", publicKey.substring(0, 20) + "...");
 
+      console.log("[push] Waiting for service worker ready...");
       const registration = await navigator.serviceWorker.ready;
+      console.log("[push] Service worker ready:", {
+        scope: registration.scope,
+        active: !!registration.active,
+        installing: !!registration.installing,
+        waiting: !!registration.waiting
+      });
 
+      console.log("[push] Checking for existing subscription...");
       const existingSub = await registration.pushManager.getSubscription();
+      
       if (existingSub) {
+        console.log("[push] Existing subscription found:", {
+          endpoint: existingSub.endpoint.substring(0, 50) + "...",
+          hasKeys: !!(existingSub.toJSON().keys)
+        });
+        
         // Already have one, just ensure backend knows about it
         const subPayload: PushSubscription = {
           endpoint: existingSub.endpoint,
@@ -1435,12 +1479,18 @@ export const storageService = {
           },
         };
         await sendPushSubscriptionToServer(subPayload);
+        console.log("[push] Existing subscription sent to server");
         return;
       }
 
+      console.log("[push] No existing subscription, creating new one...");
       const newSub = await registration.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(publicKey) as BufferSource,
+      });
+      console.log("[push] New subscription created:", {
+        endpoint: newSub.endpoint.substring(0, 50) + "...",
+        hasKeys: !!(newSub.toJSON().keys)
       });
 
       const subJson = newSub.toJSON();
@@ -1453,10 +1503,18 @@ export const storageService = {
         },
       };
 
+      console.log("[push] Sending subscription to server...");
       await sendPushSubscriptionToServer(payload);
-      console.log("[push] Subscription registered");
+      console.log("[push] ✓ Subscription successfully registered");
     } catch (e) {
-      console.error("[push] registerPushNotifications error", e);
+      console.error("[push] ❌ registerPushNotifications error:", e);
+      if (e instanceof Error) {
+        console.error("[push] Error details:", {
+          name: e.name,
+          message: e.message,
+          stack: e.stack?.substring(0, 200)
+        });
+      }
     }
   },
 

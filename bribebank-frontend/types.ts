@@ -146,6 +146,7 @@ export interface HistoryEvent {
   action: string; // Relaxed to string to allow ASSIGNED, etc.
   timestamp: number;
   assignerName: string; // Snapshot of admin name
+  metadata?: string | null;
 }
 
 export interface AppNotification {

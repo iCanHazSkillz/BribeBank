@@ -1,187 +1,169 @@
-![alt text](https://github.com/iCanHazSkillz/BribeBank/blob/master/bribebank-frontend/src/assets/BribeBankLogo.webp?raw=true)
+![BribeBank logo](https://github.com/iCanHazSkillz/BribeBank/blob/master/bribebank-frontend/src/assets/BribeBankLogo.webp?raw=true)
+
 # BribeBank
 
-BribeBank is a **family rewards wallet** for parents and kids.
+BribeBank is a family rewards wallet for parents and kids.
 
-Parents create a family, add their children, and assign:
+Parents create a family, add children, and manage:
+- Rewards (prize cards in a child wallet)
+- Bounties (tasks/chores that grant rewards or tickets)
+- Store and wheel systems driven by tickets
 
-- **Rewards** (prize cards) that live in each child’s wallet
-- **Bounties** (tasks/chores) that pay out rewards when verified
-
-The app uses **real-time updates (SSE)** so that when a child starts/completes a task or claims a reward, the parent’s admin dashboard refreshes immediately.
-
----
+The app supports real-time updates through SSE and web push notifications.
 
 ## Features
 
-### For Parents (Admin Dashboard)
+### Parent/Admin features
+- Family and user management (parent/child roles)
+- Reward template CRUD and assignment
+- Bounty template CRUD, assignment, verification, and denial
+- Optional task deadlines and deadline warning notifications
+- Optional photo proof for task completion
+- Ticket grants and conversion-rate configuration
+- Store item CRUD and purchase tracking
+- Wheel segment configuration, reset, and spins
+- Template export/import (rewards and bounties)
+- Per-family history and notification management
 
-- Create and manage a **family**
-- Add / edit / disable **users** (parents and children)
-- Create **reward templates**:
-  - Title, description, emoji, theme color
-  - Assign to one or more children
-- Create **bounty templates** (tasks):
-  - Title, emoji, reward value (`"$5"`, `"30 mins TV"`, etc.)
-  - Optional **FCFS** (first-come-first-served) behaviour
-  - Card theme color
-- Approve / deny **reward claims**
-- Verify **completed bounties** and automatically grant a reward
-- View **history** of actions per child
-- Receive and clear **notifications**
-
-### For Kids (Wallet View)
-
-- Personal **wallet** of reward cards, grouped by template/status
-- **Task tab** showing active bounties:
-  - Accept / reject offered tasks
-  - Mark tasks as completed
-- **History tab** of approved/denied rewards & verified tasks
-- In-app **notifications** for:
-  - New rewards assigned
-  - New tasks assigned
-  - Tasks verified / rewards granted
-- Live updates via **Server-Sent Events (SSE)** whenever parents act
-
----
+### Child features
+- Wallet of assigned rewards
+- Task workflow (accept/complete/resubmit denied work)
+- History and unread notifications
+- Store purchases with ticket balance
+- Wheel spin experience (if enabled by family)
 
 ## Tech Stack
 
 ### Backend (`bribebank-api`)
-
-- **Node.js** + **TypeScript**
-- **Express**
-- **Prisma** ORM
-- **PostgreSQL**
-- **JWT** authentication
-- **Server-Sent Events (SSE)** for real-time updates
-- Centralised `prisma` client (`src/lib/prisma.ts`)
-- History & Notification services: `src/services/historyService.ts`, `notificationService.ts`
+- Node.js + TypeScript
+- Express
+- Prisma ORM
+- PostgreSQL
+- JWT auth
+- Server-Sent Events (SSE)
+- Web Push (VAPID)
 
 ### Frontend (`bribebank-frontend`)
-
-- **React** + **TypeScript**
-- **Vite**
+- React + TypeScript
+- Vite
 - Tailwind-style utility classes
-- `lucide-react` icons
-- Core components:
-  - `AdminView` (parent dashboard)
-  - `WalletView` (child wallet/tasks)
-  - `PrizeCard`
-- `storageService.ts` as a single client for all API calls
+- `storageService.ts` (primary API client)
+- `apiService.ts` (auth-focused API client)
 
 ### Deployment
-
-- Root-level `docker-compose.yml`:
-  - API container (bribebank-api)
-  - Frontend container (bribebank-frontend)
-  - Postgres DB
-- Designed to work behind your own reverse proxy (e.g. `api.bribebank.yourdomain.com`, `bribebank.yourdomain.com`).
-
----
+- `docker-compose.yml` with API, frontend, and Postgres services
+- Designed for reverse proxy deployment
 
 ## Project Structure
 
 ```text
 BribeBank/
-├── bribebank-api/          # Backend API (Express + Prisma)
-│   ├── prisma/
-│   │   ├── schema.prisma
-│   │   └── migrations/     # Tracked Prisma migrations
-│   ├── src/
-│   │   ├── controllers/    # auth, rewards, bounties, users, etc.
-│   │   ├── routes/         # /auth, /families, /rewards, /bounties, /history, /notifications, /events
-│   │   ├── services/       # historyService, notificationService, SSE broadcaster
-│   │   ├── realtime/       # SSE wiring
-│   │   ├── lib/            # prisma client, helpers
-│   │   └── types/          # shared backend types (e.g. sseEvents)
+├── bribebank-api/
+│   ├── prisma/schema.prisma
+│   ├── src/controllers/
+│   ├── src/routes/
+│   ├── src/services/
+│   ├── src/realtime/
+│   ├── src/types/
 │   └── package.json
-│
-├── bribebank-frontend/     # React frontend
-│   ├── components/         # AdminView, WalletView, PrizeCard, LoginView, etc.
-│   ├── services/           # storageService.ts
-│   ├── types.ts            # base frontend types
-│   ├── types/              # additional shared types (e.g. SSE event types)
-│   ├── config.ts           # API base URL config
-│   ├── App.tsx / index.tsx
+├── bribebank-frontend/
+│   ├── components/
+│   ├── services/
+│   ├── types.ts
+│   ├── types/
+│   ├── config.ts
 │   └── package.json
-│
-├── docker-compose.yml      # Multi-container setup
-├── reset-db.sh             # Dev DB reset helper
+├── docs/agent/
+├── docker-compose.yml
+├── .env.example
 └── README.md
 ```
 
----
-
 ## Running Locally (Dev)
-### Backend (bribebank-api)
-`cd bribebank-api`
 
-create `.env` file with your favorite editor
+### Backend (`bribebank-api`)
+1. `cd bribebank-api`
+2. Create `.env` using values compatible with your Postgres instance.
 
-
-**.env should define something like:**
+Example:
 
 ```text
 DATABASE_URL=postgresql://bribebank:password@localhost:5432/bribebank?schema=public
 JWT_SECRET=change-me
 PORT=3001
-CORS_ORIGIN=http://localhost:5173
 ```
 
-Then:
+3. Run:
 
-```text
+```bash
 npm install
 npx prisma migrate dev
-npm run dev`    # or npm run start
+npm run dev
 ```
 
-API will typically be on http://localhost:3001.
+API defaults to `http://localhost:3001`.
 
-### Frontend (bribebank-frontend)
-`cd bribebank-frontend`
+### Frontend (`bribebank-frontend`)
+1. `cd bribebank-frontend`
+2. Set `VITE_API_URL` in `.env`.
 
-`npm install`
+Example:
 
-
-**config.ts should point to the API:**
 ```text
-export const API_BASE =
-  import.meta.env.VITE_API_BASE || "http://localhost:3001";
-
+VITE_API_URL=http://localhost:3001
 ```
-(Optional) set VITE_API_BASE in .env:
 
-`VITE_API_BASE=http://localhost:3001`
+3. Run:
 
+```bash
+npm install
+npm run dev
+```
 
-Then:
-
-`npm run dev`
-
-
-Frontend will run on http://localhost:5173.
+Frontend defaults to `http://localhost:5173`.
 
 ### Running with Docker
+From repo root:
 
-From the repo root:
+```bash
+docker compose build
+docker compose up -d
+```
 
-`docker compose build`
+## Environment Notes
+- Frontend reads `VITE_API_URL` from build/runtime environment (`bribebank-frontend/config.ts`).
+- Backend CORS allowlist is currently hardcoded in `bribebank-api/src/server.ts`.
+- Backend `JWT_SECRET` and `DATABASE_URL` are loaded through backend env.
 
-`docker compose up -d`
+## Agent and Contract Docs
+- System map: `docs/agent/system-map.md`
+- REST contracts: `docs/agent/contracts-rest.md`
+- Event contracts: `docs/agent/contracts-events.md`
+- Feature matrix: `docs/agent/feature-capability-matrix.md`
+- Change playbook: `docs/agent/change-playbook.md`
+- Agent entrypoint: `.github/copilot-instructions.md`
 
+## Doc Sync Checklist
+When behavior changes, update docs in the same PR/change set:
+- `README.md` for env/setup/feature summary changes
+- `docs/agent/contracts-rest.md` for route changes
+- `docs/agent/contracts-events.md` for SSE changes
+- `docs/agent/feature-capability-matrix.md` for capability status
+- `.github/copilot-instructions.md` for ownership/convention changes
+
+### Lightweight validation commands
+Use ripgrep from repo root:
+
+```bash
+rg "VITE_API_URL|DATABASE_URL|JWT_SECRET" README.md .env.example bribebank-frontend/config.ts docker-compose.yml
+rg "app.use\(|router\.(get|post|put|patch|delete)" bribebank-api/src/server.ts bribebank-api/src/routes
+rg "type:" bribebank-api/src/types/sseEvents.ts bribebank-frontend/types/sseEvents.ts
+```
 
 ## Roadmap Ideas
-
-- Scheduled / recurring bounties
-
-- In-app currency system and store for purchasing kid's wanted items
-
-- Expiry for tasks
-
+- Scheduled/recurring bounties
 - Exportable history for parents
+- Additional reporting/analytics for family activity
 
 ## License
-
 TBD.

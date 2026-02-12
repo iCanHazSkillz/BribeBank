@@ -30,7 +30,10 @@ app.use(helmet());
 app.use(cors({
   origin: [
     'https://bribebank.homeflixlab.com',
-    'http://localhost:3000',  // Keep for local dev
+    'http://localhost:3000',  // Legacy local dev origin
+    'http://localhost:5173',  // Vite local dev origin
+    'http://127.0.0.1:5173',  // Loopback variant
+    'http://127.0.0.1:3000',  // Loopback legacy variant
     'null'  // TWA may send null origin
   ],
   credentials: true

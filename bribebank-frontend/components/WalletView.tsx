@@ -10,7 +10,7 @@ import { useTheme } from '../contexts/ThemeContext';
 
 interface WalletViewProps {
   currentUser: User;
-  initialTab?: "wallet" | "tasks" | "history";
+  initialTab?: "wallet" | "tasks" | "store" | "history";
   desktopShowNotifications?: boolean;
   onDesktopNotificationsToggle?: () => void;
   onUserUpdate?: () => Promise<void>;
@@ -274,7 +274,7 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab,
   }, [refreshData]);
   
   useEffect(() => {
-    if (initialTab && (initialTab === "wallet" || initialTab === "tasks" || initialTab === "history")) {
+    if (initialTab) {
       setTab(initialTab);
     }
   }, [initialTab]);

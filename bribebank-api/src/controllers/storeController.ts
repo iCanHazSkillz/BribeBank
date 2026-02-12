@@ -44,7 +44,7 @@ export const getFamilyStoreItems = async (req: Request, res: Response) => {
  */
 export const createStoreItem = async (req: Request, res: Response) => {
   const { familyId } = req.params;
-  let { title, cost, imageUrl, productUrl, description } = req.body;
+  let { title, cost, imageUrl, productUrl, description, notifyUserIds } = req.body;
 
   if (!familyId) {
     return res.status(400).json({ error: "MISSING_FAMILY_ID" });
@@ -72,6 +72,54 @@ export const createStoreItem = async (req: Request, res: Response) => {
         description: description ?? null,
       },
     });
+
+    const selectedNotifyUserIds = Array.isArray(notifyUserIds)
+      ? [...new Set(notifyUserIds.filter((id: unknown): id is string => typeof id === "string"))]
+      : [];
+
+    if (selectedNotifyUserIds.length > 0) {
+      const recipients = await prisma.user.findMany({
+        where: {
+          id: { in: selectedNotifyUserIds },
+          familyId,
+        },
+        select: {
+          id: true,
+          displayName: true,
+        },
+      });
+
+      // Keep push body concise while still including item details.
+      const rawDetails = item.description?.trim()
+        ? `${item.title} is now in the store for ${item.cost} tickets. ${item.description.trim()}`
+        : `${item.title} is now in the store for ${item.cost} tickets.`;
+      const pushBody = rawDetails.length > 160 ? `${rawDetails.slice(0, 157)}...` : rawDetails;
+
+      for (const recipient of recipients) {
+        await addNotification({
+          userId: recipient.id,
+          message: `New store item: "${item.title}" (${item.cost} tickets)`,
+        });
+
+        try {
+          await sendPushToUser(recipient.id, {
+            title: "New Store Item Added",
+            body: pushBody,
+            tag: `store-item-${item.id}`,
+            type: "STORE_ITEM_ADDED",
+            familyId,
+            itemId: item.id,
+            url: "/?view=wallet&walletTab=store",
+          });
+        } catch (pushErr) {
+          console.warn(
+            "createStoreItem push failed for user:",
+            recipient.id,
+            pushErr
+          );
+        }
+      }
+    }
 
     const event: SseEvent = {
       type: "STORE_ITEM_ADDED",
