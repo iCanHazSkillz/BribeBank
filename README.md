@@ -138,23 +138,38 @@ docker compose up -d
 - Password changes immediately invalidate old sessions by bumping a server-side `sessionVersion`.
 
 ## Self-Hoster Emergency Recovery
-If a parent loses both password and family recovery key, the self-hoster can run a maintenance command from the API project:
+If a parent loses both password and family recovery key, use one of the following methods.
+
+### Preferred (production container)
+Run inside the already-built API container so Prisma Client and schema stay in sync:
 
 ```bash
-cd bribebank-api
-npx tsx src/scripts/recoverParentPassword.ts --username <parentUsername> --new-password "<newPassword>"
+docker compose -f docker-compose.yml exec bribebank-api \
+  node dist/scripts/recoverParentPassword.js --username <parentUsername> --new-password "<newPassword>"
 ```
 
 Optional:
 
 ```bash
-npx tsx src/scripts/recoverParentPassword.ts --username <parentUsername> --new-password "<newPassword>" --force-rotate-key false
+docker compose -f docker-compose.yml exec bribebank-api \
+  node dist/scripts/recoverParentPassword.js --username <parentUsername> --new-password "<newPassword>" --force-rotate-key false
+```
+
+### Host fallback (outside container)
+If you must run from host, install deps and regenerate Prisma client first:
+
+```bash
+cd bribebank-api
+npm install
+npx prisma generate
+npm run recover:parent-password -- --username <parentUsername> --new-password "<newPassword>"
 ```
 
 Notes:
 - Command only recovers `PARENT` accounts.
 - By default it rotates the family recovery key and prints the new key once.
 - Recovery actions are audited as `MASTER_PASSWORD_RECOVERY` history events.
+- If you see `Unknown argument sessionVersion` or `passwordRecoveryKeyHash`, your local Prisma client is stale. Run `npx prisma generate` and retry.
 
 ## Agent and Contract Docs
 - System map: `docs/agent/system-map.md`
