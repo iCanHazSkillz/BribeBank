@@ -15,6 +15,7 @@ The app supports real-time updates through SSE and web push notifications.
 
 ### Parent/Admin features
 - Family and user management (parent/child roles)
+- Parent password recovery via family recovery key
 - Reward template CRUD and assignment
 - Bounty template CRUD, assignment, verification, and denial
 - Optional task deadlines and deadline warning notifications
@@ -134,6 +135,26 @@ docker compose up -d
 - Frontend reads `VITE_API_URL` from build/runtime environment (`bribebank-frontend/config.ts`).
 - Backend CORS allowlist is currently hardcoded in `bribebank-api/src/server.ts`.
 - Backend `JWT_SECRET` and `DATABASE_URL` are loaded through backend env.
+- Password changes immediately invalidate old sessions by bumping a server-side `sessionVersion`.
+
+## Self-Hoster Emergency Recovery
+If a parent loses both password and family recovery key, the self-hoster can run a maintenance command from the API project:
+
+```bash
+cd bribebank-api
+npx tsx src/scripts/recoverParentPassword.ts --username <parentUsername> --new-password "<newPassword>"
+```
+
+Optional:
+
+```bash
+npx tsx src/scripts/recoverParentPassword.ts --username <parentUsername> --new-password "<newPassword>" --force-rotate-key false
+```
+
+Notes:
+- Command only recovers `PARENT` accounts.
+- By default it rotates the family recovery key and prints the new key once.
+- Recovery actions are audited as `MASTER_PASSWORD_RECOVERY` history events.
 
 ## Agent and Contract Docs
 - System map: `docs/agent/system-map.md`

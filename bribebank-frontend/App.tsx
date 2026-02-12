@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { User, UserRole, BountyStatus, AssignedBounty, AssignedPrize, PrizeStatus } from "./types";
 import { storageService } from "./services/storageService";
 import { LoginView } from "./components/LoginView";
@@ -49,6 +49,11 @@ const App: React.FC = () => {
   const [releaseNotes, setReleaseNotes] = useState<ReleaseNotesEntry>(FALLBACK_RELEASE_NOTES);
   const [walletBadgeCount, setWalletBadgeCount] = useState(0);
   const [adminBadgeCount, setAdminBadgeCount] = useState(0);
+  const [showRecoverySetupModal, setShowRecoverySetupModal] = useState(false);
+  const [isGeneratingRecoveryKey, setIsGeneratingRecoveryKey] = useState(false);
+  const [generatedRecoveryKey, setGeneratedRecoveryKey] = useState("");
+  const [recoveryAcknowledged, setRecoveryAcknowledged] = useState(false);
+  const staleLogoutInProgressRef = useRef(false);
 
   // allow AdminView to open a specific tab via deep-link
   const [initialAdminTab, setInitialAdminTab] = useState<string | undefined>(
@@ -160,6 +165,29 @@ const App: React.FC = () => {
     window.location.reload();
   }, []);
 
+  const clearSessionAndRouteToLogin = useCallback(() => {
+    storageService.logout();
+    setCurrentUser(null);
+    setView("login");
+    setInitialAdminTab(undefined);
+    setInitialWalletTab(undefined);
+    setShowRecoverySetupModal(false);
+    setGeneratedRecoveryKey("");
+    setRecoveryAcknowledged(false);
+  }, []);
+
+  const forceLogoutToLogin = useCallback((reason: string) => {
+    if (staleLogoutInProgressRef.current) {
+      return;
+    }
+
+    staleLogoutInProgressRef.current = true;
+    console.warn(`[App] Logging out due to stale session (${reason})`);
+    clearSessionAndRouteToLogin();
+    setShowUserMenu(false);
+    setShowNotifications(false);
+  }, [clearSessionAndRouteToLogin]);
+
   const dismissUpdateModal = useCallback(() => {
     localStorage.setItem(`${UPDATE_MODAL_SEEN_PREFIX}${__APP_RELEASE_VERSION__}`, "true");
     setShowUpdateModal(false);
@@ -227,10 +255,12 @@ const App: React.FC = () => {
         const freshUser = await storageService.refreshSession();
         setCurrentUser(freshUser);
         applyDeepLinkForUser(freshUser);
-      } catch {
-        storageService.logout();
-        setCurrentUser(null);
-        setView("login");
+      } catch (err) {
+        if (err instanceof Error && err.message === "SESSION_STALE") {
+          forceLogoutToLogin("init-refresh");
+          return;
+        }
+        clearSessionAndRouteToLogin();
       }
     };
 
@@ -263,7 +293,32 @@ const App: React.FC = () => {
         }
       });
     }
-  }, [triggerAutoReload]);
+  }, [triggerAutoReload, clearSessionAndRouteToLogin, forceLogoutToLogin]);
+
+  useEffect(() => {
+    const originalFetch = window.fetch.bind(window);
+
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const response = await originalFetch(input, init);
+
+      if (response.status === 401) {
+        try {
+          const body = await response.clone().json();
+          if (body?.error === "SESSION_STALE") {
+            forceLogoutToLogin("http-401");
+          }
+        } catch {
+          // Ignore non-JSON 401 responses.
+        }
+      }
+
+      return response;
+    };
+
+    return () => {
+      window.fetch = originalFetch;
+    };
+  }, [forceLogoutToLogin]);
 
   const fetchBadgeCounts = async () => {
     if (!currentUser) return;
@@ -309,6 +364,10 @@ const App: React.FC = () => {
         setCurrentUser(freshUser);
         await fetchBadgeCounts();
       } catch (err) {
+        if (err instanceof Error && err.message === "SESSION_STALE") {
+          forceLogoutToLogin("visibility-refresh");
+          return;
+        }
         console.error("Failed to refresh user session", err);
       }
     };
@@ -346,7 +405,7 @@ const App: React.FC = () => {
       document.removeEventListener("visibilitychange", handleVisibility);
       document.removeEventListener("mousedown", handleClickOutside);
     };
-  }, [currentUser?.id, showUserMenu, showNotifications, triggerAutoReload]);
+  }, [currentUser?.id, showUserMenu, showNotifications, triggerAutoReload, forceLogoutToLogin]);
 
   useEffect(() => {
     if (currentUser) {
@@ -375,11 +434,23 @@ const App: React.FC = () => {
         }
       };
 
+      source.onerror = async () => {
+        try {
+          await storageService.refreshSession();
+        } catch (err) {
+          if (err instanceof Error && err.message === "SESSION_STALE") {
+            source.close();
+            forceLogoutToLogin("sse-refresh");
+          }
+        }
+      };
+
       return () => source.close();
     }
-  }, [currentUser?.id]);
+  }, [currentUser?.id, forceLogoutToLogin]);
 
   const handleLogin = async (user: User) => {
+    staleLogoutInProgressRef.current = false;
     setCurrentUser(user);
 
     // Apply deep-link post-login too
@@ -389,11 +460,7 @@ const App: React.FC = () => {
   };
 
   const handleLogout = () => {
-    storageService.logout();
-    setCurrentUser(null);
-    setView("login");
-    setInitialAdminTab(undefined);
-    setInitialWalletTab(undefined);
+    clearSessionAndRouteToLogin();
   };
 
   const handleUserUpdate = async () => {
@@ -401,9 +468,49 @@ const App: React.FC = () => {
       const freshUser = await storageService.refreshSession();
       setCurrentUser(freshUser);
     } catch (err) {
+      if (err instanceof Error && err.message === "SESSION_STALE") {
+        forceLogoutToLogin("post-update-refresh");
+        return;
+      }
       console.error("Failed to refresh user after update", err);
     }
   };
+
+  const handleGenerateRecoveryKey = async () => {
+    try {
+      setIsGeneratingRecoveryKey(true);
+      const result = await storageService.regenerateRecoveryKey();
+      setGeneratedRecoveryKey(result.recoveryKey);
+      setRecoveryAcknowledged(false);
+    } catch (err) {
+      console.error("Failed to generate recovery key", err);
+    } finally {
+      setIsGeneratingRecoveryKey(false);
+    }
+  };
+
+  useEffect(() => {
+    const ensureRecoveryKeySetup = async () => {
+      if (!currentUser || currentUser.role !== UserRole.ADMIN) {
+        setShowRecoverySetupModal(false);
+        return;
+      }
+
+      try {
+        const status = await storageService.getRecoveryKeyStatus();
+        const needsSetup = !status.configured;
+        setShowRecoverySetupModal(needsSetup);
+        if (needsSetup) {
+          setGeneratedRecoveryKey("");
+          setRecoveryAcknowledged(false);
+        }
+      } catch (err) {
+        console.error("Failed to load recovery key status", err);
+      }
+    };
+
+    void ensureRecoveryKeySetup();
+  }, [currentUser?.id, currentUser?.role]);
 
   const updateModal = showUpdateModal ? (
     <div className="fixed inset-0 z-[110] bg-black/60 flex items-center justify-center p-4">
@@ -581,6 +688,59 @@ const App: React.FC = () => {
       </header>
       
       {updateModal}
+      {showRecoverySetupModal && (
+        <div className="fixed inset-0 z-[120] bg-black/70 flex items-center justify-center p-4">
+          <div className="w-full max-w-xl bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+            <div className="bg-gradient-to-r from-amber-500 to-orange-600 px-6 py-5 text-white">
+              <h2 className="text-2xl font-bold">Set Up Family Recovery Key</h2>
+              <p className="mt-1 text-amber-50 text-sm">
+                Required before continuing. This key is needed if a parent forgets their password.
+              </p>
+            </div>
+            <div className="p-6 space-y-4">
+              {!generatedRecoveryKey ? (
+                <>
+                  <p className="text-sm text-gray-700 dark:text-gray-300">
+                    Generate a family recovery key now and store it securely. If lost, only your self-hoster administrator can recover access.
+                  </p>
+                  <button
+                    onClick={handleGenerateRecoveryKey}
+                    disabled={isGeneratingRecoveryKey}
+                    className="px-4 py-2 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700 disabled:opacity-60"
+                  >
+                    {isGeneratingRecoveryKey ? "Generating..." : "Generate Recovery Key"}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm text-gray-700 dark:text-gray-300">Your new family recovery key (shown once):</p>
+                  <div className="p-3 rounded-lg bg-gray-100 dark:bg-gray-900 font-mono text-sm text-gray-900 dark:text-gray-100 break-all">
+                    {generatedRecoveryKey}
+                  </div>
+                  <label className="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
+                    <input
+                      type="checkbox"
+                      checked={recoveryAcknowledged}
+                      onChange={(e) => setRecoveryAcknowledged(e.target.checked)}
+                      className="mt-1"
+                    />
+                    I have securely saved this recovery key.
+                  </label>
+                  <div className="flex justify-end">
+                    <button
+                      onClick={() => setShowRecoverySetupModal(false)}
+                      disabled={!recoveryAcknowledged}
+                      className="px-4 py-2 rounded-lg bg-emerald-600 text-white font-semibold hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      Continue
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       
       {/* Content Area */}
       <main className="h-full overflow-y-auto no-scrollbar lg:pt-16">

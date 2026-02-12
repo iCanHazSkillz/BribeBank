@@ -5,14 +5,19 @@
     "features": [
       "Parents can now optionally notify selected family members when creating a new store item.",
       "Approvals and wallet history now show task lifecycle cards with clearer reward linkage.",
+      "Added parent forgot-password recovery using a family recovery key.",
       "App updates now apply automatically when a new service-worker build is detected."
     ],
     "improvements": [
       "Task deadline UX is now opt-in with a disabled-by-default toggle and clearer input flow.",
+      "Parents are now prompted to set up a family recovery key to avoid account lockouts.",
       "Added a one-time 'BribeBank was updated' modal with categorized release highlights."
     ],
     "fixes": [
+      "Password changes now immediately invalidate stale sessions so old tokens can no longer be used.",
+      "Users are now automatically returned to login as soon as a stale session is detected.",
       "Corrected task lifecycle status handling for denied-without-resubmit outcomes in wallet history.",
+      "Added a self-hoster emergency CLI recovery path when no family recovery key is available.",
       "Stabilized update delivery by replacing manual update confirmation with immediate automatic refresh."
     ]
   },
@@ -23,14 +28,19 @@
       "features": [
         "Parents can now optionally notify selected family members when creating a new store item.",
         "Approvals and wallet history now show task lifecycle cards with clearer reward linkage.",
+        "Added parent forgot-password recovery using a family recovery key.",
         "App updates now apply automatically when a new service-worker build is detected."
       ],
       "improvements": [
         "Task deadline UX is now opt-in with a disabled-by-default toggle and clearer input flow.",
+        "Parents are now prompted to set up a family recovery key to avoid account lockouts.",
         "Added a one-time 'BribeBank was updated' modal with categorized release highlights."
       ],
       "fixes": [
+        "Password changes now immediately invalidate stale sessions so old tokens can no longer be used.",
+        "Users are now automatically returned to login as soon as a stale session is detected.",
         "Corrected task lifecycle status handling for denied-without-resubmit outcomes in wallet history.",
+        "Added a self-hoster emergency CLI recovery path when no family recovery key is available.",
         "Stabilized update delivery by replacing manual update confirmation with immediate automatic refresh."
       ]
     }

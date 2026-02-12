@@ -115,6 +115,11 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, o
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [currentFamily, setCurrentFamily] = useState<Family | null>(null);
   const [tempConversionRate, setTempConversionRate] = useState<string>('10');
+  const [recoveryKeyConfigured, setRecoveryKeyConfigured] = useState(false);
+  const [recoveryKeyUpdatedAt, setRecoveryKeyUpdatedAt] = useState<string | null>(null);
+  const [latestRecoveryKey, setLatestRecoveryKey] = useState<string | null>(null);
+  const [isGeneratingRecoveryKey, setIsGeneratingRecoveryKey] = useState(false);
+  const [recoveryKeyCopied, setRecoveryKeyCopied] = useState(false);
   
   // Selection & Filter State
   const [searchTerm, setSearchTerm] = useState('');
@@ -246,6 +251,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, o
         storeItemsFromApi,
         wheelSegmentsFromApi,
         wheelConfigFromApi,
+        recoveryKeyStatus,
       ] = await Promise.all([
         storageService.getTemplates(familyId),         // Reward templates
         storageService.getAssignments(familyId),       // Assigned rewards
@@ -257,6 +263,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, o
         storageService.getStoreItems(familyId),        // Store items
         storageService.getWheelSegments(familyId),
         storageService.getWheelConfig(familyId),
+        storageService.getRecoveryKeyStatus(),
       ]);
 
       //----------------------------------------------------
@@ -295,6 +302,8 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, o
         ticketConversionRate: wheelConfigFromApi.ticketConversionRate || 10,
       });
       setTempConversionRate(String(wheelConfigFromApi.ticketConversionRate || 10));
+      setRecoveryKeyConfigured(!!recoveryKeyStatus.configured);
+      setRecoveryKeyUpdatedAt(recoveryKeyStatus.updatedAt ?? null);
       
       // Calculate winning chance from segments (exclude Try Again segments)
       const prizeSegments = wheelSegmentsFromApi.filter((s: any) => !s.label.toLowerCase().includes('try again'));
@@ -454,6 +463,42 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, o
     setEditingId(null);
     setEditingStoreItemId(null);
     setTicketAmount('');
+  };
+
+  const handleRegenerateRecoveryKey = async () => {
+    const ok = await confirm({
+      title: "Rotate Family Recovery Key?",
+      message:
+        "This will invalidate the previous family recovery key immediately. Continue?",
+      confirmLabel: "Rotate Key",
+      destructive: true,
+    });
+    if (!ok) return;
+
+    try {
+      setIsGeneratingRecoveryKey(true);
+      const result = await storageService.regenerateRecoveryKey();
+      setLatestRecoveryKey(result.recoveryKey);
+      setRecoveryKeyConfigured(true);
+      setRecoveryKeyUpdatedAt(result.updatedAt);
+      setRecoveryKeyCopied(false);
+      showToast("Recovery key rotated. Save it now.", "success");
+    } catch (err: any) {
+      showToast(err.message || "Failed to rotate recovery key", "error");
+    } finally {
+      setIsGeneratingRecoveryKey(false);
+    }
+  };
+
+  const handleCopyRecoveryKey = async () => {
+    if (!latestRecoveryKey) return;
+    try {
+      await navigator.clipboard.writeText(latestRecoveryKey);
+      setRecoveryKeyCopied(true);
+      setTimeout(() => setRecoveryKeyCopied(false), 2000);
+    } catch {
+      showToast("Failed to copy recovery key", "error");
+    }
   };
 
   // --- ACTIONS ---
@@ -3704,6 +3749,61 @@ const handleBulkAssign = async () => {
             <div className="space-y-6">
                 {!userFormView ? (
                     <>
+                        <div className="bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-sm border border-gray-100 dark:border-gray-700">
+                            <div className="flex items-start justify-between gap-4">
+                                <div>
+                                    <h3 className="font-bold text-lg text-gray-800 dark:text-white flex items-center gap-2">
+                                        <KeyRound size={18} />
+                                        Family Recovery Key
+                                    </h3>
+                                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                                        Used for parent forgot-password recovery.
+                                    </p>
+                                    <p className={`text-xs mt-2 font-semibold ${recoveryKeyConfigured ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                                        {recoveryKeyConfigured ? 'Configured' : 'Not configured'}
+                                    </p>
+                                    {recoveryKeyUpdatedAt && (
+                                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                        Last rotated: {new Date(recoveryKeyUpdatedAt).toLocaleString()}
+                                      </p>
+                                    )}
+                                </div>
+                                <button
+                                  onClick={handleRegenerateRecoveryKey}
+                                  disabled={isGeneratingRecoveryKey}
+                                  className="px-4 py-2 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed"
+                                >
+                                  {isGeneratingRecoveryKey
+                                    ? "Generating..."
+                                    : recoveryKeyConfigured
+                                    ? "Rotate Key"
+                                    : "Generate Key"}
+                                </button>
+                            </div>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-3">
+                                If no key is available, recovery must be done by your BribeBank self-hoster administrator.
+                            </p>
+                            {latestRecoveryKey && (
+                              <div className="mt-4 p-4 rounded-xl border border-emerald-200 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/20">
+                                <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-300">
+                                  New recovery key (shown once):
+                                </p>
+                                <p className="mt-2 p-3 rounded-lg font-mono text-xs bg-white dark:bg-gray-900 text-emerald-700 dark:text-emerald-300 break-all">
+                                  {latestRecoveryKey}
+                                </p>
+                                <button
+                                  onClick={handleCopyRecoveryKey}
+                                  className="mt-3 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700"
+                                >
+                                  {recoveryKeyCopied ? "Copied" : "Copy Recovery Key"}
+                                </button>
+                                <p className="text-[11px] text-amber-700 dark:text-amber-300 mt-2">
+                                  Store this securely. It cannot be retrieved later.
+                                </p>
+                              </div>
+                            )}
+                        </div>
+
                         <div className="bg-white dark:bg-gray-800 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-gray-700">
                             <div className="flex justify-between items-center mb-4">
                                 <h3 className="font-bold text-lg text-gray-800 dark:text-white">Family Members</h3>

@@ -8,6 +8,9 @@ Source of truth: route modules in `bribebank-api/src/routes/*` and wiring in `br
   - Public auth endpoints (register/login/join)
   - `GET /push/public-key`
   - `GET /events?token=<jwt>` (JWT passed as query token)
+- JWT auth is enforced with server-side `sessionVersion` validation.
+  - Password changes increment `User.sessionVersion`.
+  - Tokens with stale/missing `sessionVersion` are rejected with `401` (`SESSION_STALE`).
 
 ## Endpoint inventory
 
@@ -17,6 +20,9 @@ Source of truth: route modules in `bribebank-api/src/routes/*` and wiring in `br
 - `POST /auth/join-family` (public)
 - `POST /auth/regenerate-code` (auth)
 - `GET /auth/me` (auth)
+- `GET /auth/recovery-key/status` (auth; parent-only)
+- `POST /auth/recovery-key/regenerate` (auth; parent-only)
+- `POST /auth/forgot-password/reset` (public; parent-targeted recovery)
 
 ### Rewards and assigned prizes
 - `GET /families/:familyId/rewards` (auth)

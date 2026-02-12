@@ -7,6 +7,8 @@ Status reflects current stable implementation in this repository.
   - Parent register/login
   - Join family with code
   - Regenerate join code
+  - Parent forgot-password recovery via family recovery key
+  - Self-hoster emergency parent password recovery CLI fallback
 - User management
   - Create/update/delete users
   - Password update

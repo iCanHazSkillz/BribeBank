@@ -68,6 +68,7 @@ BribeBank is a family rewards platform with:
   2. Update to API contract or auth/permission behavior that affects app flows.
   3. Push/SSE/history lifecycle behavior changes surfaced to users.
   4. Significant bug fixes that alter expected outcomes.
+  5. Auth, account recovery, or security control changes.
 - Per-release maintenance rules:
   1. Ensure `releases[__APP_RELEASE_VERSION__]` exists with `title`, `date`, `features[]`, `improvements[]`, `fixes[]`.
   2. Keep bullet points concise, user-facing, and factual.
@@ -92,3 +93,4 @@ For any feature or behavior change:
 ## Known Reality Checks
 - Build/test execution may depend on local Node/npm availability.
 - If runtime behavior and docs conflict, trust code paths above and fix docs in the same change set.
+- For auth/recovery changes, also update `README.md` operational recovery guidance and `docs/agent/contracts-rest.md`.

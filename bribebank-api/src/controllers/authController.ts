@@ -3,7 +3,10 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { config } from "../config.js";
 import { prisma } from "../lib/prisma.js";
-import { Prisma } from "@prisma/client";
+import { Prisma, Role } from "@prisma/client";
+import { assertParent, getRequestUser } from "../lib/authHelpers.js";
+import { verifyRecoveryKey } from "../lib/recoveryKey.js";
+import { rotateFamilyRecoveryKey } from "../services/recoveryService.js";
 
 const AVATAR_COLORS = [
   "bg-indigo-500",
@@ -24,8 +27,54 @@ function generateJoinCode(): string {
     return Math.random().toString(36).substring(2, 8).toUpperCase();
 }
 
-function signToken(userId: string) {
-    return jwt.sign({ userId }, config.jwtSecret, { expiresIn: "7d" });
+function signToken(userId: string, sessionVersion: number) {
+    return jwt.sign({ userId, sessionVersion }, config.jwtSecret, { expiresIn: "7d" });
+}
+
+const FORGOT_RESET_WINDOW_MS = 10 * 60 * 1000;
+const FORGOT_RESET_MAX_ATTEMPTS = 8;
+const forgotResetAttempts = new Map<string, { count: number; windowStart: number }>();
+
+function getForgotResetKey(req: Request, username: string) {
+  const ip = req.ip || "unknown-ip";
+  return `${ip}:${username}`;
+}
+
+function isRateLimited(req: Request, normalizedUsername: string): boolean {
+  const now = Date.now();
+  const key = getForgotResetKey(req, normalizedUsername);
+  const current = forgotResetAttempts.get(key);
+  if (!current) return false;
+
+  if (now - current.windowStart > FORGOT_RESET_WINDOW_MS) {
+    forgotResetAttempts.delete(key);
+    return false;
+  }
+
+  return current.count >= FORGOT_RESET_MAX_ATTEMPTS;
+}
+
+function trackForgotResetFailure(req: Request, normalizedUsername: string) {
+  const now = Date.now();
+  const key = getForgotResetKey(req, normalizedUsername);
+  const current = forgotResetAttempts.get(key);
+  if (!current || now - current.windowStart > FORGOT_RESET_WINDOW_MS) {
+    forgotResetAttempts.set(key, { count: 1, windowStart: now });
+    return;
+  }
+
+  forgotResetAttempts.set(key, {
+    count: current.count + 1,
+    windowStart: current.windowStart,
+  });
+}
+
+function clearForgotResetAttempts(req: Request, normalizedUsername: string) {
+  forgotResetAttempts.delete(getForgotResetKey(req, normalizedUsername));
+}
+
+function isPasswordStrongEnough(password: string): boolean {
+  return password.length >= 8;
 }
 
 // -----------------------------------------------------
@@ -80,7 +129,7 @@ export const registerParent = async (req: Request, res: Response) => {
 
     return res.json({
       message: "Parent account created",
-      token: signToken(user.id),
+      token: signToken(user.id, user.sessionVersion),
       joinCode,
     });
   } catch (err: unknown) {
@@ -128,7 +177,7 @@ export const login = async (req: Request, res: Response) => {
     }
 
     return res.json({
-      token: signToken(user.id),
+      token: signToken(user.id, user.sessionVersion),
     });
   } catch (err) {
     console.error("login error:", err);
@@ -184,7 +233,7 @@ export const joinFamily = async (req: Request, res: Response) => {
 
     return res.json({
       message: "Child account created",
-      token: signToken(user.id),
+      token: signToken(user.id, user.sessionVersion),
       familyName: family.name,
     });
   } catch (err: unknown) {
@@ -262,4 +311,149 @@ export const getMe = async (req: Request, res: Response) => {
     } catch {
         return res.status(400).json({ error: "Failed" });
     }
+};
+
+// -----------------------------------------------------
+// RECOVERY KEY STATUS (PARENT ONLY)
+// -----------------------------------------------------
+export const getRecoveryKeyStatus = async (req: Request, res: Response) => {
+  try {
+    const requester = await getRequestUser(req);
+    if (!requester) {
+      return res.status(401).json({ error: "UNAUTHENTICATED" });
+    }
+    assertParent(requester);
+
+    const family = await prisma.family.findUnique({
+      where: { id: requester.familyId },
+      select: {
+        passwordRecoveryKeyHash: true,
+        passwordRecoveryKeyUpdatedAt: true,
+      },
+    });
+
+    if (!family) {
+      return res.status(404).json({ error: "FAMILY_NOT_FOUND" });
+    }
+
+    return res.json({
+      configured: !!family.passwordRecoveryKeyHash,
+      updatedAt: family.passwordRecoveryKeyUpdatedAt,
+    });
+  } catch (err: any) {
+    if (err && typeof err === "object" && "status" in err) {
+      return res.status(err.status).json({ error: err.error });
+    }
+    console.error("getRecoveryKeyStatus error:", err);
+    return res.status(500).json({ error: "INTERNAL_SERVER_ERROR" });
+  }
+};
+
+// -----------------------------------------------------
+// REGENERATE RECOVERY KEY (PARENT ONLY)
+// -----------------------------------------------------
+export const regenerateRecoveryKey = async (req: Request, res: Response) => {
+  try {
+    const requester = await getRequestUser(req);
+    if (!requester) {
+      return res.status(401).json({ error: "UNAUTHENTICATED" });
+    }
+    assertParent(requester);
+
+    const { recoveryKey, updatedAt } = await rotateFamilyRecoveryKey(
+      requester.familyId
+    );
+
+    return res.json({
+      recoveryKey,
+      updatedAt,
+    });
+  } catch (err: any) {
+    if (err && typeof err === "object" && "status" in err) {
+      return res.status(err.status).json({ error: err.error });
+    }
+    console.error("regenerateRecoveryKey error:", err);
+    return res.status(500).json({ error: "INTERNAL_SERVER_ERROR" });
+  }
+};
+
+// -----------------------------------------------------
+// FORGOT PASSWORD RESET (PUBLIC)
+// -----------------------------------------------------
+export const resetForgottenPassword = async (req: Request, res: Response) => {
+  try {
+    const { username, recoveryKey, newPassword } = req.body as {
+      username?: string;
+      recoveryKey?: string;
+      newPassword?: string;
+    };
+
+    if (!username || !recoveryKey || !newPassword) {
+      return res.status(400).json({ error: "MISSING_FIELDS" });
+    }
+    if (!isPasswordStrongEnough(newPassword)) {
+      return res.status(400).json({ error: "WEAK_PASSWORD" });
+    }
+
+    const normalizedUsername = username.trim().toLowerCase();
+    if (isRateLimited(req, normalizedUsername)) {
+      return res.status(429).json({ error: "TOO_MANY_ATTEMPTS" });
+    }
+
+    const invalidResponse = () =>
+      res.status(400).json({ error: "INVALID_RECOVERY_CREDENTIALS" });
+
+    const user = await prisma.user.findUnique({
+      where: { username: normalizedUsername },
+      select: {
+        id: true,
+        familyId: true,
+        role: true,
+      },
+    });
+
+    if (!user || user.role !== Role.PARENT) {
+      trackForgotResetFailure(req, normalizedUsername);
+      return invalidResponse();
+    }
+
+    const family = await prisma.family.findUnique({
+      where: { id: user.familyId },
+      select: {
+        passwordRecoveryKeyHash: true,
+      },
+    });
+
+    const validKey = await verifyRecoveryKey(
+      recoveryKey.trim().toUpperCase(),
+      family?.passwordRecoveryKeyHash
+    );
+    if (!validKey) {
+      trackForgotResetFailure(req, normalizedUsername);
+      return invalidResponse();
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    const { recoveryKey: newRecoveryKey, updatedAt } =
+      await rotateFamilyRecoveryKey(user.familyId);
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        password: hashedPassword,
+        sessionVersion: { increment: 1 },
+      },
+    });
+
+    clearForgotResetAttempts(req, normalizedUsername);
+
+    return res.json({
+      message: "PASSWORD_RESET_SUCCESS",
+      newRecoveryKey,
+      rotatedAt: updatedAt,
+    });
+  } catch (err) {
+    console.error("resetForgottenPassword error:", err);
+    return res.status(500).json({ error: "INTERNAL_SERVER_ERROR" });
+  }
 };

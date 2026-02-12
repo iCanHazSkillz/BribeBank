@@ -296,7 +296,10 @@ export const updateUserPassword = async (req: Request, res: Response) => {
 
     await prisma.user.update({
       where: { id },
-      data: { password: hashed },
+      data: {
+        password: hashed,
+        sessionVersion: { increment: 1 },
+      },
     });
 
     return res.status(204).send();

@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { User } from "../types";
 import { storageService } from "../services/storageService";
 import { apiService } from "../services/apiService";
-import { Users, Lock, ArrowRight, Eye, EyeOff } from "lucide-react";
+import { Users, Lock, ArrowRight, Eye, EyeOff, KeyRound, Copy, Check } from "lucide-react";
 import BribeBankLogo from "../src/assets/BribeBankLogo.webp";
 
 interface LoginViewProps {
@@ -11,8 +11,17 @@ interface LoginViewProps {
 
 export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
   const [isSignUp, setIsSignUp] = useState(false);
+  const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [error, setError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [showRecoveryKey, setShowRecoveryKey] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [forgotRecoveryKey, setForgotRecoveryKey] = useState("");
+  const [forgotNewPassword, setForgotNewPassword] = useState("");
+  const [forgotConfirmPassword, setForgotConfirmPassword] = useState("");
+  const [resetSuccessKey, setResetSuccessKey] = useState("");
+  const [copied, setCopied] = useState(false);
 
   // Shared auth fields
   const [username, setUsername] = useState("");
@@ -40,6 +49,63 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
     } catch (err: any) {
       console.error("Login failed:", err);
       setError(err?.message || "Invalid username or password.");
+    }
+  };
+
+  const handleForgotPasswordReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+
+    if (!username || !forgotRecoveryKey || !forgotNewPassword || !forgotConfirmPassword) {
+      setError("All fields are required.");
+      return;
+    }
+    if (forgotNewPassword.length < 8) {
+      setError("New password must be at least 8 characters.");
+      return;
+    }
+    if (forgotNewPassword !== forgotConfirmPassword) {
+      setError("Passwords do not match.");
+      return;
+    }
+
+    try {
+      const result = await storageService.resetForgottenPassword(
+        username.trim().toLowerCase(),
+        forgotRecoveryKey.trim().toUpperCase(),
+        forgotNewPassword
+      );
+      setResetSuccessKey(result.newRecoveryKey);
+      setForgotRecoveryKey("");
+      setForgotNewPassword("");
+      setForgotConfirmPassword("");
+      setCopied(false);
+    } catch (err: any) {
+      const msg = err?.message || "Password reset failed.";
+      if (msg === "INVALID_RECOVERY_CREDENTIALS") {
+        setError("Invalid recovery details. Check username and recovery key.");
+        return;
+      }
+      if (msg === "TOO_MANY_ATTEMPTS") {
+        setError("Too many attempts. Please wait and try again.");
+        return;
+      }
+      if (msg === "WEAK_PASSWORD") {
+        setError("New password must be at least 8 characters.");
+        return;
+      }
+      setError(msg);
+    }
+  };
+
+  const handleCopyResetKey = async () => {
+    if (!resetSuccessKey) return;
+    try {
+      await navigator.clipboard.writeText(resetSuccessKey);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setError("Failed to copy. Please copy the key manually.");
     }
   };
 
@@ -141,7 +207,7 @@ const handleSignUp = async (e: React.FormEvent) => {
             BribeBank
           </h1>
           <p className="text-gray-300 mt-2 font-medium">
-            {isSignUp ? "Create Family Account" : "Welcome Back"}
+            {isForgotPassword ? "Recover Parent Password" : isSignUp ? "Create Family Account" : "Welcome Back"}
           </p>
         </div>
 
@@ -154,7 +220,7 @@ const handleSignUp = async (e: React.FormEvent) => {
           )}
 
           <form
-            onSubmit={isSignUp ? handleSignUp : handleLogin}
+            onSubmit={isForgotPassword ? handleForgotPasswordReset : isSignUp ? handleSignUp : handleLogin}
             className="space-y-4"
           >
             {isSignUp && (
@@ -208,6 +274,7 @@ const handleSignUp = async (e: React.FormEvent) => {
               </div>
             </div>
 
+            {!isForgotPassword && (
             <div>
               <label className="block text-xs font-bold text-gray-300 uppercase tracking-wider mb-1">
                 Password
@@ -234,32 +301,156 @@ const handleSignUp = async (e: React.FormEvent) => {
                 </button>
               </div>
             </div>
+            )}
+
+            {isForgotPassword && (
+              <>
+                <div>
+                  <label className="block text-xs font-bold text-gray-300 uppercase tracking-wider mb-1">
+                    Family Recovery Key
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showRecoveryKey ? "text" : "password"}
+                      placeholder="XXXX-XXXX-XXXX-..."
+                      className="w-full p-3 pl-10 pr-10 bg-gray-700 rounded-xl border border-gray-600 text-white placeholder-gray-400 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
+                      value={forgotRecoveryKey}
+                      onChange={(e) => setForgotRecoveryKey(e.target.value)}
+                    />
+                    <KeyRound size={18} className="absolute left-3 top-3.5 text-gray-500" />
+                    <button
+                      type="button"
+                      onClick={() => setShowRecoveryKey(!showRecoveryKey)}
+                      className="absolute right-3 top-3.5 text-gray-500 hover:text-gray-300 transition-colors"
+                      tabIndex={-1}
+                    >
+                      {showRecoveryKey ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-gray-300 uppercase tracking-wider mb-1">
+                    New Password
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showNewPassword ? "text" : "password"}
+                      placeholder="At least 8 characters"
+                      className="w-full p-3 pl-10 pr-10 bg-gray-700 rounded-xl border border-gray-600 text-white placeholder-gray-400 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
+                      value={forgotNewPassword}
+                      onChange={(e) => setForgotNewPassword(e.target.value)}
+                    />
+                    <Lock size={18} className="absolute left-3 top-3.5 text-gray-500" />
+                    <button
+                      type="button"
+                      onClick={() => setShowNewPassword(!showNewPassword)}
+                      className="absolute right-3 top-3.5 text-gray-500 hover:text-gray-300 transition-colors"
+                      tabIndex={-1}
+                    >
+                      {showNewPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-gray-300 uppercase tracking-wider mb-1">
+                    Confirm New Password
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showConfirmPassword ? "text" : "password"}
+                      placeholder="Re-enter new password"
+                      className="w-full p-3 pl-10 pr-10 bg-gray-700 rounded-xl border border-gray-600 text-white placeholder-gray-400 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
+                      value={forgotConfirmPassword}
+                      onChange={(e) => setForgotConfirmPassword(e.target.value)}
+                    />
+                    <Lock size={18} className="absolute left-3 top-3.5 text-gray-500" />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      className="absolute right-3 top-3.5 text-gray-500 hover:text-gray-300 transition-colors"
+                      tabIndex={-1}
+                    >
+                      {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
 
             <button
               type="submit"
               className="w-full py-4 mt-2 bg-indigo-600 text-white rounded-xl font-bold text-lg shadow-lg hover:bg-indigo-700 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
             >
-              {isSignUp ? "Create Account" : "Login"}{" "}
+              {isForgotPassword ? "Reset Password" : isSignUp ? "Create Account" : "Login"}{" "}
               <ArrowRight size={20} />
             </button>
           </form>
 
+          {isForgotPassword && (
+            <>
+              <p className="mt-3 text-xs text-gray-400">
+                If you do not have your family recovery key, contact your BribeBank self-hoster administrator.
+              </p>
+              {resetSuccessKey && (
+                <div className="mt-4 p-4 rounded-xl border border-emerald-500/50 bg-emerald-900/30">
+                  <p className="text-emerald-300 font-semibold text-sm">Password reset successful.</p>
+                  <p className="text-gray-300 text-xs mt-1">New family recovery key (shown once):</p>
+                  <div className="mt-2 p-3 rounded-lg bg-gray-900 text-emerald-300 font-mono text-xs break-all">
+                    {resetSuccessKey}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleCopyResetKey}
+                    className="mt-3 inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold"
+                  >
+                    {copied ? <Check size={16} /> : <Copy size={16} />}
+                    {copied ? "Copied" : "Copy Recovery Key"}
+                  </button>
+                  <p className="text-[11px] text-amber-300 mt-2">
+                    Store this key securely. It will not be shown again.
+                  </p>
+                </div>
+              )}
+            </>
+          )}
+
           {/* Toggle */}
           <div className="mt-6 text-center">
             <p className="text-sm text-gray-400">
-              {isSignUp
+              {isForgotPassword
+                ? "Remembered your password?"
+                : isSignUp
                 ? "Already have a family account?"
                 : "First time here?"}
             </p>
             <button
               onClick={() => {
-                setIsSignUp(!isSignUp);
+                if (isForgotPassword) {
+                  setIsForgotPassword(false);
+                  setResetSuccessKey("");
+                } else {
+                  setIsSignUp(!isSignUp);
+                }
                 setError("");
               }}
               className="mt-1 text-indigo-400 font-bold text-sm hover:underline flex items-center justify-center gap-1 mx-auto"
             >
-              {isSignUp ? "Login instead" : "Create new family wallet"}
+              {isForgotPassword ? "Back to login" : isSignUp ? "Login instead" : "Create new family wallet"}
             </button>
+            {!isSignUp && !isForgotPassword && (
+              <button
+                onClick={() => {
+                  setIsForgotPassword(true);
+                  setError("");
+                  setResetSuccessKey("");
+                }}
+                className="mt-3 text-xs text-gray-300 hover:text-white underline"
+              >
+                Forgot parent password?
+              </button>
+            )}
           </div>
         </div>
       </div>

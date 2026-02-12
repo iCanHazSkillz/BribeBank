@@ -23,6 +23,8 @@ model Family {
 
   joinCode       String?   @unique
   joinCodeExpiry DateTime?
+  passwordRecoveryKeyHash String?
+  passwordRecoveryKeyUpdatedAt DateTime?
   wheelSpinCost  Int       @default(1)
   ticketConversionRate Int @default(10) // 10 tickets = $1 by default
 
@@ -52,6 +54,7 @@ model User {
   avatarColor String?    @default("bg-blue-500")
   avatarUrl   String?    @db.Text // Optional profile picture URL (base64 data URL) - needs Text for large images
   ticketBalance Int      @default(0)
+  sessionVersion Int     @default(0)
 
   createdAt   DateTime   @default(now())
 

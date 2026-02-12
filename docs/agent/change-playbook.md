@@ -28,6 +28,9 @@ Use this checklist to make feature work decision-complete and documentation-safe
 - SSE contract updates in `docs/agent/contracts-events.md`.
 - Capability status updates in `docs/agent/feature-capability-matrix.md`.
 - High-level context updates in `.github/copilot-instructions.md` and `README.md`.
+- If auth or account recovery behavior changes, update:
+  - `README.md` self-hoster recovery guidance
+  - `docs/agent/contracts-rest.md` auth endpoint inventory
 
 ## 5. Release versioning and notes (AI-managed)
 - Canonical notes file: `bribebank-frontend/public/release-notes.json`.
@@ -52,6 +55,7 @@ Use this checklist to make feature work decision-complete and documentation-safe
 - Confirm no direct component `fetch()` calls were added.
 - Confirm setup instructions still work from clean clone.
 - Confirm release notes have been reviewed/updated when release-impacting changes were made.
+- Confirm auth/recovery operational commands still match repo scripts and paths.
 
 ## 7. Suggested command set
 Run from repo root:

@@ -282,6 +282,12 @@ export const storageService = {
     });
 
     if (!res.ok) {
+      if (res.status === 401) {
+        const body = await res.json().catch(() => null);
+        if (body?.error === "SESSION_STALE") {
+          throw new Error("SESSION_STALE");
+        }
+      }
       // Token invalid / expired
       throw new Error("SESSION_INVALID");
     }
@@ -305,6 +311,65 @@ export const storageService = {
 
     localStorage.setItem(SESSION_KEY, JSON.stringify(sessionUser));
     return sessionUser;
+  },
+
+  getRecoveryKeyStatus: async (): Promise<{ configured: boolean; updatedAt?: string | null }> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const res = await fetch(apiUrl("/auth/recovery-key/status"), {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.error || "Failed to load recovery key status");
+    }
+
+    return await res.json();
+  },
+
+  regenerateRecoveryKey: async (): Promise<{ recoveryKey: string; updatedAt: string }> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const res = await fetch(apiUrl("/auth/recovery-key/regenerate"), {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.error || "Failed to regenerate recovery key");
+    }
+
+    return await res.json();
+  },
+
+  resetForgottenPassword: async (
+    username: string,
+    recoveryKey: string,
+    newPassword: string
+  ): Promise<{ newRecoveryKey: string; rotatedAt: string }> => {
+    const res = await fetch(apiUrl("/auth/forgot-password/reset"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: username.trim().toLowerCase(),
+        recoveryKey: recoveryKey.trim().toUpperCase(),
+        newPassword,
+      }),
+    });
+
+    const body = await res.json().catch(() => null);
+    if (!res.ok) {
+      throw new Error(body?.error || "Failed to reset forgotten password");
+    }
+
+    return {
+      newRecoveryKey: body.newRecoveryKey,
+      rotatedAt: body.rotatedAt,
+    };
   },
 
 

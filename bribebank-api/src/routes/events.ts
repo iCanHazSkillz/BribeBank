@@ -2,14 +2,14 @@
 import { Router, Request, Response } from "express";
 import jwt from "jsonwebtoken";
 import { config } from "../config.js";
-import { PrismaClient } from "@prisma/client";
 import { addClient, removeClient } from "../realtime/eventBus.js";
+import { prisma } from "../lib/prisma.js";
 
 const router = Router();
-const prisma = new PrismaClient();
 
 interface JwtPayload {
   userId: string;
+  sessionVersion?: number;
   iat: number;
   exp: number;
 }
@@ -28,13 +28,20 @@ router.get("/", async (req: Request, res: Response) => {
     return res.status(401).json({ error: "Invalid token" });
   }
 
+  if (typeof decoded.sessionVersion !== "number") {
+    return res.status(401).json({ error: "SESSION_STALE" });
+  }
+
   const user = await prisma.user.findUnique({
     where: { id: decoded.userId },
-    select: { id: true, familyId: true },
+    select: { id: true, familyId: true, sessionVersion: true },
   });
 
   if (!user || !user.familyId) {
     return res.status(403).json({ error: "User has no family" });
+  }
+  if (user.sessionVersion !== decoded.sessionVersion) {
+    return res.status(401).json({ error: "SESSION_STALE" });
   }
 
   // SSE headers
