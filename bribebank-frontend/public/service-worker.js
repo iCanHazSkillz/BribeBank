@@ -3,6 +3,7 @@
 // Dynamic versioned cache name - replaced at build time with timestamp
 // Format: bribebank-static-TIMESTAMP
 const CACHE_NAME = "bribebank-static-{{BUILD_TIMESTAMP}}";
+const SW_BUILD_ID = "{{BUILD_TIMESTAMP}}";
 
 // Which files (at minimum) to cache on install.
 // You can expand this (CSS, fonts, etc.) later or let Workbox handle it.
@@ -38,7 +39,8 @@ self.addEventListener("activate", (event) => {
         clients.forEach((client) => {
           client.postMessage({
             type: 'SW_UPDATE_AVAILABLE',
-            message: 'A new version of the app is available. Please refresh.'
+            message: 'A new version of the app is available. Please refresh.',
+            buildId: SW_BUILD_ID
           });
         });
       });

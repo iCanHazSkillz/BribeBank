@@ -55,6 +55,25 @@ BribeBank is a family rewards platform with:
 - Frontend API env var is `VITE_API_URL`.
 - Backend CORS origins are currently configured directly in `bribebank-api/src/server.ts` (not env-driven today).
 - JWT secret and database URL are loaded from backend env.
+- Frontend build metadata constants are injected at build time:
+  - `__APP_BUILD_ID__` (unique build id)
+  - `__APP_RELEASE_VERSION__` (semantic release identifier)
+
+## AI-Managed Release Notes Policy
+- Canonical release notes file: `bribebank-frontend/public/release-notes.json`.
+- Release notes are AI-managed by default for this repository.
+- When a change warrants build versioning, the implementing agent must review and update release notes in the same change set.
+- Trigger criteria for required release-notes update:
+  1. User-visible feature, UX, or behavior changes in frontend.
+  2. Update to API contract or auth/permission behavior that affects app flows.
+  3. Push/SSE/history lifecycle behavior changes surfaced to users.
+  4. Significant bug fixes that alter expected outcomes.
+- Per-release maintenance rules:
+  1. Ensure `releases[__APP_RELEASE_VERSION__]` exists with `title`, `date`, `features[]`, `improvements[]`, `fixes[]`.
+  2. Keep bullet points concise, user-facing, and factual.
+  3. Update `latest` to mirror the newest release entry.
+  4. If release version changes, add a new version key instead of overwriting prior release history.
+  5. If release notes are intentionally unchanged, document the reason in PR/task notes.
 
 ## Change Workflow (Documentation-Aware)
 For any feature or behavior change:
@@ -67,6 +86,7 @@ For any feature or behavior change:
    - `docs/agent/contracts-rest.md`
    - `docs/agent/contracts-events.md`
    - `docs/agent/feature-capability-matrix.md`
+   - `bribebank-frontend/public/release-notes.json` (when trigger criteria above apply)
    - this file if ownership or architecture conventions changed
 
 ## Known Reality Checks

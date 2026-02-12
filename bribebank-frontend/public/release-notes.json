@@ -1,0 +1,38 @@
+{
+  "latest": {
+    "title": "New year, new features! What's new in BribeBank",
+    "date": "2026-02-12",
+    "features": [
+      "Parents can now optionally notify selected family members when creating a new store item.",
+      "Approvals and wallet history now show task lifecycle cards with clearer reward linkage.",
+      "App updates now apply automatically when a new service-worker build is detected."
+    ],
+    "improvements": [
+      "Task deadline UX is now opt-in with a disabled-by-default toggle and clearer input flow.",
+      "Added a one-time 'BribeBank was updated' modal with categorized release highlights."
+    ],
+    "fixes": [
+      "Corrected task lifecycle status handling for denied-without-resubmit outcomes in wallet history.",
+      "Stabilized update delivery by replacing manual update confirmation with immediate automatic refresh."
+    ]
+  },
+  "releases": {
+    "0.0.0": {
+      "title": "New year, new features! What's new in BribeBank",
+      "date": "2026-02-12",
+      "features": [
+        "Parents can now optionally notify selected family members when creating a new store item.",
+        "Approvals and wallet history now show task lifecycle cards with clearer reward linkage.",
+        "App updates now apply automatically when a new service-worker build is detected."
+      ],
+      "improvements": [
+        "Task deadline UX is now opt-in with a disabled-by-default toggle and clearer input flow.",
+        "Added a one-time 'BribeBank was updated' modal with categorized release highlights."
+      ],
+      "fixes": [
+        "Corrected task lifecycle status handling for denied-without-resubmit outcomes in wallet history.",
+        "Stabilized update delivery by replacing manual update confirmation with immediate automatic refresh."
+      ]
+    }
+  }
+}

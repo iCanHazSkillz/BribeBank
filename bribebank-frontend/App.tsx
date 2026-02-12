@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { User, UserRole, BountyStatus, AssignedBounty, AssignedPrize, PrizeStatus } from "./types";
 import { storageService } from "./services/storageService";
 import { LoginView } from "./components/LoginView";
@@ -12,6 +12,29 @@ import { API_BASE } from "./config";
 
 type View = "wallet" | "admin" | "login";
 type WalletTab = "wallet" | "tasks" | "store" | "history";
+type ReleaseNotesEntry = {
+  title?: string;
+  date?: string;
+  features?: string[];
+  improvements?: string[];
+  fixes?: string[];
+};
+
+type ReleaseNotesPayload = {
+  latest?: ReleaseNotesEntry;
+  releases?: Record<string, ReleaseNotesEntry>;
+};
+
+const UPDATE_RELOAD_GUARD_KEY = "bb_update_reload_in_progress";
+const LAST_SEEN_BUILD_ID_KEY = "bb_last_seen_build_id";
+const UPDATE_MODAL_SEEN_PREFIX = "bb_update_modal_seen::";
+const RELOAD_GUARD_WINDOW_MS = 15000;
+const FALLBACK_RELEASE_NOTES: ReleaseNotesEntry = {
+  title: "BribeBank was updated",
+  features: ["New app updates are now applied automatically."],
+  improvements: ["Update summaries are now shown after successful upgrades."],
+  fixes: ["General bug fixes and stability improvements."]
+};
 
 const isWalletTab = (v: string | null): v is WalletTab =>
   v === "wallet" || v === "tasks" || v === "store" || v === "history";
@@ -22,7 +45,8 @@ const App: React.FC = () => {
   const [view, setView] = useState<View>("login");
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
-  const [updateAvailable, setUpdateAvailable] = useState(false);
+  const [showUpdateModal, setShowUpdateModal] = useState(false);
+  const [releaseNotes, setReleaseNotes] = useState<ReleaseNotesEntry>(FALLBACK_RELEASE_NOTES);
   const [walletBadgeCount, setWalletBadgeCount] = useState(0);
   const [adminBadgeCount, setAdminBadgeCount] = useState(0);
 
@@ -116,7 +140,79 @@ const App: React.FC = () => {
     }
   };
 
+  const triggerAutoReload = useCallback((reason: string) => {
+    const lastSeenBuildId = localStorage.getItem(LAST_SEEN_BUILD_ID_KEY);
+    if (!lastSeenBuildId) {
+      // First install session: do not force a reload.
+      return;
+    }
+
+    const now = Date.now();
+    const guardRaw = sessionStorage.getItem(UPDATE_RELOAD_GUARD_KEY);
+    const guardTimestamp = guardRaw ? Number(guardRaw) : 0;
+
+    if (Number.isFinite(guardTimestamp) && now - guardTimestamp < RELOAD_GUARD_WINDOW_MS) {
+      return;
+    }
+
+    sessionStorage.setItem(UPDATE_RELOAD_GUARD_KEY, String(now));
+    console.log(`[App] Auto reloading for app update (${reason})`);
+    window.location.reload();
+  }, []);
+
+  const dismissUpdateModal = useCallback(() => {
+    localStorage.setItem(`${UPDATE_MODAL_SEEN_PREFIX}${__APP_RELEASE_VERSION__}`, "true");
+    setShowUpdateModal(false);
+  }, []);
+
   useEffect(() => {
+    const guardRaw = sessionStorage.getItem(UPDATE_RELOAD_GUARD_KEY);
+    if (guardRaw) {
+      const guardTimestamp = Number(guardRaw);
+      if (!Number.isFinite(guardTimestamp) || Date.now() - guardTimestamp >= RELOAD_GUARD_WINDOW_MS) {
+        sessionStorage.removeItem(UPDATE_RELOAD_GUARD_KEY);
+      }
+    }
+
+    const maybeShowUpdatedModal = async () => {
+      const lastSeenBuildId = localStorage.getItem(LAST_SEEN_BUILD_ID_KEY);
+      if (!lastSeenBuildId) {
+        localStorage.setItem(LAST_SEEN_BUILD_ID_KEY, __APP_BUILD_ID__);
+        return;
+      }
+
+      if (lastSeenBuildId === __APP_BUILD_ID__) {
+        return;
+      }
+
+      localStorage.setItem(LAST_SEEN_BUILD_ID_KEY, __APP_BUILD_ID__);
+      const modalSeenKey = `${UPDATE_MODAL_SEEN_PREFIX}${__APP_RELEASE_VERSION__}`;
+      if (localStorage.getItem(modalSeenKey)) {
+        return;
+      }
+
+      try {
+        const response = await fetch("/release-notes.json", { cache: "no-store" });
+        if (!response.ok) {
+          setReleaseNotes(FALLBACK_RELEASE_NOTES);
+          setShowUpdateModal(true);
+          return;
+        }
+
+        const payload = (await response.json()) as ReleaseNotesPayload;
+        const selected =
+          payload?.releases?.[__APP_RELEASE_VERSION__] ||
+          payload?.latest ||
+          FALLBACK_RELEASE_NOTES;
+        setReleaseNotes(selected);
+      } catch (err) {
+        console.warn("[App] Failed to load release notes", err);
+        setReleaseNotes(FALLBACK_RELEASE_NOTES);
+      }
+
+      setShowUpdateModal(true);
+    };
+
     const init = async () => {
       const stored = storageService.getCurrentUser();
 
@@ -139,6 +235,7 @@ const App: React.FC = () => {
     };
 
     void init();
+    void maybeShowUpdatedModal();
 
     // Check for service worker updates on load
     if ('serviceWorker' in navigator) {
@@ -153,8 +250,7 @@ const App: React.FC = () => {
             if (newWorker) {
               newWorker.addEventListener('statechange', () => {
                 if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                  // There's a new service worker waiting to activate
-                  setUpdateAvailable(true);
+                  triggerAutoReload("updatefound-installed");
                 }
               });
             }
@@ -162,12 +258,12 @@ const App: React.FC = () => {
 
           // Also check if there's already a waiting service worker
           if (registration.waiting) {
-            setUpdateAvailable(true);
+            triggerAutoReload("registration-waiting");
           }
         }
       });
     }
-  }, []);
+  }, [triggerAutoReload]);
 
   const fetchBadgeCounts = async () => {
     if (!currentUser) return;
@@ -236,8 +332,8 @@ const App: React.FC = () => {
     // Listen for service worker updates
     const handleSWMessage = (event: MessageEvent) => {
       if (event.data?.type === 'SW_UPDATE_AVAILABLE') {
-        console.log('[App] Service worker update available:', event.data.message);
-        setUpdateAvailable(true);
+        console.log('[App] Service worker update available:', event.data.message, event.data.buildId);
+        triggerAutoReload("sw-message");
       }
     };
 
@@ -250,7 +346,7 @@ const App: React.FC = () => {
       document.removeEventListener("visibilitychange", handleVisibility);
       document.removeEventListener("mousedown", handleClickOutside);
     };
-  }, [currentUser?.id, showUserMenu, showNotifications]);
+  }, [currentUser?.id, showUserMenu, showNotifications, triggerAutoReload]);
 
   useEffect(() => {
     if (currentUser) {
@@ -283,12 +379,6 @@ const App: React.FC = () => {
     }
   }, [currentUser?.id]);
 
-  const handleUpdateClick = () => {
-    // Simply reload the page - the service worker will serve the new version
-    // Local storage and dark mode preference will be preserved
-    window.location.reload();
-  };
-
   const handleLogin = async (user: User) => {
     setCurrentUser(user);
 
@@ -315,8 +405,70 @@ const App: React.FC = () => {
     }
   };
 
+  const updateModal = showUpdateModal ? (
+    <div className="fixed inset-0 z-[110] bg-black/60 flex items-center justify-center p-4">
+      <div className="w-full max-w-xl bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+        <div className="bg-gradient-to-r from-emerald-500 to-teal-600 px-6 py-5 text-white">
+          <h2 className="text-2xl font-bold">BribeBank was updated</h2>
+          <p className="mt-1 text-emerald-50 text-sm">
+            {releaseNotes.title || "Latest improvements are now available."}
+            {releaseNotes.date ? ` (${releaseNotes.date})` : ""}
+          </p>
+        </div>
+        <div className="p-6 space-y-5">
+          <section>
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-200 mb-2">New Features</h3>
+            <ul className="space-y-2 text-sm text-gray-700 dark:text-gray-300">
+              {(releaseNotes.features?.length ? releaseNotes.features : ["General feature enhancements."]).map((item) => (
+                <li key={`feature-${item}`} className="flex items-start gap-2">
+                  <span className="text-emerald-500 mt-0.5">•</span>
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+          <section>
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-200 mb-2">Improvements</h3>
+            <ul className="space-y-2 text-sm text-gray-700 dark:text-gray-300">
+              {(releaseNotes.improvements?.length ? releaseNotes.improvements : ["General UX and performance improvements."]).map((item) => (
+                <li key={`improvement-${item}`} className="flex items-start gap-2">
+                  <span className="text-teal-500 mt-0.5">•</span>
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+          <section>
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-200 mb-2">Bug Fixes</h3>
+            <ul className="space-y-2 text-sm text-gray-700 dark:text-gray-300">
+              {(releaseNotes.fixes?.length ? releaseNotes.fixes : ["General stability fixes."]).map((item) => (
+                <li key={`fix-${item}`} className="flex items-start gap-2">
+                  <span className="text-cyan-500 mt-0.5">•</span>
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+          <div className="pt-2 flex justify-end">
+            <button
+              onClick={dismissUpdateModal}
+              className="px-5 py-2.5 rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-semibold hover:opacity-95 transition-opacity"
+            >
+              Got it
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
   if (!currentUser || view === "login") {
-    return <LoginView onLogin={handleLogin} />;
+    return (
+      <>
+        <LoginView onLogin={handleLogin} />
+        {updateModal}
+      </>
+    );
   }
 
   return (
@@ -428,30 +580,10 @@ const App: React.FC = () => {
         </div>
       </header>
       
-      {/* Update Available Banner */}
-      {updateAvailable && (
-        <div className="fixed top-0 left-0 right-0 bg-gradient-to-r from-blue-500 to-indigo-600 text-white px-4 py-3 z-40 lg:top-16">
-          <div className="max-w-md lg:max-w-none mx-auto flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="flex-shrink-0">
-                <div className="flex items-center justify-center h-6 w-6 rounded-md bg-white/20">
-                  <span className="text-sm font-bold">✓</span>
-                </div>
-              </div>
-              <p className="font-medium text-sm">A new version is available</p>
-            </div>
-            <button
-              onClick={handleUpdateClick}
-              className="flex-shrink-0 px-4 py-1.5 bg-white text-blue-600 font-semibold rounded-lg hover:bg-blue-50 transition-colors text-sm"
-            >
-              Update Now
-            </button>
-          </div>
-        </div>
-      )}
+      {updateModal}
       
       {/* Content Area */}
-      <main className={`h-full overflow-y-auto no-scrollbar lg:pt-16 ${updateAvailable ? 'pt-16 lg:pt-24' : ''}`}>
+      <main className="h-full overflow-y-auto no-scrollbar lg:pt-16">
         {view === "admin" && currentUser.role === UserRole.ADMIN && (
           <AdminView 
             currentUser={currentUser} 

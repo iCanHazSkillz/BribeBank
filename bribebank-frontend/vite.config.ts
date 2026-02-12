@@ -6,6 +6,9 @@ import { readFileSync, writeFileSync } from 'fs';
 
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
+    const packageJson = JSON.parse(readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8')) as { version?: string };
+    const buildId = Date.now().toString();
+    const releaseVersion = env.RELEASE_VERSION || packageJson.version || '0.0.0';
     
     // Plugin to inject build timestamp into service worker
     const swTimestampPlugin = {
@@ -14,11 +17,10 @@ export default defineConfig(({ mode }) => {
       writeBundle() {
         try {
           const swPath = 'dist/service-worker.js';
-          const timestamp = Date.now();
           let swContent = readFileSync(swPath, 'utf-8');
-          swContent = swContent.replace('{{BUILD_TIMESTAMP}}', timestamp.toString());
+          swContent = swContent.replace(/{{BUILD_TIMESTAMP}}/g, buildId);
           writeFileSync(swPath, swContent);
-          console.log(`✓ Service Worker cache busted with timestamp: ${timestamp}`);
+          console.log(`✓ Service Worker cache busted with build id: ${buildId}`);
         } catch (error: any) {
           console.warn(`⚠ Could not update service worker timestamp:`, error.message);
         }
@@ -33,7 +35,9 @@ export default defineConfig(({ mode }) => {
       plugins: [react(), tailwindcss(), swTimestampPlugin],
       define: {
         'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-        'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
+        'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
+        __APP_BUILD_ID__: JSON.stringify(buildId),
+        __APP_RELEASE_VERSION__: JSON.stringify(releaseVersion)
       },
       resolve: {
         alias: {

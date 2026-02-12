@@ -29,14 +29,31 @@ Use this checklist to make feature work decision-complete and documentation-safe
 - Capability status updates in `docs/agent/feature-capability-matrix.md`.
 - High-level context updates in `.github/copilot-instructions.md` and `README.md`.
 
-## 5. Validation checklist
+## 5. Release versioning and notes (AI-managed)
+- Canonical notes file: `bribebank-frontend/public/release-notes.json`.
+- Default owner: implementing AI agent in the same change set.
+- If change is user-visible or behavior-impacting, release notes update is required.
+- Required checklist per release:
+  1. Confirm release version source (`RELEASE_VERSION` env override or frontend `package.json` version).
+  2. Add/update `releases.<version>` with:
+     - `title`
+     - `date` (`YYYY-MM-DD`)
+     - `features[]`
+     - `improvements[]`
+     - `fixes[]`
+  3. Update `latest` to match the newest release.
+  4. Keep entries short and user-facing (no internal-only implementation detail bullets).
+  5. Preserve older version entries; do not delete prior notes.
+
+## 6. Validation checklist
 - Confirm env variable names used in docs match code and compose.
 - Confirm route paths/methods in docs match route modules.
 - Confirm SSE unions align backend and frontend.
 - Confirm no direct component `fetch()` calls were added.
 - Confirm setup instructions still work from clean clone.
+- Confirm release notes have been reviewed/updated when release-impacting changes were made.
 
-## 6. Suggested command set
+## 7. Suggested command set
 Run from repo root:
 
 ```bash
@@ -44,9 +61,10 @@ rg "VITE_API_URL|DATABASE_URL|JWT_SECRET" README.md .env.example bribebank-front
 rg "router\.(get|post|put|patch|delete)" bribebank-api/src/routes
 rg "type:" bribebank-api/src/types/sseEvents.ts bribebank-frontend/types/sseEvents.ts
 rg "fetch\(" bribebank-frontend/components bribebank-frontend/services
+rg "\"latest\"|\"releases\"|\"features\"|\"improvements\"|\"fixes\"" bribebank-frontend/public/release-notes.json
 ```
 
-## 7. Acceptance criteria template
+## 8. Acceptance criteria template
 - Behavior works for authorized roles only.
 - API error states are explicit and surfaced.
 - Required side effects occur (SSE/push/history/notification).
