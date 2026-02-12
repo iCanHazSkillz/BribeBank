@@ -8,14 +8,11 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm install
 
-# COPY prisma schema BEFORE generating the client
-COPY prisma ./prisma
-
-# Generate Prisma Client
-RUN npx prisma generate
-
-# Copy source code AFTER prisma generate
+# Copy full source first so Prisma client is generated from the exact build context
 COPY . .
+
+# Generate Prisma Client from current schema
+RUN npx prisma generate
 
 # Build TS
 RUN npm run build
