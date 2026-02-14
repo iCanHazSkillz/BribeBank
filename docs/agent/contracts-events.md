@@ -41,10 +41,11 @@ Frontend mirror: `bribebank-frontend/types/sseEvents.ts`
   - `familyId`
   - `reason`: union-backed reason code
   - `timestamp`
-- Important drift warning:
-  - Backend includes reasons such as `TASK_DENIED` and `CONVERSION_RATE_UPDATED`.
-  - Frontend union currently omits at least those two values.
-  - Keep both unions synchronized when editing reasons.
+- Current reasons include task and lifecycle reasons such as:
+  - `TASK_ASSIGNED`, `TASK_ACCEPTED`, `TASK_VERIFIED`, `TASK_DENIED`, `TASK_REJECTED`, `TASK_CANCELLED`
+  - `EARNED_TICKETS`, `RECEIVED_TICKETS`
+  - `WHEEL_UPDATED`, `WHEEL_RESET`, `WHEEL_SPIN`
+  - `CONVERSION_RATE_UPDATED`
 
 ### `TICKETS_GIVEN`
 - Trigger: parent grants tickets.

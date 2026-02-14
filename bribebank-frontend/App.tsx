@@ -69,7 +69,8 @@ const App: React.FC = () => {
     const params = new URLSearchParams(window.location.search);
 
     const desiredView = params.get("view"); // "admin" | "wallet" | null
-    const adminTab = params.get("adminTab"); // e.g. "approvals"
+    const rawAdminTab = params.get("adminTab"); // e.g. "manage" | legacy "approvals"
+    const adminTab = rawAdminTab === "approvals" ? "manage" : rawAdminTab;
     const rawWalletTab = params.get("walletTab") || params.get("tab");
     const walletTab = isWalletTab(rawWalletTab) ? rawWalletTab : undefined;
 

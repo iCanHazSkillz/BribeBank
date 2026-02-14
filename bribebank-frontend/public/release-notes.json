@@ -1,15 +1,12 @@
 {
   "latest": {
-    "title": "New year, new features! What's new in BribeBank",
-    "date": "2026-02-12",
+    "title": "Better, faster, stronger: BribeBank's latest update is here!",
+    "date": "2026-02-13",
     "features": [
-      "Parents can now optionally notify selected family members when creating a new store item.",
-      "Approvals and wallet history now show task lifecycle cards with clearer reward linkage.",
-      "Added parent forgot-password recovery using a family recovery key.",
-      "App updates now apply automatically when a new service-worker build is detected."
+      "Admin Approvals has been refactored into a Manage tab with unified task/reward management.",
+      "Parents and children can now cancel unverified tasks to close stale assignments cleanly."
     ],
     "improvements": [
-      "Task deadline UX is now opt-in with a disabled-by-default toggle and clearer input flow.",
       "Parents are now prompted to set up a family recovery key to avoid account lockouts.",
       "Added a one-time 'BribeBank was updated' modal with categorized release highlights."
     ],
@@ -17,23 +14,22 @@
       "Password changes now immediately invalidate stale sessions so old tokens can no longer be used.",
       "Users are now automatically returned to login as soon as a stale session is detected.",
       "Fixed mobile update modal clipping by making update dialogs viewport-safe and scrollable.",
+      "FCFS tasks now close lifecycle history for users who missed the claim, including who claimed first.",
+      "Admin and wallet history now use one newest-first activity feed instead of split lifecycle/legacy sections.",
       "Corrected task lifecycle status handling for denied-without-resubmit outcomes in wallet history.",
       "Added a self-hoster emergency CLI recovery path when no family recovery key is available.",
       "Stabilized update delivery by replacing manual update confirmation with immediate automatic refresh."
     ]
   },
   "releases": {
-    "0.0.0": {
-      "title": "New year, new features! What's new in BribeBank",
-      "date": "2026-02-12",
+    "0.1.0": {
+      "title": "Better, faster, stronger: BribeBank's latest update is here!",
+      "date": "2026-02-13",
       "features": [
-        "Parents can now optionally notify selected family members when creating a new store item.",
-        "Approvals and wallet history now show task lifecycle cards with clearer reward linkage.",
-        "Added parent forgot-password recovery using a family recovery key.",
-        "App updates now apply automatically when a new service-worker build is detected."
+        "Admin Approvals has been refactored into a Manage tab with unified task/reward management.",
+        "Parents and children can now cancel unverified tasks to close stale assignments cleanly."
       ],
       "improvements": [
-        "Task deadline UX is now opt-in with a disabled-by-default toggle and clearer input flow.",
         "Parents are now prompted to set up a family recovery key to avoid account lockouts.",
         "Added a one-time 'BribeBank was updated' modal with categorized release highlights."
       ],
@@ -41,6 +37,8 @@
         "Password changes now immediately invalidate stale sessions so old tokens can no longer be used.",
         "Users are now automatically returned to login as soon as a stale session is detected.",
         "Fixed mobile update modal clipping by making update dialogs viewport-safe and scrollable.",
+        "FCFS tasks now close lifecycle history for users who missed the claim, including who claimed first.",
+        "Admin and wallet history now use one newest-first activity feed instead of split lifecycle/legacy sections.",
         "Corrected task lifecycle status handling for denied-without-resubmit outcomes in wallet history.",
         "Added a self-hoster emergency CLI recovery path when no family recovery key is available.",
         "Stabilized update delivery by replacing manual update confirmation with immediate automatic refresh."

@@ -47,6 +47,7 @@ Source of truth: route modules in `bribebank-api/src/routes/*` and wiring in `br
 - `POST /bounty-assignments/:id/complete` (auth)
 - `POST /bounty-assignments/:id/verify` (auth)
 - `POST /bounty-assignments/:id/deny` (auth)
+- `POST /bounty-assignments/:id/cancel` (auth; parent any unverified assignment, child own unverified assignment)
 - `DELETE /bounty-assignments/:id` (auth)
 
 ### Users

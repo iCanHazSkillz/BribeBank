@@ -1141,6 +1141,24 @@ export const storageService = {
     }
   },
 
+  cancelBountyAssignment: async (id: string): Promise<void> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const res = await fetch(apiUrl(`/bounty-assignments/${id}/cancel`), {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      console.error("cancelBountyAssignment error:", res.status, body);
+      throw new Error(body?.error || "Failed to cancel bounty assignment");
+    }
+  },
+
   deleteBountyAssignment: async (id: string): Promise<void> => {
     const token = getAuthToken();
     if (!token) throw new Error("Not authenticated");

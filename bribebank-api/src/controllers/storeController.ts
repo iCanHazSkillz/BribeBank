@@ -352,7 +352,7 @@ export const purchaseStoreItem = async (req: Request, res: Response) => {
           type: "STORE_PURCHASE",
           familyId: user.familyId,
           assignmentId: assignment.id,
-          url: "/?view=admin&adminTab=approvals",
+          url: "/?view=admin&adminTab=manage",
         });
       } catch (pushErr) {
         console.warn("purchaseStoreItem push failed for parent:", parent.id, pushErr);

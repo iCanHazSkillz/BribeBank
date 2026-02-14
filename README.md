@@ -17,7 +17,7 @@ The app supports real-time updates through SSE and web push notifications.
 - Family and user management (parent/child roles)
 - Parent password recovery via family recovery key
 - Reward template CRUD and assignment
-- Bounty template CRUD, assignment, verification, and denial
+- Bounty template CRUD, assignment, verification, denial, and cancellation
 - Optional task deadlines and deadline warning notifications
 - Optional photo proof for task completion
 - Ticket grants and conversion-rate configuration
@@ -136,6 +136,7 @@ docker compose up -d
 - Backend CORS allowlist is currently hardcoded in `bribebank-api/src/server.ts`.
 - Backend `JWT_SECRET` and `DATABASE_URL` are loaded through backend env.
 - Password changes immediately invalidate old sessions by bumping a server-side `sessionVersion`.
+- Admin deep links support both `adminTab=manage` and legacy `adminTab=approvals` (mapped to Manage).
 
 ## Self-Hoster Emergency Recovery
 If a parent loses both password and family recovery key, use one of the following methods.

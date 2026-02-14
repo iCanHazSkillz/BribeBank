@@ -20,6 +20,10 @@ type TaskLifecycleMetadata = {
   linkedAction?: string;
   denialMessage?: string;
   allowResubmit?: boolean;
+  cancelledByUserId?: string;
+  cancelledByName?: string;
+  fcfsClaimedByUserId?: string;
+  fcfsClaimedByName?: string;
 };
 
 const buildTaskLifecycleMetadata = (
@@ -511,6 +515,36 @@ export const acceptAssignedBounty = async (req: Request, res: Response) => {
         fcfsLoserUserIds = others.map((o) => o.userId);
 
         if (others.length) {
+          const fcfsLosers = await tx.user.findMany({
+            where: { id: { in: fcfsLoserUserIds } },
+            select: { id: true, displayName: true, username: true },
+          });
+
+          for (const loser of fcfsLosers) {
+            const loserName = loser.displayName || loser.username || "Child";
+            await addHistoryEvent(
+              {
+                familyId: assignment.familyId,
+                userId: loser.id,
+                userName: loserName,
+                title,
+                emoji,
+                action: "TASK_MISSED_FCFS",
+                assignerName: childName,
+                metadata: buildTaskLifecycleMetadata({
+                  bountyAssignmentId: others.find((o) => o.userId === loser.id)?.id || assignment.id,
+                  bountyId: bounty.id,
+                  rewardType: bounty.rewardType === "TICKETS" ? "TICKETS" : "CUSTOM",
+                  rewardValue: bounty.rewardValue,
+                  linkedAction: "TASK_MISSED_FCFS",
+                  fcfsClaimedByUserId: user.id,
+                  fcfsClaimedByName: childName,
+                }),
+              },
+              tx
+            );
+          }
+
           await tx.bountyAssignment.deleteMany({
             where: { id: { in: others.map((o) => o.id) } },
           });
@@ -785,8 +819,8 @@ export const completeAssignedBounty = async (req: Request, res: Response) => {
             assignmentId: assignment.id,
             childId: child.id,
 
-            // Deep link to parent approvals
-            url: "/?view=admin&adminTab=approvals",
+            // Deep link to parent manage tab
+            url: "/?view=admin&adminTab=manage",
           })
         )
       );
@@ -1279,6 +1313,154 @@ export const denyAssignedBounty = async (req: Request, res: Response) => {
     });
   } catch (err) {
     console.error("denyAssignedBounty error:", err);
+    return res.status(500).json({ error: "INTERNAL_SERVER_ERROR" });
+  }
+};
+
+// POST /bounty-assignments/:id/cancel
+export const cancelAssignedBounty = async (req: Request, res: Response) => {
+  const { id } = req.params;
+  if (!id) {
+    return res.status(400).json({ error: "MISSING_ASSIGNMENT_ID" });
+  }
+
+  try {
+    const assignment = await prisma.bountyAssignment.findUnique({
+      where: { id },
+      include: {
+        bounty: true,
+        user: true,
+      },
+    });
+
+    if (!assignment) {
+      return res.status(404).json({ error: "NOT_FOUND" });
+    }
+
+    const actor = await assertFamilyMember(req, assignment.familyId);
+    const bounty = assignment.bounty;
+    const child = assignment.user;
+
+    if (!bounty || !child) {
+      return res.status(500).json({ error: "BOUNTY_OR_CHILD_MISSING" });
+    }
+
+    if (assignment.status === BountyStatus.VERIFIED) {
+      return res.status(400).json({ error: "CANNOT_CANCEL_VERIFIED_TASK" });
+    }
+
+    const canCancel =
+      actor.role === Role.PARENT ||
+      (actor.role === Role.CHILD && actor.id === assignment.userId);
+    if (!canCancel) {
+      return res.status(403).json({ error: "FORBIDDEN" });
+    }
+
+    const actorName = actor.displayName || actor.username || "User";
+    const childName = child.displayName || child.username || "Child";
+    const isParentActor = actor.role === Role.PARENT;
+    const familyId = assignment.familyId;
+
+    let parentIds: string[] = [];
+
+    await prisma.$transaction(async (tx) => {
+      await tx.bountyAssignment.delete({ where: { id } });
+
+      await addHistoryEvent(
+        {
+          familyId,
+          userId: assignment.userId,
+          userName: childName,
+          title: bounty.title,
+          emoji: bounty.emoji || "🧹",
+          action: "TASK_CANCELLED",
+          assignerName: actorName,
+          metadata: buildTaskLifecycleMetadata({
+            bountyAssignmentId: assignment.id,
+            bountyId: bounty.id,
+            rewardType: bounty.rewardType === "TICKETS" ? "TICKETS" : "CUSTOM",
+            rewardValue: bounty.rewardValue,
+            linkedAction: "TASK_CANCELLED",
+            cancelledByUserId: actor.id,
+            cancelledByName: actorName,
+          }),
+        },
+        tx
+      );
+
+      if (isParentActor) {
+        await addNotification(
+          {
+            userId: child.id,
+            message: `${actorName} cancelled task "${bounty.title}".`,
+          },
+          tx
+        );
+      } else {
+        const parents = await tx.user.findMany({
+          where: { familyId, role: Role.PARENT },
+          select: { id: true },
+        });
+        parentIds = parents.map((p) => p.id);
+        await Promise.all(
+          parentIds.map((parentId) =>
+            addNotification(
+              {
+                userId: parentId,
+                message: `${actorName} cancelled task "${bounty.title}".`,
+              },
+              tx
+            )
+          )
+        );
+      }
+    });
+
+    try {
+      if (isParentActor) {
+        await sendPushToUser(child.id, {
+          title: "Task cancelled",
+          body: `${actorName} cancelled: ${bounty.title}`,
+          tag: "task-cancelled",
+          type: "TASK_CANCELLED",
+          familyId,
+          assignmentId: assignment.id,
+          url: "/?view=wallet&walletTab=tasks",
+        });
+      } else {
+        await Promise.all(
+          parentIds.map((parentId) =>
+            sendPushToUser(parentId, {
+              title: "Task cancelled",
+              body: `${actorName} cancelled: ${bounty.title}`,
+              tag: "task-cancelled",
+              type: "TASK_CANCELLED",
+              familyId,
+              assignmentId: assignment.id,
+              url: "/?view=admin&adminTab=manage",
+            })
+          )
+        );
+      }
+    } catch (pushErr) {
+      console.warn("cancelAssignedBounty push failed:", pushErr);
+    }
+
+    const event: SseEvent = {
+      type: "WALLET_UPDATE",
+      familyId,
+      reason: "TASK_CANCELLED",
+      timestamp: Date.now(),
+    };
+    broadcastToFamily(familyId, event);
+
+    return res.status(204).send();
+  } catch (err: any) {
+    if (err && typeof err === "object" && "status" in err) {
+      return res.status(err.status).json({ error: err.error });
+    }
+
+    console.error("cancelAssignedBounty error:", err);
     return res.status(500).json({ error: "INTERNAL_SERVER_ERROR" });
   }
 };

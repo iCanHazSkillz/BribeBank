@@ -28,6 +28,11 @@ type ParsedTaskLifecycleMetadata = {
   rewardValue?: string;
   linkedAction?: string;
   denialMessage?: string;
+  allowResubmit?: boolean;
+  cancelledByUserId?: string;
+  cancelledByName?: string;
+  fcfsClaimedByUserId?: string;
+  fcfsClaimedByName?: string;
 };
 
 const parseTaskLifecycleMetadata = (
@@ -58,20 +63,29 @@ const TASK_ACTION_LABELS: Record<string, string> = {
   TASK_COMPLETED: "Marked complete",
   VERIFIED_TASK: "Task verified",
   DENIED_TASK: "Task denied",
+  TASK_CANCELLED: "Task cancelled",
+  TASK_MISSED_FCFS: "Missed (claimed by another child)",
   TASK_REFUSED: "Task refused",
   TASK_REJECTED_AFTER_DENIAL: "Denied task rejected",
   EARNED_TICKETS: "Tickets awarded",
   TASK_REWARD_GRANTED: "Reward granted",
 };
 
-const getTaskLifecycleStatus = (action: string): string => {
+const getTaskLifecycleStatus = (
+  action: string,
+  metadata?: ParsedTaskLifecycleMetadata
+): string => {
   switch (action) {
     case "VERIFIED_TASK":
     case "TASK_REWARD_GRANTED":
     case "EARNED_TICKETS":
       return "Verified";
     case "DENIED_TASK":
-      return "Denied";
+      return metadata?.allowResubmit === false ? "Cancelled" : "Denied";
+    case "TASK_CANCELLED":
+      return "Cancelled";
+    case "TASK_MISSED_FCFS":
+      return "Missed";
     case "TASK_COMPLETED":
       return "Awaiting review";
     case "TASK_ACCEPTED":
@@ -100,7 +114,7 @@ const PASTEL_COLORS = [
 ];
 
 export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, onUserUpdate, desktopShowNotifications, onDesktopNotificationsToggle }) => {
-  const [tab, setTab] = useState<'assign' | 'approvals' | 'create' | 'users' | 'store'>('assign');
+  const [tab, setTab] = useState<'assign' | 'manage' | 'create' | 'users' | 'store'>('assign');
   const [assignSubTab, setAssignSubTab] = useState<'rewards' | 'bounties' | 'tickets'>('rewards');
 
   // Data State
@@ -433,7 +447,8 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, o
 
     useEffect(() => {
     if (initialTab) {
-      setTab(initialTab as any);
+      const normalizedTab = initialTab === "approvals" ? "manage" : initialTab;
+      setTab(normalizedTab as any);
       refreshData();
     }
   }, [initialTab]);
@@ -850,6 +865,27 @@ const handleBulkAssign = async () => {
           console.error("Failed to deny bounty:", err);
           showToast("Failed to deny task", 'error');
       }
+  };
+
+  const handleCancelTask = async (assignmentId: string) => {
+    const ok = await confirm({
+      title: "Cancel This Task?",
+      message: "Cancel this task and close its lifecycle? No reward will be assigned.",
+      confirmLabel: "Cancel Task",
+      cancelLabel: "Keep Task",
+      destructive: true,
+    });
+
+    if (!ok) return;
+
+    try {
+      await storageService.cancelBountyAssignment(assignmentId);
+      await refreshData();
+      showToast("Task cancelled.", "success");
+    } catch (err) {
+      console.error("Failed to cancel task:", err);
+      showToast("Failed to cancel task", "error");
+    }
   };
 
   // User Management Logic
@@ -1506,6 +1542,12 @@ const handleBulkAssign = async () => {
     }
   });
 
+  const activeUnverifiedAssignmentIds = new Set(
+    bountyAssignments
+      .filter((assignment) => assignment.status !== BountyStatus.VERIFIED)
+      .map((assignment) => assignment.id)
+  );
+
   const recentTaskLifecycles = Array.from(taskLifecycleBuckets.values())
     .map((bucket) => {
       const events = [...bucket.events].sort((a, b) => a.timestamp - b.timestamp);
@@ -1540,7 +1582,10 @@ const handleBulkAssign = async () => {
         ...bucket,
         events,
         latestTimestamp: latestEvent?.timestamp || 0,
-        latestStatus: getTaskLifecycleStatus(latestEvent?.action || "TASK_ASSIGNED"),
+        latestStatus: getTaskLifecycleStatus(
+          latestEvent?.action || "TASK_ASSIGNED",
+          latestEvent?.parsedMetadata
+        ),
         taskTitle:
           events.find((event) => event.action !== "EARNED_TICKETS" && event.action !== "TASK_REWARD_GRANTED")?.title ||
           latestEvent?.title ||
@@ -1552,10 +1597,25 @@ const handleBulkAssign = async () => {
         childName: latestEvent?.userName || "Child",
         rewardSummary,
         expectedReward,
+        isActiveUnverified: activeUnverifiedAssignmentIds.has(bucket.bountyAssignmentId),
       };
     })
-    .sort((a, b) => b.latestTimestamp - a.latestTimestamp)
-    .slice(0, TASK_LIFECYCLE_LIMIT);
+    .sort((a, b) => b.latestTimestamp - a.latestTimestamp);
+
+  const unifiedHistoryFeed = [
+    ...recentTaskLifecycles.map((lifecycle) => ({
+      kind: "lifecycle" as const,
+      timestamp: lifecycle.latestTimestamp,
+      lifecycle,
+    })),
+    ...legacyHistoryEvents.map((event) => ({
+      kind: "event" as const,
+      timestamp: event.timestamp,
+      event,
+    })),
+  ]
+    .sort((a, b) => b.timestamp - a.timestamp)
+    .slice(0, TASK_LIFECYCLE_LIMIT * 2);
 
   // IconPicker helper
   const IconPicker: React.FC<{
@@ -1616,7 +1676,7 @@ const handleBulkAssign = async () => {
         <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
           {[
             { id: 'assign', label: 'Assign', icon: Send },
-            { id: 'approvals', label: 'Approvals', icon: CheckCircle, badge: totalPending },
+            { id: 'manage', label: 'Manage', icon: CheckCircle, badge: totalPending },
             { id: 'create', label: 'Create', icon: Plus },
             { id: 'store', label: 'Store', icon: ShoppingBag },
             { id: 'users', label: 'Family', icon: UserIcon }
@@ -2307,7 +2367,7 @@ const handleBulkAssign = async () => {
       <div className="flex p-4 gap-2 justify-around lg:hidden bg-gray-50 dark:bg-gray-900">
         {[
             { id: 'assign', label: 'Assign', icon: Send },
-            { id: 'approvals', label: `${totalPending}`, fullLabel: 'Approvals', icon: CheckCircle },
+            { id: 'manage', label: `${totalPending}`, fullLabel: 'Manage', icon: CheckCircle },
             { id: 'create', label: 'Create', icon: Plus },
             { id: 'store', label: 'Store', icon: ShoppingBag },
             { id: 'users', label: 'Family', icon: UserIcon }
@@ -2320,13 +2380,13 @@ const handleBulkAssign = async () => {
             >
                 <div className="relative">
                     <t.icon size={20} />
-                    {t.id === 'approvals' && totalPending > 0 && (
+                    {t.id === 'manage' && totalPending > 0 && (
                         <span className={`absolute -top-1 -right-1 min-w-[16px] h-4 flex items-center justify-center text-[10px] font-bold rounded-full px-1 ${tab === t.id ? 'bg-white text-indigo-600' : 'bg-red-500 text-white'}`}>
                             {totalPending}
                         </span>
                     )}
                 </div>
-                <span className="text-xs font-semibold">{t.id === 'approvals' ? 'Approvals' : t.label}</span>
+                <span className="text-xs font-semibold">{t.id === 'manage' ? 'Manage' : t.label}</span>
             </button>
         ))}
       </div>
@@ -2337,20 +2397,20 @@ const handleBulkAssign = async () => {
           <div>
             <h2 className="text-2xl font-bold text-gray-800 dark:text-white">
               {tab === 'assign' && 'Assign Rewards & Tasks'}
-              {tab === 'approvals' && 'Pending Approvals'}
+              {tab === 'manage' && 'Manage Tasks & Rewards'}
               {tab === 'create' && 'Create Templates'}
               {tab === 'store' && 'Store Management'}
               {tab === 'users' && 'Family Members'}
             </h2>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
               {tab === 'assign' && 'Distribute rewards, tasks, and tickets to family members'}
-              {tab === 'approvals' && 'Review and approve pending requests'}
+              {tab === 'manage' && 'Review, approve, and manage task/reward lifecycle activity'}
               {tab === 'create' && 'Build reward and task templates'}
               {tab === 'store' && 'Manage store items and prize wheel'}
               {tab === 'users' && 'Manage family members and settings'}
             </p>
           </div>
-          {totalPending > 0 && tab !== 'approvals' && (
+          {totalPending > 0 && tab !== 'manage' && (
             <span className="bg-amber-100 text-amber-800 text-sm font-bold px-4 py-2 rounded-full">
               {totalPending} Pending
             </span>
@@ -2687,7 +2747,7 @@ const handleBulkAssign = async () => {
           </>
         )}
 
-        {tab === 'approvals' && (
+        {tab === 'manage' && (
           <div className="space-y-8">
             {/* Pending Bounties */}
             {pendingBounties.length > 0 && (
@@ -2844,109 +2904,120 @@ const handleBulkAssign = async () => {
             <div className="pt-6 border-t border-gray-200 dark:border-gray-700 space-y-6">
               <div>
                 <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-4 flex items-center gap-2">
-                  <History size={18} /> Recent Task Lifecycles
+                  <History size={18} /> Activity Feed
                 </h3>
-                {recentTaskLifecycles.length === 0 ? (
+                {unifiedHistoryFeed.length === 0 ? (
                   <div className="bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-100 dark:border-gray-700 text-sm text-gray-500 dark:text-gray-400">
-                    No task lifecycle history yet.
+                    No activity yet.
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {recentTaskLifecycles.map((lifecycle) => (
-                      <div
-                        key={lifecycle.bountyAssignmentId}
-                        className="bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-100 dark:border-gray-700"
-                      >
-                        <div className="flex items-start justify-between gap-3 mb-3">
-                          <div className="flex items-start gap-3">
-                            <span className="text-2xl">{lifecycle.taskEmoji}</span>
-                            <div>
-                              <p className="text-sm font-bold text-gray-800 dark:text-white">{lifecycle.taskTitle}</p>
-                              <p className="text-xs text-gray-500 dark:text-gray-400">
-                                Child: <span className="font-semibold">{lifecycle.childName}</span>
-                              </p>
-                              {lifecycle.expectedReward && (
-                                <p className="text-xs text-gray-500 dark:text-gray-400">
-                                  Reward target: <span className="font-semibold">{lifecycle.expectedReward}</span>
-                                </p>
+                    {unifiedHistoryFeed.map((item) => {
+                      if (item.kind === "lifecycle") {
+                        const lifecycle = item.lifecycle;
+                        return (
+                          <div
+                            key={`lifecycle-${lifecycle.bountyAssignmentId}`}
+                            className="bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-100 dark:border-gray-700"
+                          >
+                            <div className="flex items-start justify-between gap-3 mb-3">
+                              <div className="flex items-start gap-3">
+                                <span className="text-2xl">{lifecycle.taskEmoji}</span>
+                                <div>
+                                  <p className="text-sm font-bold text-gray-800 dark:text-white">{lifecycle.taskTitle}</p>
+                                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                                    Child: <span className="font-semibold">{lifecycle.childName}</span>
+                                  </p>
+                                  {lifecycle.expectedReward && (
+                                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                                      Reward target: <span className="font-semibold">{lifecycle.expectedReward}</span>
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                              <span className="px-2 py-1 rounded-full text-[11px] font-bold bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300">
+                                {lifecycle.latestStatus}
+                              </span>
+                            </div>
+
+                            <div className="space-y-2 mb-3">
+                              {lifecycle.events.map((event) => (
+                                <div
+                                  key={event.id}
+                                  className="flex items-start gap-2 text-xs text-gray-600 dark:text-gray-300"
+                                >
+                                  <span className="mt-1 w-2 h-2 rounded-full bg-indigo-300 dark:bg-indigo-600 shrink-0"></span>
+                                  <div className="flex-1">
+                                    <p className="font-semibold text-gray-800 dark:text-gray-100">
+                                      {TASK_ACTION_LABELS[event.action] || event.action.replaceAll("_", " ")}
+                                    </p>
+                                    <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                                      {new Date(event.timestamp).toLocaleString()} by {event.assignerName}
+                                      {event.action === "TASK_MISSED_FCFS" && event.parsedMetadata.fcfsClaimedByName
+                                        ? ` • Claimed by ${event.parsedMetadata.fcfsClaimedByName}`
+                                        : ""}
+                                    </p>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+
+                            {lifecycle.rewardSummary && (
+                              <div className="mb-3 px-3 py-2 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-xs font-semibold text-green-700 dark:text-green-300">
+                                {lifecycle.rewardSummary}
+                              </div>
+                            )}
+
+                            <div className="flex flex-wrap gap-2">
+                              <span
+                                title={lifecycle.bountyAssignmentId}
+                                className="px-2 py-1 rounded-full text-[11px] bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300"
+                              >
+                                Task Ref: {lifecycle.bountyAssignmentId.slice(0, 8)}
+                              </span>
+                              {lifecycle.rewardAssignmentId && (
+                                <span
+                                  title={lifecycle.rewardAssignmentId}
+                                  className="px-2 py-1 rounded-full text-[11px] bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300"
+                                >
+                                  Reward Ref: {lifecycle.rewardAssignmentId.slice(0, 8)}
+                                </span>
                               )}
                             </div>
-                          </div>
-                          <span className="px-2 py-1 rounded-full text-[11px] font-bold bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300">
-                            {lifecycle.latestStatus}
-                          </span>
-                        </div>
 
-                        <div className="space-y-2 mb-3">
-                          {lifecycle.events.map((event) => (
-                            <div
-                              key={event.id}
-                              className="flex items-start gap-2 text-xs text-gray-600 dark:text-gray-300"
-                            >
-                              <span className="mt-1 w-2 h-2 rounded-full bg-indigo-300 dark:bg-indigo-600 shrink-0"></span>
-                              <div className="flex-1">
-                                <p className="font-semibold text-gray-800 dark:text-gray-100">
-                                  {TASK_ACTION_LABELS[event.action] || event.action.replaceAll("_", " ")}
-                                </p>
-                                <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                                  {new Date(event.timestamp).toLocaleString()} by {event.assignerName}
-                                </p>
+                            {lifecycle.isActiveUnverified && (
+                              <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
+                                <button
+                                  onClick={() => void handleCancelTask(lifecycle.bountyAssignmentId)}
+                                  className="w-full py-2 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 font-bold rounded-xl hover:bg-red-100 dark:hover:bg-red-900/50 flex items-center justify-center gap-1 text-sm border border-red-200 dark:border-red-700"
+                                >
+                                  <X size={16} /> Cancel Task
+                                </button>
                               </div>
-                            </div>
-                          ))}
-                        </div>
-
-                        {lifecycle.rewardSummary && (
-                          <div className="mb-3 px-3 py-2 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-xs font-semibold text-green-700 dark:text-green-300">
-                            {lifecycle.rewardSummary}
+                            )}
                           </div>
-                        )}
+                        );
+                      }
 
-                        <div className="flex flex-wrap gap-2">
-                          <span
-                            title={lifecycle.bountyAssignmentId}
-                            className="px-2 py-1 rounded-full text-[11px] bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300"
-                          >
-                            Task Ref: {lifecycle.bountyAssignmentId.slice(0, 8)}
-                          </span>
-                          {lifecycle.rewardAssignmentId && (
-                            <span
-                              title={lifecycle.rewardAssignmentId}
-                              className="px-2 py-1 rounded-full text-[11px] bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300"
-                            >
-                              Reward Ref: {lifecycle.rewardAssignmentId.slice(0, 8)}
-                            </span>
-                          )}
+                      const event = item.event;
+                      return (
+                        <div
+                          key={`event-${event.id}`}
+                          className="bg-white dark:bg-gray-800 p-3 rounded-xl border border-gray-100 dark:border-gray-700 flex items-center gap-3 opacity-90"
+                        >
+                          <span className="text-xl">{event.emoji}</span>
+                          <div className="flex-1">
+                            <p className="text-sm font-semibold text-gray-800 dark:text-white">{event.title}</p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                              <span className="font-medium">{event.userName}</span> • {new Date(event.timestamp).toLocaleDateString()}
+                              <span className="block text-[10px] text-indigo-500">
+                                {(TASK_ACTION_LABELS[event.action] || event.action.replaceAll("_", " "))} by {event.assignerName}
+                              </span>
+                            </p>
+                          </div>
                         </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <h4 className="text-sm font-bold text-gray-700 dark:text-gray-200 mb-2">Legacy Events</h4>
-                {legacyHistoryEvents.length === 0 ? (
-                  <div className="text-xs text-gray-500 dark:text-gray-400">No legacy events.</div>
-                ) : (
-                  <div className="space-y-2 opacity-80">
-                    {legacyHistoryEvents.slice(0, 5).map((event) => (
-                      <div
-                        key={event.id}
-                        className="bg-white dark:bg-gray-800 p-3 rounded-xl border border-gray-100 dark:border-gray-700 flex items-center gap-3"
-                      >
-                        <span className="text-xl">{event.emoji}</span>
-                        <div className="flex-1">
-                          <p className="text-sm font-semibold text-gray-800 dark:text-white">{event.title}</p>
-                          <p className="text-xs text-gray-500 dark:text-gray-400">
-                            <span className="font-medium">{event.userName}</span> • {new Date(event.timestamp).toLocaleDateString()}
-                            <span className="block text-[10px] text-indigo-500">
-                              {(TASK_ACTION_LABELS[event.action] || event.action.replaceAll("_", " "))} by {event.assignerName}
-                            </span>
-                          </p>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>

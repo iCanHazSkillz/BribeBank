@@ -411,7 +411,7 @@ export const claimAssignedPrize = async (req: Request, res: Response) => {
           type: "REWARD_CLAIMED",
           familyId: assignment.familyId,
           assignmentId: assignment.id,
-          url: "/?view=admin&adminTab=approvals",
+          url: "/?view=admin&adminTab=manage",
         })
       )
     );
