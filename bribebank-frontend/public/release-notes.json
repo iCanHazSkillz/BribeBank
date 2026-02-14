@@ -1,27 +1,37 @@
 {
   "latest": {
-    "title": "Better, faster, stronger: BribeBank's latest update is here!",
+    "title": "Smoother startup updates and smarter cache behavior",
     "date": "2026-02-13",
     "features": [
-      "Admin Approvals has been refactored into a Manage tab with unified task/reward management.",
-      "Parents and children can now cancel unverified tasks to close stale assignments cleanly."
+      "The app now checks a build manifest on startup and foreground to detect new deployments immediately.",
+      "App updates can now auto-apply on open with a single guarded reload when a newer build is available."
     ],
     "improvements": [
-      "Parents are now prompted to set up a family recovery key to avoid account lockouts.",
-      "Added a one-time 'BribeBank was updated' modal with categorized release highlights."
+      "Service worker registration now starts earlier during app boot to reduce update lag.",
+      "Navigation/app shell fetch behavior now prioritizes fresh HTML while keeping offline fallback."
     ],
     "fixes": [
-      "Password changes now immediately invalidate stale sessions so old tokens can no longer be used.",
-      "Users are now automatically returned to login as soon as a stale session is detected.",
-      "Fixed mobile update modal clipping by making update dialogs viewport-safe and scrollable.",
-      "FCFS tasks now close lifecycle history for users who missed the claim, including who claimed first.",
-      "Admin and wallet history now use one newest-first activity feed instead of split lifecycle/legacy sections.",
-      "Corrected task lifecycle status handling for denied-without-resubmit outcomes in wallet history.",
-      "Added a self-hoster emergency CLI recovery path when no family recovery key is available.",
-      "Stabilized update delivery by replacing manual update confirmation with immediate automatic refresh."
+      "Reduced cases where users had to manually refresh after a deployment.",
+      "Excluded update metadata endpoints from service-worker caching to avoid stale version checks."
     ]
   },
   "releases": {
+    "0.1.1": {
+      "title": "Smoother startup updates and smarter cache behavior",
+      "date": "2026-02-13",
+      "features": [
+        "The app now checks a build manifest on startup and foreground to detect new deployments immediately.",
+        "App updates can now auto-apply on open with a single guarded reload when a newer build is available."
+      ],
+      "improvements": [
+        "Service worker registration now starts earlier during app boot to reduce update lag.",
+        "Navigation/app shell fetch behavior now prioritizes fresh HTML while keeping offline fallback."
+      ],
+      "fixes": [
+        "Reduced cases where users had to manually refresh after a deployment.",
+        "Excluded update metadata endpoints from service-worker caching to avoid stale version checks."
+      ]
+    },
     "0.1.0": {
       "title": "Better, faster, stronger: BribeBank's latest update is here!",
       "date": "2026-02-13",

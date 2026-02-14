@@ -19,30 +19,28 @@ root.render(
 );
 
 if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker
-      .register("/service-worker.js")
-      .then((registration) => {
-        console.log(
-          "[SW] registered with scope:",
-          registration.scope
-        );
-      })
-      .catch((err) => {
-        console.error("[SW] registration failed:", err);
-      });
-    
-    // Check if opened from notification (new window case)
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('_from_notification')) {
-      // Clean up the URL
-      params.delete('_from_notification');
-      const cleanUrl = params.toString() 
-        ? `${window.location.pathname}?${params.toString()}`
-        : window.location.pathname;
-      window.history.replaceState({}, '', cleanUrl);
-    }
-  });
+  navigator.serviceWorker
+    .register("/service-worker.js")
+    .then((registration) => {
+      console.log(
+        "[SW] registered with scope:",
+        registration.scope
+      );
+    })
+    .catch((err) => {
+      console.error("[SW] registration failed:", err);
+    });
+
+  // Check if opened from notification (new window case)
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('_from_notification')) {
+    // Clean up the URL
+    params.delete('_from_notification');
+    const cleanUrl = params.toString() 
+      ? `${window.location.pathname}?${params.toString()}`
+      : window.location.pathname;
+    window.history.replaceState({}, '', cleanUrl);
+  }
   
   // Listen for messages from service worker
   navigator.serviceWorker.addEventListener("message", (event) => {

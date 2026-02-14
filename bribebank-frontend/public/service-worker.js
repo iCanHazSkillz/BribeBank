@@ -61,18 +61,48 @@ self.addEventListener("fetch", (event) => {
   // 1) Never touch cross-origin (your api.* domain)
   if (url.origin !== self.location.origin) return;
 
-  // 2) Skip anything with query params (prevents token URL caching explosions)
-  //    If you rely on same-origin URLs with queries for static content, remove this.
+  // 2) Always bypass update metadata endpoints so app-open checks stay fresh.
+  if (url.pathname === "/version.json" || url.pathname === "/release-notes.json") return;
+
+  // 3) Network-first for app shell navigation with cache fallback.
+  const acceptHeader = request.headers.get("accept") || "";
+  const isNavigation =
+    request.mode === "navigate" ||
+    request.destination === "document" ||
+    acceptHeader.includes("text/html");
+
+  if (isNavigation) {
+    event.respondWith(
+      (async () => {
+        const cache = await caches.open(CACHE_NAME);
+        try {
+          const networkResponse = await fetch(request);
+          if (networkResponse && networkResponse.ok) {
+            await cache.put("/index.html", networkResponse.clone());
+          }
+          return networkResponse;
+        } catch {
+          return (
+            (await cache.match(request)) ||
+            (await cache.match("/index.html")) ||
+            Response.error()
+          );
+        }
+      })()
+    );
+    return;
+  }
+
+  // 4) Skip anything with query params (prevents token URL caching explosions)
   if (url.search) return;
 
-  // 3) Skip SSE explicitly (belt + suspenders)
-  const accept = request.headers.get("accept") || "";
-  if (accept.includes("text/event-stream")) return;
+  // 5) Skip SSE explicitly (belt + suspenders)
+  if (acceptHeader.includes("text/event-stream")) return;
 
-  // 4) Optionally skip obvious API paths if you ever add same-origin APIs
+  // 6) Optionally skip obvious API paths if you ever add same-origin APIs
   if (url.pathname.startsWith("/api")) return;
 
-  // 5) Only handle typical static destinations
+  // 7) Only handle typical static destinations
   const dest = request.destination;
   const allowed = new Set(["document", "script", "style", "image", "font"]);
   if (dest && !allowed.has(dest)) return;

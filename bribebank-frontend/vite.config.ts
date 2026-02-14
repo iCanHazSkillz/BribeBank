@@ -26,13 +26,32 @@ export default defineConfig(({ mode }) => {
         }
       }
     };
+
+    const versionManifestPlugin = {
+      name: 'version-manifest',
+      apply: 'build',
+      writeBundle() {
+        try {
+          const versionPath = 'dist/version.json';
+          const payload = {
+            buildId,
+            releaseVersion,
+            builtAt: new Date().toISOString(),
+          };
+          writeFileSync(versionPath, JSON.stringify(payload, null, 2));
+          console.log(`✓ Version manifest written: ${versionPath}`);
+        } catch (error: any) {
+          console.warn(`⚠ Could not write version manifest:`, error.message);
+        }
+      },
+    };
     
     return {
       server: {
         port: 3000,
         host: '0.0.0.0',
       },
-      plugins: [react(), tailwindcss(), swTimestampPlugin],
+      plugins: [react(), tailwindcss(), swTimestampPlugin, versionManifestPlugin],
       define: {
         'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
         'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),

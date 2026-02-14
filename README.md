@@ -138,6 +138,12 @@ docker compose up -d
 - Password changes immediately invalidate old sessions by bumping a server-side `sessionVersion`.
 - Admin deep links support both `adminTab=manage` and legacy `adminTab=approvals` (mapped to Manage).
 
+## PWA Update Behavior
+- App update checks happen on startup and when the app returns to foreground.
+- Frontend serves `/version.json` (build metadata: `buildId`, `releaseVersion`, optional `builtAt`) and uses it to detect newer builds.
+- Service worker uses network-first for HTML navigation (with cache fallback) and cache-backed static assets.
+- When a newer build is detected, the app performs one guarded auto-reload to apply the update.
+
 ## Self-Hoster Emergency Recovery
 If a parent loses both password and family recovery key, use one of the following methods.
 

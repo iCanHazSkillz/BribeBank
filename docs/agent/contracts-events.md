@@ -109,3 +109,12 @@ Frontend mirror: `bribebank-frontend/types/sseEvents.ts`
 3. Update emitters in controllers/services.
 4. Update frontend consumers/switch handlers.
 5. Update this document with any payload or reason changes.
+
+## PWA update flow (non-SSE)
+- The app also performs update detection outside SSE:
+  - SW lifecycle signals (`updatefound`, waiting worker, SW message)
+  - Foreground/startup build manifest checks via `/version.json`
+- `/version.json` is generated at frontend build time and includes:
+  - `buildId: string`
+  - `releaseVersion: string`
+  - `builtAt?: string`

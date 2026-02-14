@@ -25,10 +25,18 @@ type ReleaseNotesPayload = {
   releases?: Record<string, ReleaseNotesEntry>;
 };
 
+type VersionManifest = {
+  buildId: string;
+  releaseVersion: string;
+  builtAt?: string;
+};
+
 const UPDATE_RELOAD_GUARD_KEY = "bb_update_reload_in_progress";
 const LAST_SEEN_BUILD_ID_KEY = "bb_last_seen_build_id";
+const VERSION_CHECK_COOLDOWN_KEY = "bb_version_check_failed_at";
 const UPDATE_MODAL_SEEN_PREFIX = "bb_update_modal_seen::";
 const RELOAD_GUARD_WINDOW_MS = 15000;
+const VERSION_CHECK_COOLDOWN_MS = 60000;
 const FALLBACK_RELEASE_NOTES: ReleaseNotesEntry = {
   title: "BribeBank was updated",
   features: ["New app updates are now applied automatically."],
@@ -166,6 +174,38 @@ const App: React.FC = () => {
     window.location.reload();
   }, []);
 
+  const checkForNewBuildOnOpen = useCallback(async (reason: string) => {
+    const lastSeenBuildId = localStorage.getItem(LAST_SEEN_BUILD_ID_KEY);
+    if (!lastSeenBuildId) {
+      localStorage.setItem(LAST_SEEN_BUILD_ID_KEY, __APP_BUILD_ID__);
+      return;
+    }
+
+    const cooldownRaw = sessionStorage.getItem(VERSION_CHECK_COOLDOWN_KEY);
+    const cooldownAt = cooldownRaw ? Number(cooldownRaw) : 0;
+    if (Number.isFinite(cooldownAt) && Date.now() - cooldownAt < VERSION_CHECK_COOLDOWN_MS) {
+      return;
+    }
+
+    try {
+      const response = await fetch("/version.json", { cache: "no-store" });
+      if (!response.ok) {
+        sessionStorage.setItem(VERSION_CHECK_COOLDOWN_KEY, String(Date.now()));
+        return;
+      }
+
+      const manifest = (await response.json()) as VersionManifest;
+      if (manifest?.buildId && manifest.buildId !== __APP_BUILD_ID__) {
+        triggerAutoReload(`version-manifest-${reason}`);
+        return;
+      }
+
+      sessionStorage.removeItem(VERSION_CHECK_COOLDOWN_KEY);
+    } catch {
+      sessionStorage.setItem(VERSION_CHECK_COOLDOWN_KEY, String(Date.now()));
+    }
+  }, [triggerAutoReload]);
+
   const clearSessionAndRouteToLogin = useCallback(() => {
     storageService.logout();
     setCurrentUser(null);
@@ -200,6 +240,14 @@ const App: React.FC = () => {
       const guardTimestamp = Number(guardRaw);
       if (!Number.isFinite(guardTimestamp) || Date.now() - guardTimestamp >= RELOAD_GUARD_WINDOW_MS) {
         sessionStorage.removeItem(UPDATE_RELOAD_GUARD_KEY);
+      }
+    }
+
+    const cooldownRaw = sessionStorage.getItem(VERSION_CHECK_COOLDOWN_KEY);
+    if (cooldownRaw) {
+      const cooldownAt = Number(cooldownRaw);
+      if (!Number.isFinite(cooldownAt) || Date.now() - cooldownAt >= VERSION_CHECK_COOLDOWN_MS) {
+        sessionStorage.removeItem(VERSION_CHECK_COOLDOWN_KEY);
       }
     }
 
@@ -267,6 +315,7 @@ const App: React.FC = () => {
 
     void init();
     void maybeShowUpdatedModal();
+    void checkForNewBuildOnOpen("startup");
 
     // Check for service worker updates on load
     if ('serviceWorker' in navigator) {
@@ -294,7 +343,7 @@ const App: React.FC = () => {
         }
       });
     }
-  }, [triggerAutoReload, clearSessionAndRouteToLogin, forceLogoutToLogin]);
+  }, [triggerAutoReload, clearSessionAndRouteToLogin, forceLogoutToLogin, checkForNewBuildOnOpen]);
 
   useEffect(() => {
     const originalFetch = window.fetch.bind(window);
@@ -375,7 +424,8 @@ const App: React.FC = () => {
 
     const handleVisibility = () => {
       if (document.visibilityState === "visible") {
-        refreshCurrentUser();
+        void refreshCurrentUser();
+        void checkForNewBuildOnOpen("foreground");
       }
     };
 
@@ -406,7 +456,7 @@ const App: React.FC = () => {
       document.removeEventListener("visibilitychange", handleVisibility);
       document.removeEventListener("mousedown", handleClickOutside);
     };
-  }, [currentUser?.id, showUserMenu, showNotifications, triggerAutoReload, forceLogoutToLogin]);
+  }, [currentUser?.id, showUserMenu, showNotifications, triggerAutoReload, forceLogoutToLogin, checkForNewBuildOnOpen]);
 
   useEffect(() => {
     if (currentUser) {
