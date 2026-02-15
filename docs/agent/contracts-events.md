@@ -46,6 +46,7 @@ Frontend mirror: `bribebank-frontend/types/sseEvents.ts`
   - `EARNED_TICKETS`, `RECEIVED_TICKETS`
   - `WHEEL_UPDATED`, `WHEEL_RESET`, `WHEEL_SPIN`
   - `CONVERSION_RATE_UPDATED`
+  - `FAMILY_MEMBERS_UPDATED`
 
 ### `TICKETS_GIVEN`
 - Trigger: parent grants tickets.
@@ -75,6 +76,18 @@ Frontend mirror: `bribebank-frontend/types/sseEvents.ts`
   - `assignmentId`
   - `newBalance`
   - `timestamp`
+
+## History Metadata Conventions (activity feed)
+- Activity feed lifecycle cards are derived from `HistoryEvent.metadata` JSON (not SSE payloads).
+- Current lifecycle metadata types:
+  - `TASK` (`lifecycleType: "TASK"`) keyed by `bountyAssignmentId`
+  - `REWARD` (`lifecycleType: "REWARD"`) keyed by `rewardAssignmentId`
+- Reward lifecycle action usage includes:
+  - `ASSIGNED_REWARD`, `REWARD_CLAIMED`, `REWARD_CLAIM_CANCELLED`, `REWARD_APPROVED`, `REWARD_REJECTED`, `STORE_PURCHASE_REQUESTED`
+  - `RECEIVED_TICKETS` only when refunding a rejected/cancelled store purchase request
+- Reward lifecycle metadata includes:
+  - `rewardOrigin: "STANDARD" | "STORE_PURCHASE"`
+  - optional `ticketCost`, `refundedTickets`
 
 ## Example payloads
 

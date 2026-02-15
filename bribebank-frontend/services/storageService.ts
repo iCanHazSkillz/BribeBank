@@ -567,6 +567,32 @@ export const storageService = {
     }
   },
 
+  deleteCurrentUser: async (userId: string): Promise<void> => {
+    try {
+      await storageService.deleteUser(userId, userId);
+    } catch (err: any) {
+      throw new Error(err?.message || "Failed to delete current user");
+    }
+  },
+
+  deleteCurrentFamily: async (): Promise<void> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const res = await fetch(apiUrl("/auth/family"), {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      console.error("deleteCurrentFamily failed", res.status, body);
+      throw new Error(body?.error || "Failed to delete family");
+    }
+  },
+
 
   // --- REWARDS (PRIZES) ---
 
@@ -765,6 +791,28 @@ export const storageService = {
         throw new Error("Failed to claim prize");
       }
     },
+
+  // Child cancels a pending prize claim (rolls card back to available)
+  cancelPrizeClaim: async (assignmentId: string): Promise<void> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const res = await fetch(
+      apiUrl(`/assigned-prizes/${assignmentId}/cancel`),
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      console.error("Failed to cancel prize claim", res.status, body);
+      throw new Error(body?.error || "Failed to cancel prize claim");
+    }
+  },
 
   // Parent approves a pending prize
   approvePrize: async (assignmentId: string): Promise<void> => {

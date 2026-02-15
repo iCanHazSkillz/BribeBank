@@ -3,10 +3,14 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { config } from "../config.js";
 import { prisma } from "../lib/prisma.js";
-import { Prisma, Role } from "@prisma/client";
+import { Prisma, PrizeType, Role } from "@prisma/client";
 import { assertParent, getRequestUser } from "../lib/authHelpers.js";
 import { verifyRecoveryKey } from "../lib/recoveryKey.js";
 import { rotateFamilyRecoveryKey } from "../services/recoveryService.js";
+import {
+  AccountDeletionError,
+  deleteFamilyCascade,
+} from "../services/accountDeletionService.js";
 
 const AVATAR_COLORS = [
   "bg-indigo-500",
@@ -77,6 +81,72 @@ function isPasswordStrongEnough(password: string): boolean {
   return password.length >= 8;
 }
 
+const DEMO_REWARDS = [
+  {
+    title: "Choose Family Movie",
+    emoji: "\uD83C\uDFAC",
+    description: "You pick tonight's movie for everyone.",
+    type: PrizeType.ACTIVITY,
+    themeColor: "bg-blue-100 text-blue-800 border-blue-200",
+  },
+  {
+    title: "Dessert Pass",
+    emoji: "\uD83C\uDF68",
+    description: "Pick a dessert for after dinner.",
+    type: PrizeType.FOOD,
+    themeColor: "bg-pink-100 text-pink-800 border-pink-200",
+  },
+  {
+    title: "30 Minutes Extra Screen Time",
+    emoji: "\uD83D\uDCF1",
+    description: "Redeem for an extra 30 minutes of screen time.",
+    type: PrizeType.PRIVILEGE,
+    themeColor: "bg-purple-100 text-purple-800 border-purple-200",
+  },
+];
+
+const DEMO_BOUNTIES = [
+  {
+    title: "After-Dinner Kitchen Reset",
+    emoji: "\uD83C\uDF7D\uFE0F",
+    rewardType: "TICKETS",
+    rewardValue: "25",
+    isFCFS: false,
+    requiresPhoto: false,
+    deadlineHours: 24,
+    themeColor: "bg-amber-100 text-amber-800 border-amber-200",
+  },
+  {
+    title: "Laundry Fold + Put Away",
+    emoji: "\uD83E\uDDFA",
+    rewardType: "CUSTOM",
+    rewardValue: "Pick Friday Dessert",
+    isFCFS: false,
+    requiresPhoto: true,
+    deadlineHours: null,
+    themeColor: "bg-teal-100 text-teal-800 border-teal-200",
+  },
+  {
+    title: "Take Out Recycling (Fast Grab)",
+    emoji: "\u267B\uFE0F",
+    rewardType: "CUSTOM",
+    rewardValue: "15 extra minutes of gaming",
+    isFCFS: true,
+    requiresPhoto: false,
+    deadlineHours: null,
+    themeColor: "bg-green-100 text-green-800 border-green-200",
+  },
+];
+
+const DEMO_WHEEL_SEGMENTS_BALANCED = [
+  { label: "30 Min Screen Time", color: "#60A5FA", prob: 1 / 6 },
+  { label: "Try Again", color: "#9CA3AF", prob: 1 / 6 },
+  { label: "Dessert Upgrade", color: "#F472B6", prob: 1 / 6 },
+  { label: "Try Again", color: "#9CA3AF", prob: 1 / 6 },
+  { label: "$5 Bonus Allowance", color: "#34D399", prob: 1 / 6 },
+  { label: "Try Again", color: "#9CA3AF", prob: 1 / 6 },
+];
+
 // -----------------------------------------------------
 // PARENT REGISTRATION
 // -----------------------------------------------------
@@ -104,25 +174,66 @@ export const registerParent = async (req: Request, res: Response) => {
     console.log("Generating join code...");
     const joinCode = generateJoinCode();
 
-    console.log("Creating family...");
-    const family = await prisma.family.create({
-      data: {
-        name: familyName,
-        joinCode,
-        joinCodeExpiry: new Date(Date.now() + 86400000),
-      },
-    });
+    const { family, user } = await prisma.$transaction(async (tx) => {
+      console.log("Creating family...");
+      const family = await tx.family.create({
+        data: {
+          name: familyName,
+          joinCode,
+          joinCodeExpiry: new Date(Date.now() + 86400000),
+        },
+      });
 
-    console.log("Creating user...");
-    const user = await prisma.user.create({
-      data: {
-        familyId: family.id,
-        username: normalizedUsername,      // <-- canonical lowercase
-        password: hashed,
-        displayName,
-        role: "PARENT",
-        avatarColor: pickAvatarColor(),
-      },
+      console.log("Creating user...");
+      const user = await tx.user.create({
+        data: {
+          familyId: family.id,
+          username: normalizedUsername, // canonical lowercase
+          password: hashed,
+          displayName,
+          role: "PARENT",
+          avatarColor: pickAvatarColor(),
+        },
+      });
+
+      // Seed starter content for first-run family experience.
+      await tx.reward.createMany({
+        data: DEMO_REWARDS.map((reward) => ({
+          familyId: family.id,
+          title: reward.title,
+          emoji: reward.emoji,
+          description: reward.description,
+          type: reward.type,
+          themeColor: reward.themeColor,
+        })),
+      });
+
+      await tx.bounty.createMany({
+        data: DEMO_BOUNTIES.map((bounty) => ({
+          familyId: family.id,
+          title: bounty.title,
+          emoji: bounty.emoji,
+          rewardType: bounty.rewardType,
+          rewardValue: bounty.rewardValue,
+          isFCFS: bounty.isFCFS,
+          requiresPhoto: bounty.requiresPhoto,
+          deadlineHours: bounty.deadlineHours,
+          themeColor: bounty.themeColor,
+        })),
+      });
+
+      for (const segment of DEMO_WHEEL_SEGMENTS_BALANCED) {
+        await tx.wheelSegment.create({
+          data: {
+            familyId: family.id,
+            label: segment.label,
+            color: segment.color,
+            prob: segment.prob,
+          },
+        });
+      }
+
+      return { family, user };
     });
 
     console.log("✔ Success");
@@ -373,6 +484,35 @@ export const regenerateRecoveryKey = async (req: Request, res: Response) => {
       return res.status(err.status).json({ error: err.error });
     }
     console.error("regenerateRecoveryKey error:", err);
+    return res.status(500).json({ error: "INTERNAL_SERVER_ERROR" });
+  }
+};
+
+// -----------------------------------------------------
+// DELETE CURRENT FAMILY (PARENT ONLY)
+// -----------------------------------------------------
+export const deleteCurrentFamily = async (req: Request, res: Response) => {
+  try {
+    const requester = await getRequestUser(req);
+    if (!requester) {
+      return res.status(401).json({ error: "UNAUTHENTICATED" });
+    }
+    assertParent(requester);
+
+    await deleteFamilyCascade(requester.familyId, {
+      source: "APP_USER",
+      actorUserId: requester.id,
+    });
+
+    return res.status(204).send();
+  } catch (err: any) {
+    if (err instanceof AccountDeletionError) {
+      return res.status(err.status).json({ error: err.code });
+    }
+    if (err && typeof err === "object" && "status" in err) {
+      return res.status(err.status).json({ error: err.error });
+    }
+    console.error("deleteCurrentFamily error:", err);
     return res.status(500).json({ error: "INTERNAL_SERVER_ERROR" });
   }
 };

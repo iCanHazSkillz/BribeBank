@@ -11,7 +11,9 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate deploy",
     "prisma:dev": "prisma migrate dev",
-    "recover:parent-password": "tsx src/scripts/recoverParentPassword.ts"
+    "recover:parent-password": "tsx src/scripts/recoverParentPassword.ts",
+    "host:list": "tsx src/scripts/selfHosterList.ts",
+    "host:delete": "tsx src/scripts/selfHosterDelete.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.15.0",

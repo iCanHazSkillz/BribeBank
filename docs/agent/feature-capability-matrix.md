@@ -13,6 +13,8 @@ Status reflects current stable implementation in this repository.
   - Create/update/delete users
   - Password update
   - Avatar metadata support
+  - Parent + child self-delete with typed confirmation
+  - Family teardown when deletion would leave zero parents
 - Rewards
   - Reward template CRUD
   - Assigned prize lifecycle: assign, claim, approve/reject, delete
@@ -26,6 +28,7 @@ Status reflects current stable implementation in this repository.
 - Notifications and history
   - Per-user unread notifications with read/read-all
   - Family and per-user history queries
+  - Activity-feed lifecycle cards for tasks and rewards (including store-purchase reward flow)
 - Push notifications
   - VAPID public key endpoint
   - Subscribe/unsubscribe endpoints
@@ -39,6 +42,9 @@ Status reflects current stable implementation in this repository.
   - Export/import for rewards and bounties
 - Real-time
   - Family-scoped SSE event streaming
+- Self-hoster operations
+  - Emergency parent recovery CLI fallback
+  - Host-level list/delete users/families via CLI
 
 ## Partially implemented / follow-up candidates
 - SSE type synchronization automation (backend/frontend union drift prevention)

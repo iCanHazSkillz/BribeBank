@@ -14,6 +14,7 @@ interface AdminViewProps {
   currentUser: User;
   initialTab?: string;
   onUserUpdate?: () => void;
+  onCurrentUserDeleted?: () => void;
   desktopShowNotifications?: boolean;
   onDesktopNotificationsToggle?: () => void;
 }
@@ -33,6 +34,16 @@ type ParsedTaskLifecycleMetadata = {
   cancelledByName?: string;
   fcfsClaimedByUserId?: string;
   fcfsClaimedByName?: string;
+};
+
+type ParsedRewardLifecycleMetadata = {
+  version: 1;
+  lifecycleType: "REWARD";
+  rewardAssignmentId: string;
+  rewardOrigin: "STANDARD" | "STORE_PURCHASE";
+  linkedAction?: string;
+  ticketCost?: number;
+  refundedTickets?: number;
 };
 
 const parseTaskLifecycleMetadata = (
@@ -55,6 +66,27 @@ const parseTaskLifecycleMetadata = (
   return null;
 };
 
+const parseRewardLifecycleMetadata = (
+  metadata: string | null | undefined
+): ParsedRewardLifecycleMetadata | null => {
+  if (!metadata) return null;
+  try {
+    const parsed = JSON.parse(metadata);
+    if (
+      parsed &&
+      parsed.version === 1 &&
+      parsed.lifecycleType === "REWARD" &&
+      typeof parsed.rewardAssignmentId === "string" &&
+      (parsed.rewardOrigin === "STANDARD" || parsed.rewardOrigin === "STORE_PURCHASE")
+    ) {
+      return parsed as ParsedRewardLifecycleMetadata;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+};
+
 const TASK_LIFECYCLE_LIMIT = 8;
 
 const TASK_ACTION_LABELS: Record<string, string> = {
@@ -69,6 +101,21 @@ const TASK_ACTION_LABELS: Record<string, string> = {
   TASK_REJECTED_AFTER_DENIAL: "Denied task rejected",
   EARNED_TICKETS: "Tickets awarded",
   TASK_REWARD_GRANTED: "Reward granted",
+};
+
+const REWARD_ACTION_LABELS: Record<string, string> = {
+  ASSIGNED_REWARD: "Reward assigned",
+  REWARD_CLAIMED: "Reward claimed",
+  REWARD_CLAIM_CANCELLED: "Claim cancelled",
+  REWARD_APPROVED: "Reward approved",
+  REWARD_REJECTED: "Reward rejected",
+  STORE_PURCHASE_REQUESTED: "Store purchase requested",
+  RECEIVED_TICKETS: "Tickets received",
+};
+
+const ACTION_LABELS: Record<string, string> = {
+  ...TASK_ACTION_LABELS,
+  ...REWARD_ACTION_LABELS,
 };
 
 const getTaskLifecycleStatus = (
@@ -99,6 +146,29 @@ const getTaskLifecycleStatus = (
   }
 };
 
+const getRewardLifecycleStatus = (
+  action: string,
+  metadata?: ParsedRewardLifecycleMetadata
+): string => {
+  switch (action) {
+    case "ASSIGNED_REWARD":
+      return "Assigned";
+    case "REWARD_CLAIMED":
+    case "STORE_PURCHASE_REQUESTED":
+      return "Awaiting approval";
+    case "REWARD_CLAIM_CANCELLED":
+      return "Cancelled";
+    case "REWARD_APPROVED":
+      return "Approved";
+    case "REWARD_REJECTED":
+      return "Rejected";
+    case "RECEIVED_TICKETS":
+      return metadata?.refundedTickets ? "Refunded" : "Updated";
+    default:
+      return "Updated";
+  }
+};
+
 const QUICK_EMOJI_OPTIONS = ['🎁', '🧹', '🍕', '💵', '📱'];
 const AVATAR_COLORS = ['bg-pink-400', 'bg-teal-400', 'bg-blue-500', 'bg-purple-500', 'bg-orange-400', 'bg-green-500', 'bg-red-400', 'bg-indigo-500'];
 const PASTEL_COLORS = [
@@ -113,7 +183,7 @@ const PASTEL_COLORS = [
     'bg-pink-100 text-pink-800 border-pink-200',
 ];
 
-export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, onUserUpdate, desktopShowNotifications, onDesktopNotificationsToggle }) => {
+export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, onUserUpdate, onCurrentUserDeleted, desktopShowNotifications, onDesktopNotificationsToggle }) => {
   const [tab, setTab] = useState<'assign' | 'manage' | 'create' | 'users' | 'store'>('assign');
   const [assignSubTab, setAssignSubTab] = useState<'rewards' | 'bounties' | 'tickets'>('rewards');
 
@@ -233,6 +303,17 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, o
 
   const [confirmState, setConfirmState] = useState<ConfirmOptions | null>(null);
   const confirmResolveRef = useRef<(result: boolean) => void>();
+  const [deleteTargetUser, setDeleteTargetUser] = useState<User | null>(null);
+  const [deleteConfirmationInput, setDeleteConfirmationInput] = useState("");
+  const [isDeletingUser, setIsDeletingUser] = useState(false);
+  const [showSelfDeleteConfirm, setShowSelfDeleteConfirm] = useState(false);
+  const [selfDeleteConfirmationInput, setSelfDeleteConfirmationInput] = useState("");
+  const [selfDeleteError, setSelfDeleteError] = useState("");
+  const [isSelfDeleting, setIsSelfDeleting] = useState(false);
+  const [showFamilyDeleteConfirm, setShowFamilyDeleteConfirm] = useState(false);
+  const [familyDeleteConfirmationInput, setFamilyDeleteConfirmationInput] = useState("");
+  const [familyDeleteError, setFamilyDeleteError] = useState("");
+  const [isFamilyDeleting, setIsFamilyDeleting] = useState(false);
 
   // Denial Modal State
   const [showDenialModal, setShowDenialModal] = useState(false);
@@ -1073,29 +1154,103 @@ const handleBulkAssign = async () => {
     }
   };
 
-  const handleDeleteUser = async (id: string) => {
-    if (id === currentUser.id) {
-      showToast("You cannot delete yourself.", "error");
+  const handleDeleteUser = (id: string) => {
+    const target = users.find((u) => u.id === id) || editingUser;
+    if (!target) {
+      showToast("Could not find that user.", "error");
+      return;
+    }
+    setDeleteTargetUser(target);
+    setDeleteConfirmationInput("");
+  };
+
+  const handleConfirmDeleteUser = async () => {
+    if (!deleteTargetUser) return;
+    if (deleteConfirmationInput !== "DELETE") {
+      showToast("Type DELETE to confirm.", "error");
       return;
     }
 
-    const ok = await confirm({
-      title: "Delete user?",
-      message: "Permanently delete this user? This cannot be undone.",
-      confirmLabel: "Delete user",
-      cancelLabel: "Cancel",
-      destructive: true,
-    });
-
-    if (!ok) return;
-
     try {
-      await storageService.deleteUser(currentUser.id, id);
-      await refreshData();
+      setIsDeletingUser(true);
+      await storageService.deleteUser(currentUser.id, deleteTargetUser.id);
+
+      if (deleteTargetUser.id === currentUser.id) {
+        onCurrentUserDeleted?.();
+        return;
+      }
+
+      setDeleteTargetUser(null);
+      setDeleteConfirmationInput("");
       handleCloseUserView();
+      await refreshData();
       showToast("User deleted.", "success");
     } catch (e: any) {
       showToast(e.message || "Error deleting user", "error");
+    } finally {
+      setIsDeletingUser(false);
+    }
+  };
+
+  const handleStartSelfDelete = () => {
+    setShowSelfDeleteConfirm(true);
+    setSelfDeleteConfirmationInput("");
+    setSelfDeleteError("");
+  };
+
+  const handleCancelSelfDelete = () => {
+    if (isSelfDeleting) return;
+    setShowSelfDeleteConfirm(false);
+    setSelfDeleteConfirmationInput("");
+    setSelfDeleteError("");
+  };
+
+  const handleConfirmSelfDelete = async () => {
+    if (selfDeleteConfirmationInput !== "DELETE") {
+      setSelfDeleteError("Type DELETE to confirm.");
+      return;
+    }
+
+    try {
+      setIsSelfDeleting(true);
+      setSelfDeleteError("");
+      await storageService.deleteCurrentUser(currentUser.id);
+      onCurrentUserDeleted?.();
+    } catch (e: any) {
+      setSelfDeleteError(e?.message || "Error deleting account");
+    } finally {
+      setIsSelfDeleting(false);
+    }
+  };
+
+  const handleStartFamilyDelete = () => {
+    setShowFamilyDeleteConfirm(true);
+    setFamilyDeleteConfirmationInput("");
+    setFamilyDeleteError("");
+  };
+
+  const handleCancelFamilyDelete = () => {
+    if (isFamilyDeleting) return;
+    setShowFamilyDeleteConfirm(false);
+    setFamilyDeleteConfirmationInput("");
+    setFamilyDeleteError("");
+  };
+
+  const handleConfirmFamilyDelete = async () => {
+    if (familyDeleteConfirmationInput !== "DELETE") {
+      setFamilyDeleteError("Type DELETE to confirm.");
+      return;
+    }
+
+    try {
+      setIsFamilyDeleting(true);
+      setFamilyDeleteError("");
+      await storageService.deleteCurrentFamily();
+      onCurrentUserDeleted?.();
+    } catch (e: any) {
+      setFamilyDeleteError(e?.message || "Error deleting family");
+    } finally {
+      setIsFamilyDeleting(false);
     }
   };
 
@@ -1516,29 +1671,61 @@ const handleBulkAssign = async () => {
       events: Array<HistoryEvent & { parsedMetadata: ParsedTaskLifecycleMetadata }>;
     }
   >();
+  const rewardLifecycleBuckets = new Map<
+    string,
+    {
+      rewardAssignmentId: string;
+      rewardOrigin: "STANDARD" | "STORE_PURCHASE";
+      events: Array<HistoryEvent & { parsedMetadata: ParsedRewardLifecycleMetadata }>;
+    }
+  >();
   const legacyHistoryEvents: HistoryEvent[] = [];
 
   history.forEach((event) => {
-    const parsedMetadata = parseTaskLifecycleMetadata(event.metadata);
-    if (!parsedMetadata) {
+    const parsedTaskMetadata = parseTaskLifecycleMetadata(event.metadata);
+    if (parsedTaskMetadata) {
+      const existing = taskLifecycleBuckets.get(parsedTaskMetadata.bountyAssignmentId);
+      if (!existing) {
+        taskLifecycleBuckets.set(parsedTaskMetadata.bountyAssignmentId, {
+          bountyAssignmentId: parsedTaskMetadata.bountyAssignmentId,
+          bountyId: parsedTaskMetadata.bountyId,
+          rewardAssignmentId: parsedTaskMetadata.rewardAssignmentId,
+          events: [{ ...event, parsedMetadata: parsedTaskMetadata }],
+        });
+        return;
+      }
+
+      existing.events.push({ ...event, parsedMetadata: parsedTaskMetadata });
+      if (!existing.rewardAssignmentId && parsedTaskMetadata.rewardAssignmentId) {
+        existing.rewardAssignmentId = parsedTaskMetadata.rewardAssignmentId;
+      }
+      return;
+    }
+
+    const parsedRewardMetadata = parseRewardLifecycleMetadata(event.metadata);
+    if (parsedRewardMetadata) {
+      const existing = rewardLifecycleBuckets.get(parsedRewardMetadata.rewardAssignmentId);
+      if (!existing) {
+        rewardLifecycleBuckets.set(parsedRewardMetadata.rewardAssignmentId, {
+          rewardAssignmentId: parsedRewardMetadata.rewardAssignmentId,
+          rewardOrigin: parsedRewardMetadata.rewardOrigin,
+          events: [{ ...event, parsedMetadata: parsedRewardMetadata }],
+        });
+        return;
+      }
+
+      existing.events.push({ ...event, parsedMetadata: parsedRewardMetadata });
+      if (
+        existing.rewardOrigin !== "STORE_PURCHASE" &&
+        parsedRewardMetadata.rewardOrigin === "STORE_PURCHASE"
+      ) {
+        existing.rewardOrigin = "STORE_PURCHASE";
+      }
+      return;
+    }
+
+    if (!parsedTaskMetadata && !parsedRewardMetadata) {
       legacyHistoryEvents.push(event);
-      return;
-    }
-
-    const existing = taskLifecycleBuckets.get(parsedMetadata.bountyAssignmentId);
-    if (!existing) {
-      taskLifecycleBuckets.set(parsedMetadata.bountyAssignmentId, {
-        bountyAssignmentId: parsedMetadata.bountyAssignmentId,
-        bountyId: parsedMetadata.bountyId,
-        rewardAssignmentId: parsedMetadata.rewardAssignmentId,
-        events: [{ ...event, parsedMetadata }],
-      });
-      return;
-    }
-
-    existing.events.push({ ...event, parsedMetadata });
-    if (!existing.rewardAssignmentId && parsedMetadata.rewardAssignmentId) {
-      existing.rewardAssignmentId = parsedMetadata.rewardAssignmentId;
     }
   });
 
@@ -1602,9 +1789,50 @@ const handleBulkAssign = async () => {
     })
     .sort((a, b) => b.latestTimestamp - a.latestTimestamp);
 
+  const recentRewardLifecycles = Array.from(rewardLifecycleBuckets.values())
+    .map((bucket) => {
+      const events = [...bucket.events].sort((a, b) => a.timestamp - b.timestamp);
+      const latestEvent = events[events.length - 1];
+      const baseRewardEvent =
+        events.find((event) => event.action !== "RECEIVED_TICKETS") || latestEvent;
+      const rewardTitleRaw = baseRewardEvent?.title || latestEvent?.title || "Reward";
+      const rewardTitle = rewardTitleRaw.startsWith("STORE:")
+        ? rewardTitleRaw.replace(/^STORE:\s*/, "")
+        : rewardTitleRaw;
+      const rewardEmoji = baseRewardEvent?.emoji || latestEvent?.emoji || "🎁";
+
+      const ticketCost =
+        events.find((event) => typeof event.parsedMetadata.ticketCost === "number")
+          ?.parsedMetadata.ticketCost ?? null;
+      const refundedTickets =
+        events.find((event) => typeof event.parsedMetadata.refundedTickets === "number")
+          ?.parsedMetadata.refundedTickets ?? null;
+
+      return {
+        ...bucket,
+        events,
+        latestTimestamp: latestEvent?.timestamp || 0,
+        latestStatus: getRewardLifecycleStatus(
+          latestEvent?.action || "ASSIGNED_REWARD",
+          latestEvent?.parsedMetadata
+        ),
+        rewardTitle,
+        rewardEmoji,
+        childName: baseRewardEvent?.userName || latestEvent?.userName || "Child",
+        ticketCost,
+        refundedTickets,
+      };
+    })
+    .sort((a, b) => b.latestTimestamp - a.latestTimestamp);
+
   const unifiedHistoryFeed = [
     ...recentTaskLifecycles.map((lifecycle) => ({
-      kind: "lifecycle" as const,
+      kind: "taskLifecycle" as const,
+      timestamp: lifecycle.latestTimestamp,
+      lifecycle,
+    })),
+    ...recentRewardLifecycles.map((lifecycle) => ({
+      kind: "rewardLifecycle" as const,
       timestamp: lifecycle.latestTimestamp,
       lifecycle,
     })),
@@ -2160,6 +2388,62 @@ const handleBulkAssign = async () => {
                   {editingStoreItemId ? 'Update Item' : 'Add to Store'}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteTargetUser && (
+        <div
+          className="fixed inset-0 bg-black/60 z-[85] flex items-center justify-center"
+          onClick={() => {
+            if (isDeletingUser) return;
+            setDeleteTargetUser(null);
+            setDeleteConfirmationInput("");
+          }}
+        >
+          <div
+            className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-md p-6 mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">
+              {deleteTargetUser.id === currentUser.id ? "Delete your account?" : "Delete this user?"}
+            </h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+              {deleteTargetUser.id === currentUser.id
+                ? "This action is permanent. If this deletion leaves no parent account, the whole family and all data will be deleted."
+                : "This action is permanent. If this deletion leaves no parent account, the whole family and all data will be deleted."}
+            </p>
+            <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">
+              Type DELETE to confirm
+            </label>
+            <input
+              type="text"
+              value={deleteConfirmationInput}
+              onChange={(e) => setDeleteConfirmationInput(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+              placeholder="DELETE"
+            />
+            <div className="flex justify-end gap-3 mt-6">
+              <button
+                type="button"
+                disabled={isDeletingUser}
+                className="px-4 py-2 text-sm rounded-xl border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-60"
+                onClick={() => {
+                  setDeleteTargetUser(null);
+                  setDeleteConfirmationInput("");
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingUser || deleteConfirmationInput !== "DELETE"}
+                className="px-4 py-2 text-sm rounded-xl text-white bg-red-600 hover:bg-red-700 disabled:opacity-60 disabled:cursor-not-allowed"
+                onClick={handleConfirmDeleteUser}
+              >
+                {isDeletingUser ? "Deleting..." : "Delete Account"}
+              </button>
             </div>
           </div>
         </div>
@@ -2913,11 +3197,11 @@ const handleBulkAssign = async () => {
                 ) : (
                   <div className="space-y-3">
                     {unifiedHistoryFeed.map((item) => {
-                      if (item.kind === "lifecycle") {
+                      if (item.kind === "taskLifecycle") {
                         const lifecycle = item.lifecycle;
                         return (
                           <div
-                            key={`lifecycle-${lifecycle.bountyAssignmentId}`}
+                            key={`task-lifecycle-${lifecycle.bountyAssignmentId}`}
                             className="bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-100 dark:border-gray-700"
                           >
                             <div className="flex items-start justify-between gap-3 mb-3">
@@ -2949,7 +3233,7 @@ const handleBulkAssign = async () => {
                                   <span className="mt-1 w-2 h-2 rounded-full bg-indigo-300 dark:bg-indigo-600 shrink-0"></span>
                                   <div className="flex-1">
                                     <p className="font-semibold text-gray-800 dark:text-gray-100">
-                                      {TASK_ACTION_LABELS[event.action] || event.action.replaceAll("_", " ")}
+                                      {ACTION_LABELS[event.action] || event.action.replaceAll("_", " ")}
                                     </p>
                                     <p className="text-[11px] text-gray-500 dark:text-gray-400">
                                       {new Date(event.timestamp).toLocaleString()} by {event.assignerName}
@@ -2999,6 +3283,74 @@ const handleBulkAssign = async () => {
                         );
                       }
 
+                      if (item.kind === "rewardLifecycle") {
+                        const lifecycle = item.lifecycle;
+                        return (
+                          <div
+                            key={`reward-lifecycle-${lifecycle.rewardAssignmentId}`}
+                            className="bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-100 dark:border-gray-700"
+                          >
+                            <div className="flex items-start justify-between gap-3 mb-3">
+                              <div className="flex items-start gap-3">
+                                <span className="text-2xl">{lifecycle.rewardEmoji}</span>
+                                <div>
+                                  <p className="text-sm font-bold text-gray-800 dark:text-white">{lifecycle.rewardTitle}</p>
+                                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                                    Child: <span className="font-semibold">{lifecycle.childName}</span>
+                                  </p>
+                                  {lifecycle.rewardOrigin === "STORE_PURCHASE" && (
+                                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                                      Store purchase request
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                              <span className="px-2 py-1 rounded-full text-[11px] font-bold bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300">
+                                {lifecycle.latestStatus}
+                              </span>
+                            </div>
+
+                            <div className="space-y-2 mb-3">
+                              {lifecycle.events.map((event) => (
+                                <div
+                                  key={event.id}
+                                  className="flex items-start gap-2 text-xs text-gray-600 dark:text-gray-300"
+                                >
+                                  <span className="mt-1 w-2 h-2 rounded-full bg-purple-300 dark:bg-purple-600 shrink-0"></span>
+                                  <div className="flex-1">
+                                    <p className="font-semibold text-gray-800 dark:text-gray-100">
+                                      {ACTION_LABELS[event.action] || event.action.replaceAll("_", " ")}
+                                    </p>
+                                    <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                                      {new Date(event.timestamp).toLocaleString()} by {event.assignerName}
+                                    </p>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+
+                            {lifecycle.rewardOrigin === "STORE_PURCHASE" && (
+                              <div className="mb-3 px-3 py-2 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 text-xs font-semibold text-amber-700 dark:text-amber-300">
+                                {lifecycle.refundedTickets
+                                  ? `Refunded ${lifecycle.refundedTickets} tickets`
+                                  : lifecycle.ticketCost
+                                  ? `Store cost: ${lifecycle.ticketCost} tickets`
+                                  : "Store purchase flow"}
+                              </div>
+                            )}
+
+                            <div className="flex flex-wrap gap-2">
+                              <span
+                                title={lifecycle.rewardAssignmentId}
+                                className="px-2 py-1 rounded-full text-[11px] bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300"
+                              >
+                                Reward Ref: {lifecycle.rewardAssignmentId.slice(0, 8)}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      }
+
                       const event = item.event;
                       return (
                         <div
@@ -3011,7 +3363,7 @@ const handleBulkAssign = async () => {
                             <p className="text-xs text-gray-500 dark:text-gray-400">
                               <span className="font-medium">{event.userName}</span> • {new Date(event.timestamp).toLocaleDateString()}
                               <span className="block text-[10px] text-indigo-500">
-                                {(TASK_ACTION_LABELS[event.action] || event.action.replaceAll("_", " "))} by {event.assignerName}
+                                {(ACTION_LABELS[event.action] || event.action.replaceAll("_", " "))} by {event.assignerName}
                               </span>
                             </p>
                           </div>
@@ -3914,6 +4266,110 @@ const handleBulkAssign = async () => {
                                         </div>
                                     </div>
                                 ))}
+                            </div>
+                        </div>
+
+                        <div className="bg-white dark:bg-gray-800 rounded-2xl p-4 shadow-sm border border-red-200 dark:border-red-900/40">
+                            {!showSelfDeleteConfirm ? (
+                                <button
+                                    onClick={handleStartSelfDelete}
+                                    className="w-full py-3 rounded-xl bg-red-600 text-white font-semibold hover:bg-red-700 transition-colors"
+                                >
+                                    Delete My Account
+                                </button>
+                            ) : (
+                                <>
+                                    <h3 className="font-bold text-lg text-red-700 dark:text-red-300">Delete Account</h3>
+                                    <p className="text-sm text-red-600/90 dark:text-red-300/90 mt-1">
+                                        This action is permanent. If no parent remains, your family and all data may also be deleted.
+                                    </p>
+                                    <label className="block mt-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                                        Type DELETE to confirm
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={selfDeleteConfirmationInput}
+                                        onChange={(e) => {
+                                            setSelfDeleteConfirmationInput(e.target.value);
+                                            if (selfDeleteError) setSelfDeleteError("");
+                                        }}
+                                        className="w-full mt-1 px-3 py-2 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                                        placeholder="DELETE"
+                                    />
+                                    {selfDeleteError && (
+                                        <p className="mt-2 text-xs text-red-600 dark:text-red-400">{selfDeleteError}</p>
+                                    )}
+                                    <div className="flex gap-2 mt-3">
+                                        <button
+                                            type="button"
+                                            onClick={handleCancelSelfDelete}
+                                            disabled={isSelfDeleting}
+                                            className="flex-1 py-2 rounded-xl border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-60"
+                                        >
+                                            Cancel
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={handleConfirmSelfDelete}
+                                            disabled={isSelfDeleting || selfDeleteConfirmationInput !== "DELETE"}
+                                            className="flex-1 py-2 rounded-xl bg-red-600 text-white font-semibold hover:bg-red-700 disabled:opacity-60 disabled:cursor-not-allowed"
+                                        >
+                                            {isSelfDeleting ? "Deleting..." : "Delete Account"}
+                                        </button>
+                                    </div>
+                                </>
+                            )}
+
+                            <div className="mt-4 pt-4 border-t border-red-200 dark:border-red-900/40">
+                                {!showFamilyDeleteConfirm ? (
+                                    <button
+                                        onClick={handleStartFamilyDelete}
+                                        className="w-full py-3 rounded-xl bg-red-700 text-white font-semibold hover:bg-red-800 transition-colors"
+                                    >
+                                        Delete Family
+                                    </button>
+                                ) : (
+                                    <>
+                                        <h3 className="font-bold text-lg text-red-700 dark:text-red-300">Delete Family</h3>
+                                        <p className="text-sm text-red-600/90 dark:text-red-300/90 mt-1">
+                                            This action is permanent. Your family and all data will be deleted.
+                                        </p>
+                                        <label className="block mt-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                                            Type DELETE to confirm
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={familyDeleteConfirmationInput}
+                                            onChange={(e) => {
+                                                setFamilyDeleteConfirmationInput(e.target.value);
+                                                if (familyDeleteError) setFamilyDeleteError("");
+                                            }}
+                                            className="w-full mt-1 px-3 py-2 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                                            placeholder="DELETE"
+                                        />
+                                        {familyDeleteError && (
+                                            <p className="mt-2 text-xs text-red-600 dark:text-red-400">{familyDeleteError}</p>
+                                        )}
+                                        <div className="flex gap-2 mt-3">
+                                            <button
+                                                type="button"
+                                                onClick={handleCancelFamilyDelete}
+                                                disabled={isFamilyDeleting}
+                                                className="flex-1 py-2 rounded-xl border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-60"
+                                            >
+                                                Cancel
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={handleConfirmFamilyDelete}
+                                                disabled={isFamilyDeleting || familyDeleteConfirmationInput !== "DELETE"}
+                                                className="flex-1 py-2 rounded-xl bg-red-700 text-white font-semibold hover:bg-red-800 disabled:opacity-60 disabled:cursor-not-allowed"
+                                            >
+                                                {isFamilyDeleting ? "Deleting..." : "Delete Family"}
+                                            </button>
+                                        </div>
+                                    </>
+                                )}
                             </div>
                         </div>
                     </>

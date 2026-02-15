@@ -32,6 +32,7 @@ Source of truth: route modules in `bribebank-api/src/routes/*` and wiring in `br
 - `GET /families/:familyId/assigned-prizes` (auth)
 - `POST /families/:familyId/assigned-prizes` (auth)
 - `POST /assigned-prizes/:id/claim` (auth)
+- `POST /assigned-prizes/:id/cancel` (auth; assignee-only, pending claims only)
 - `POST /assigned-prizes/:id/approve` (auth)
 - `POST /assigned-prizes/:id/reject` (auth)
 - `DELETE /assigned-prizes/:id` (auth)
@@ -56,7 +57,7 @@ Source of truth: route modules in `bribebank-api/src/routes/*` and wiring in `br
 - `GET /users/:id/avatar-info` (auth)
 - `PATCH /users/:id` (auth)
 - `PATCH /users/:id/password` (auth)
-- `DELETE /users/:id` (auth)
+- `DELETE /users/:id` (auth; supports self-delete and may trigger family teardown when deletion leaves no parents/users)
 
 ### History
 - `GET /families/:familyId/history` (auth)

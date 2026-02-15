@@ -1,35 +1,37 @@
 {
   "latest": {
-    "title": "Smoother startup updates and smarter cache behavior",
-    "date": "2026-02-13",
-    "features": [
-      "The app now checks a build manifest on startup and foreground to detect new deployments immediately.",
-      "App updates can now auto-apply on open with a single guarded reload when a newer build is available."
-    ],
-    "improvements": [
-      "Service worker registration now starts earlier during app boot to reduce update lag.",
-      "Navigation/app shell fetch behavior now prioritizes fresh HTML while keeping offline fallback."
-    ],
-    "fixes": [
-      "Reduced cases where users had to manually refresh after a deployment.",
-      "Excluded update metadata endpoints from service-worker caching to avoid stale version checks."
-    ]
-  },
-  "releases": {
-    "0.1.1": {
-      "title": "Smoother startup updates and smarter cache behavior",
-      "date": "2026-02-13",
+      "title": "Better Account Control; Lifecycle for Rewards",
+      "date": "2026-02-15",
       "features": [
-        "The app now checks a build manifest on startup and foreground to detect new deployments immediately.",
-        "App updates can now auto-apply on open with a single guarded reload when a newer build is available."
+        "Parents and children can now delete their own account in-app with typed DELETE confirmation.",
+        "Self-hosters can now list and delete users/families through host management CLI tools."
       ],
       "improvements": [
-        "Service worker registration now starts earlier during app boot to reduce update lag.",
-        "Navigation/app shell fetch behavior now prioritizes fresh HTML while keeping offline fallback."
+        "Family-member deletion rules are now centralized so app and CLI paths enforce identical safety logic.",
+        "Family teardown now occurs automatically when deletion would leave no remaining parent account.",
+        "Activity feed now groups reward actions into lifecycle cards, including store purchase request/approval/rejection flow."
       ],
       "fixes": [
-        "Reduced cases where users had to manually refresh after a deployment.",
-        "Excluded update metadata endpoints from service-worker caching to avoid stale version checks."
+        "Resolved deletion failures caused by leftover push subscription rows tied to deleted users.",
+        "Member updates now broadcast a dedicated family-members wallet update reason to refresh active clients."
+      ]
+    },
+  "releases": {
+    "0.2.1": {
+      "title": "Better Account Control; Lifecycle for Rewards",
+      "date": "2026-02-15",
+      "features": [
+        "Parents and children can now delete their own account in-app with typed DELETE confirmation.",
+        "Self-hosters can now list and delete users/families through host management CLI tools."
+      ],
+      "improvements": [
+        "Family-member deletion rules are now centralized so app and CLI paths enforce identical safety logic.",
+        "Family teardown now occurs automatically when deletion would leave no remaining parent account.",
+        "Activity feed now groups reward actions into lifecycle cards, including store purchase request/approval/rejection flow."
+      ],
+      "fixes": [
+        "Resolved deletion failures caused by leftover push subscription rows tied to deleted users.",
+        "Member updates now broadcast a dedicated family-members wallet update reason to refresh active clients."
       ]
     },
     "0.1.0": {

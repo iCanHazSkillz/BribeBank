@@ -7,6 +7,8 @@ import { SseEvent } from "../types/sseEvents.js";
 import { addNotification } from "../services/notificationService.js";
 import { sendPushToUser } from "../services/pushService.js";
 import { processAvatar } from "../lib/imageProcessor.js";
+import { addHistoryEvent } from "../services/historyService.js";
+import { buildRewardLifecycleMetadata } from "../lib/rewardLifecycleMetadata.js";
 
 /**
  * GET /families/:familyId/store-items
@@ -326,6 +328,22 @@ export const purchaseStoreItem = async (req: Request, res: Response) => {
         themeColor: "bg-teal-100 text-teal-800 border-teal-200",
         claimedAt: new Date(),
       },
+    });
+
+    await addHistoryEvent({
+      familyId: user.familyId,
+      userId: user.id,
+      userName: user.displayName,
+      emoji: "🛍️",
+      title: assignment.title,
+      action: "STORE_PURCHASE_REQUESTED",
+      assignerName: user.displayName,
+      metadata: buildRewardLifecycleMetadata({
+        rewardAssignmentId: assignment.id,
+        rewardOrigin: "STORE_PURCHASE",
+        linkedAction: "STORE_PURCHASE_REQUESTED",
+        ticketCost: item.cost,
+      }),
     });
 
     // Notify all parents

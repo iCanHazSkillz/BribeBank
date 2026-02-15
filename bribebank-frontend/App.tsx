@@ -61,6 +61,7 @@ const App: React.FC = () => {
   const [isGeneratingRecoveryKey, setIsGeneratingRecoveryKey] = useState(false);
   const [generatedRecoveryKey, setGeneratedRecoveryKey] = useState("");
   const [recoveryAcknowledged, setRecoveryAcknowledged] = useState(false);
+  const [adminViewRefreshKey, setAdminViewRefreshKey] = useState(0);
   const staleLogoutInProgressRef = useRef(false);
 
   // allow AdminView to open a specific tab via deep-link
@@ -215,6 +216,7 @@ const App: React.FC = () => {
     setShowRecoverySetupModal(false);
     setGeneratedRecoveryKey("");
     setRecoveryAcknowledged(false);
+    setAdminViewRefreshKey(0);
   }, []);
 
   const forceLogoutToLogin = useCallback((reason: string) => {
@@ -540,6 +542,19 @@ const App: React.FC = () => {
     }
   };
 
+  const handleRecoverySetupContinue = async () => {
+    // Route first-time setup to Family tab and force an AdminView refresh.
+    setShowRecoverySetupModal(false);
+    setView("admin");
+    setInitialAdminTab("users");
+    setInitialWalletTab(undefined);
+    setGeneratedRecoveryKey("");
+    setRecoveryAcknowledged(false);
+    setAdminViewRefreshKey((prev) => prev + 1);
+    await handleUserUpdate();
+    window.setTimeout(() => setInitialAdminTab(undefined), 0);
+  };
+
   useEffect(() => {
     const ensureRecoveryKeySetup = async () => {
       if (!currentUser || currentUser.role !== UserRole.ADMIN) {
@@ -725,7 +740,7 @@ const App: React.FC = () => {
                         handleLogout();
                         setShowUserMenu(false);
                       }}
-                      className="w-full flex items-center gap-3 px-4 py-2 rounded-lg text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                      className="w-full flex items-center gap-3 px-4 py-2 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                     >
                       <LogOut size={18} />
                       <span className="font-medium">Log Out</span>
@@ -779,7 +794,7 @@ const App: React.FC = () => {
                   </label>
                   <div className="flex justify-end">
                     <button
-                      onClick={() => setShowRecoverySetupModal(false)}
+                      onClick={handleRecoverySetupContinue}
                       disabled={!recoveryAcknowledged}
                       className="px-4 py-2 rounded-lg bg-emerald-600 text-white font-semibold hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed"
                     >
@@ -797,12 +812,14 @@ const App: React.FC = () => {
       <main className="h-full overflow-y-auto no-scrollbar lg:pt-16">
         {view === "admin" && currentUser.role === UserRole.ADMIN && (
           <AdminView 
+            key={`admin-${currentUser.id}-${adminViewRefreshKey}`}
             currentUser={currentUser} 
             initialTab={initialAdminTab}
             onUserUpdate={async () => {
               await handleUserUpdate();
               await fetchBadgeCounts();
             }}
+            onCurrentUserDeleted={clearSessionAndRouteToLogin}
             desktopShowNotifications={showNotifications}
             onDesktopNotificationsToggle={() => setShowNotifications(!showNotifications)}
           />
@@ -818,6 +835,7 @@ const App: React.FC = () => {
               await handleUserUpdate();
               await fetchBadgeCounts();
             }}
+            onCurrentUserDeleted={clearSessionAndRouteToLogin}
           />
         )}
       </main>

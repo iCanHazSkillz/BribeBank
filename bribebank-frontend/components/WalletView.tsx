@@ -14,6 +14,7 @@ interface WalletViewProps {
   desktopShowNotifications?: boolean;
   onDesktopNotificationsToggle?: () => void;
   onUserUpdate?: () => Promise<void>;
+  onCurrentUserDeleted?: () => void;
 }
 
 type WalletTab = "wallet" | "tasks" | "store" | "history";
@@ -50,6 +51,16 @@ type ParsedTaskLifecycleMetadata = {
   fcfsClaimedByName?: string;
 };
 
+type ParsedRewardLifecycleMetadata = {
+  version: 1;
+  lifecycleType: "REWARD";
+  rewardAssignmentId: string;
+  rewardOrigin: "STANDARD" | "STORE_PURCHASE";
+  linkedAction?: string;
+  ticketCost?: number;
+  refundedTickets?: number;
+};
+
 const parseTaskLifecycleMetadata = (
   metadata: string | null | undefined
 ): ParsedTaskLifecycleMetadata | null => {
@@ -63,6 +74,27 @@ const parseTaskLifecycleMetadata = (
       typeof parsed.bountyAssignmentId === "string"
     ) {
       return parsed as ParsedTaskLifecycleMetadata;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+};
+
+const parseRewardLifecycleMetadata = (
+  metadata: string | null | undefined
+): ParsedRewardLifecycleMetadata | null => {
+  if (!metadata) return null;
+  try {
+    const parsed = JSON.parse(metadata);
+    if (
+      parsed &&
+      parsed.version === 1 &&
+      parsed.lifecycleType === "REWARD" &&
+      typeof parsed.rewardAssignmentId === "string" &&
+      (parsed.rewardOrigin === "STANDARD" || parsed.rewardOrigin === "STORE_PURCHASE")
+    ) {
+      return parsed as ParsedRewardLifecycleMetadata;
     }
   } catch {
     return null;
@@ -84,6 +116,21 @@ const TASK_ACTION_LABELS: Record<string, string> = {
   TASK_REJECTED_AFTER_DENIAL: "Denied task rejected",
   EARNED_TICKETS: "Tickets awarded",
   TASK_REWARD_GRANTED: "Reward granted",
+};
+
+const REWARD_ACTION_LABELS: Record<string, string> = {
+  ASSIGNED_REWARD: "Reward assigned",
+  REWARD_CLAIMED: "Reward claimed",
+  REWARD_CLAIM_CANCELLED: "Claim cancelled",
+  REWARD_APPROVED: "Reward approved",
+  REWARD_REJECTED: "Reward rejected",
+  STORE_PURCHASE_REQUESTED: "Store purchase requested",
+  RECEIVED_TICKETS: "Tickets received",
+};
+
+const ACTION_LABELS: Record<string, string> = {
+  ...TASK_ACTION_LABELS,
+  ...REWARD_ACTION_LABELS,
 };
 
 const getTaskLifecycleStatus = (
@@ -114,7 +161,30 @@ const getTaskLifecycleStatus = (
   }
 };
 
-export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab, desktopShowNotifications, onDesktopNotificationsToggle, onUserUpdate }) => {
+const getRewardLifecycleStatus = (
+  action: string,
+  metadata?: ParsedRewardLifecycleMetadata
+): string => {
+  switch (action) {
+    case "ASSIGNED_REWARD":
+      return "Assigned";
+    case "REWARD_CLAIMED":
+    case "STORE_PURCHASE_REQUESTED":
+      return "Awaiting approval";
+    case "REWARD_CLAIM_CANCELLED":
+      return "Cancelled";
+    case "REWARD_APPROVED":
+      return "Approved";
+    case "REWARD_REJECTED":
+      return "Rejected";
+    case "RECEIVED_TICKETS":
+      return metadata?.refundedTickets ? "Refunded" : "Updated";
+    default:
+      return "Updated";
+  }
+};
+
+export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab, desktopShowNotifications, onDesktopNotificationsToggle, onUserUpdate, onCurrentUserDeleted }) => {
   const [tab, setTab] = useState<WalletTab>(() => {
     return initialTab ?? getWalletTabFromUrl() ?? "wallet";
   }); 
@@ -156,6 +226,10 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab,
   const [settingsPassword, setSettingsPassword] = useState('');
   const [settingsAvatarColor, setSettingsAvatarColor] = useState(currentUser.avatarColor);
   const [settingsAvatarUrl, setSettingsAvatarUrl] = useState(currentUser.avatarUrl || '');
+  const [showDeleteAccountConfirm, setShowDeleteAccountConfirm] = useState(false);
+  const [deleteAccountConfirmInput, setDeleteAccountConfirmInput] = useState('');
+  const [deleteAccountError, setDeleteAccountError] = useState('');
+  const [isDeletingCurrentAccount, setIsDeletingCurrentAccount] = useState(false);
   
   // Image cropping state
   const [showImageCropper, setShowImageCropper] = useState(false);
@@ -648,7 +722,49 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab,
     setSettingsPassword('');
     setSettingsAvatarColor(currentUser.avatarColor);
     setSettingsAvatarUrl(currentUser.avatarUrl || '');
+    setShowDeleteAccountConfirm(false);
+    setDeleteAccountConfirmInput('');
+    setDeleteAccountError('');
     setShowAccountSettings(true);
+  };
+
+  const handleCancelClaim = async (assignmentId: string) => {
+    const ok = await confirm({
+      title: "Cancel Card Use?",
+      message:
+        "This cancels your pending request. For regular rewards the card will return to available, and for store purchases your tickets are refunded and the request is removed.",
+      confirmLabel: "Cancel Use",
+      cancelLabel: "Keep Waiting",
+      destructive: true,
+    });
+
+    if (!ok) return;
+
+    try {
+      await storageService.cancelPrizeClaim(assignmentId);
+      setToast({
+        message: "Card use cancelled.",
+        type: "info",
+      });
+      await refreshData();
+      if (onUserUpdate) {
+        await onUserUpdate();
+      }
+    } catch (err) {
+      console.error("Failed to cancel prize claim", err);
+      setToast({
+        message: "Failed to cancel card use. Please try again.",
+        type: "error",
+      });
+    }
+  };
+
+  const handleCloseAccountSettings = () => {
+    if (isDeletingCurrentAccount) return;
+    setShowAccountSettings(false);
+    setShowDeleteAccountConfirm(false);
+    setDeleteAccountConfirmInput('');
+    setDeleteAccountError('');
   };
 
   const handleSaveAccountSettings = async () => {
@@ -695,6 +811,35 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab,
     } catch (err: any) {
       console.error("Failed to update account", err);
       setToast({ message: err.message || "Failed to update account", type: "error" });
+    }
+  };
+
+  const handleDeleteCurrentAccount = async () => {
+    if (deleteAccountConfirmInput !== "DELETE") {
+      setDeleteAccountError("Type DELETE to confirm.");
+      return;
+    }
+
+    let shouldResetDeletingState = true;
+    try {
+      setIsDeletingCurrentAccount(true);
+      setDeleteAccountError("");
+      await storageService.deleteCurrentUser(currentUser.id);
+      handleCloseAccountSettings();
+      if (onCurrentUserDeleted) {
+        shouldResetDeletingState = false;
+        onCurrentUserDeleted();
+      } else {
+        storageService.logout();
+        window.location.reload();
+      }
+    } catch (err: any) {
+      setDeleteAccountError(err?.message || "Failed to delete account.");
+      setToast({ message: err?.message || "Failed to delete account.", type: "error" });
+    } finally {
+      if (shouldResetDeletingState) {
+        setIsDeletingCurrentAccount(false);
+      }
     }
   };
 
@@ -938,29 +1083,61 @@ const groupedPrizes: GroupedPrize[] = Object.values(
       events: Array<HistoryEvent & { parsedMetadata: ParsedTaskLifecycleMetadata }>;
     }
   >();
+  const rewardLifecycleBuckets = new Map<
+    string,
+    {
+      rewardAssignmentId: string;
+      rewardOrigin: "STANDARD" | "STORE_PURCHASE";
+      events: Array<HistoryEvent & { parsedMetadata: ParsedRewardLifecycleMetadata }>;
+    }
+  >();
   const legacyHistoryEvents: HistoryEvent[] = [];
 
   historyEvents.forEach((event) => {
-    const parsedMetadata = parseTaskLifecycleMetadata(event.metadata);
-    if (!parsedMetadata) {
+    const parsedTaskMetadata = parseTaskLifecycleMetadata(event.metadata);
+    if (parsedTaskMetadata) {
+      const existing = taskLifecycleBuckets.get(parsedTaskMetadata.bountyAssignmentId);
+      if (!existing) {
+        taskLifecycleBuckets.set(parsedTaskMetadata.bountyAssignmentId, {
+          bountyAssignmentId: parsedTaskMetadata.bountyAssignmentId,
+          bountyId: parsedTaskMetadata.bountyId,
+          rewardAssignmentId: parsedTaskMetadata.rewardAssignmentId,
+          events: [{ ...event, parsedMetadata: parsedTaskMetadata }],
+        });
+        return;
+      }
+
+      existing.events.push({ ...event, parsedMetadata: parsedTaskMetadata });
+      if (!existing.rewardAssignmentId && parsedTaskMetadata.rewardAssignmentId) {
+        existing.rewardAssignmentId = parsedTaskMetadata.rewardAssignmentId;
+      }
+      return;
+    }
+
+    const parsedRewardMetadata = parseRewardLifecycleMetadata(event.metadata);
+    if (parsedRewardMetadata) {
+      const existing = rewardLifecycleBuckets.get(parsedRewardMetadata.rewardAssignmentId);
+      if (!existing) {
+        rewardLifecycleBuckets.set(parsedRewardMetadata.rewardAssignmentId, {
+          rewardAssignmentId: parsedRewardMetadata.rewardAssignmentId,
+          rewardOrigin: parsedRewardMetadata.rewardOrigin,
+          events: [{ ...event, parsedMetadata: parsedRewardMetadata }],
+        });
+        return;
+      }
+
+      existing.events.push({ ...event, parsedMetadata: parsedRewardMetadata });
+      if (
+        existing.rewardOrigin !== "STORE_PURCHASE" &&
+        parsedRewardMetadata.rewardOrigin === "STORE_PURCHASE"
+      ) {
+        existing.rewardOrigin = "STORE_PURCHASE";
+      }
+      return;
+    }
+
+    if (!parsedTaskMetadata && !parsedRewardMetadata) {
       legacyHistoryEvents.push(event);
-      return;
-    }
-
-    const existing = taskLifecycleBuckets.get(parsedMetadata.bountyAssignmentId);
-    if (!existing) {
-      taskLifecycleBuckets.set(parsedMetadata.bountyAssignmentId, {
-        bountyAssignmentId: parsedMetadata.bountyAssignmentId,
-        bountyId: parsedMetadata.bountyId,
-        rewardAssignmentId: parsedMetadata.rewardAssignmentId,
-        events: [{ ...event, parsedMetadata }],
-      });
-      return;
-    }
-
-    existing.events.push({ ...event, parsedMetadata });
-    if (!existing.rewardAssignmentId && parsedMetadata.rewardAssignmentId) {
-      existing.rewardAssignmentId = parsedMetadata.rewardAssignmentId;
     }
   });
 
@@ -1016,9 +1193,50 @@ const groupedPrizes: GroupedPrize[] = Object.values(
     })
     .sort((a, b) => b.latestTimestamp - a.latestTimestamp);
 
+  const recentRewardLifecycles = Array.from(rewardLifecycleBuckets.values())
+    .map((bucket) => {
+      const events = [...bucket.events].sort((a, b) => a.timestamp - b.timestamp);
+      const latestEvent = events[events.length - 1];
+      const baseRewardEvent =
+        events.find((event) => event.action !== "RECEIVED_TICKETS") || latestEvent;
+      const rewardTitleRaw = baseRewardEvent?.title || latestEvent?.title || "Reward";
+      const rewardTitle = rewardTitleRaw.startsWith("STORE:")
+        ? rewardTitleRaw.replace(/^STORE:\s*/, "")
+        : rewardTitleRaw;
+      const rewardEmoji = baseRewardEvent?.emoji || latestEvent?.emoji || "🎁";
+
+      const ticketCost =
+        events.find((event) => typeof event.parsedMetadata.ticketCost === "number")
+          ?.parsedMetadata.ticketCost ?? null;
+      const refundedTickets =
+        events.find((event) => typeof event.parsedMetadata.refundedTickets === "number")
+          ?.parsedMetadata.refundedTickets ?? null;
+
+      return {
+        ...bucket,
+        events,
+        latestTimestamp: latestEvent?.timestamp || 0,
+        latestStatus: getRewardLifecycleStatus(
+          latestEvent?.action || "ASSIGNED_REWARD",
+          latestEvent?.parsedMetadata
+        ),
+        rewardTitle,
+        rewardEmoji,
+        childName: baseRewardEvent?.userName || latestEvent?.userName || "Child",
+        ticketCost,
+        refundedTickets,
+      };
+    })
+    .sort((a, b) => b.latestTimestamp - a.latestTimestamp);
+
   const unifiedHistoryFeed = [
     ...recentTaskLifecycles.map((lifecycle) => ({
-      kind: "lifecycle" as const,
+      kind: "taskLifecycle" as const,
+      timestamp: lifecycle.latestTimestamp,
+      lifecycle,
+    })),
+    ...recentRewardLifecycles.map((lifecycle) => ({
+      kind: "rewardLifecycle" as const,
       timestamp: lifecycle.latestTimestamp,
       lifecycle,
     })),
@@ -1308,9 +1526,24 @@ const groupedPrizes: GroupedPrize[] = Object.values(
                       status={group.status}
                       count={group.count}
                       assignedBy={group.assignedBy}
-                      actionLabel={group.status === PrizeStatus.AVAILABLE ? "Use Card" : "Waiting..."}
-                      onClick={group.status === PrizeStatus.AVAILABLE ? () => handleClaim(group.ids[0]) : undefined}
-                      disabled={group.status === PrizeStatus.PENDING_APPROVAL}
+                      actionLabel={
+                        group.status === PrizeStatus.AVAILABLE
+                          ? "Use Card"
+                          : group.status === PrizeStatus.PENDING_APPROVAL
+                          ? "Cancel Use"
+                          : "Waiting..."
+                      }
+                      onClick={
+                        group.status === PrizeStatus.AVAILABLE
+                          ? () => handleClaim(group.ids[0])
+                          : group.status === PrizeStatus.PENDING_APPROVAL
+                          ? () => void handleCancelClaim(group.ids[0])
+                          : undefined
+                      }
+                      disabled={
+                        group.status !== PrizeStatus.AVAILABLE &&
+                        group.status !== PrizeStatus.PENDING_APPROVAL
+                      }
                       />
                       {group.status === PrizeStatus.AVAILABLE && (
                           <div className="text-xs text-gray-400 dark:text-gray-500 text-center mt-1 mb-2">Assigned by {group.assignedBy}</div>
@@ -1612,7 +1845,7 @@ const groupedPrizes: GroupedPrize[] = Object.values(
         {showAccountSettings && (
           <div
             className="fixed inset-0 bg-black/60 z-[80] flex items-center justify-center"
-            onClick={() => setShowAccountSettings(false)}
+            onClick={handleCloseAccountSettings}
           >
             <div
               className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-md p-6 mx-4"
@@ -1749,21 +1982,86 @@ const groupedPrizes: GroupedPrize[] = Object.values(
                     placeholder="Leave blank to keep current"
                   />
                 </div>
+
+                <div className="pt-4 border-t border-red-200 dark:border-red-900/40">
+                  {!showDeleteAccountConfirm ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowDeleteAccountConfirm(true);
+                        setDeleteAccountConfirmInput('');
+                        setDeleteAccountError('');
+                      }}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-2 text-sm rounded-xl text-white bg-red-600 hover:bg-red-700"
+                    >
+                      <Trash2 size={16} />
+                      Delete My Account
+                    </button>
+                  ) : (
+                    <>
+                      <h4 className="text-sm font-semibold text-red-700 dark:text-red-300">Delete Account</h4>
+                      <p className="mt-1 text-xs text-red-600 dark:text-red-300">
+                        This action is permanent. If no parent remains, your family and all data may also be deleted.
+                      </p>
+                      <label className="block mt-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                        Type DELETE to confirm
+                      </label>
+                      <input
+                        type="text"
+                        value={deleteAccountConfirmInput}
+                        onChange={(e) => {
+                          setDeleteAccountConfirmInput(e.target.value);
+                          if (deleteAccountError) setDeleteAccountError("");
+                        }}
+                        className="w-full mt-1 px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg"
+                        placeholder="DELETE"
+                      />
+                      {deleteAccountError && (
+                        <p className="mt-2 text-xs text-red-600 dark:text-red-400">{deleteAccountError}</p>
+                      )}
+                      <div className="flex gap-2 mt-3">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (isDeletingCurrentAccount) return;
+                            setShowDeleteAccountConfirm(false);
+                            setDeleteAccountConfirmInput('');
+                            setDeleteAccountError('');
+                          }}
+                          disabled={isDeletingCurrentAccount}
+                          className="flex-1 px-4 py-2 text-sm rounded-xl border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-60"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleDeleteCurrentAccount}
+                          disabled={isDeletingCurrentAccount || deleteAccountConfirmInput !== "DELETE"}
+                          className="flex-1 px-4 py-2 text-sm rounded-xl text-white bg-red-600 hover:bg-red-700 disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          {isDeletingCurrentAccount ? "Deleting..." : "Delete Account"}
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
 
               <div className="flex justify-end gap-3 mt-6">
                 <button
                   type="button"
                   className="px-4 py-2 text-sm rounded-xl border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700"
-                  onClick={() => setShowAccountSettings(false)}
+                  onClick={handleCloseAccountSettings}
+                  disabled={isDeletingCurrentAccount}
                 >
                   Cancel
                 </button>
 
                 <button
                   type="button"
-                  className="px-4 py-2 text-sm rounded-xl text-white bg-blue-600 hover:bg-blue-700"
+                  className="px-4 py-2 text-sm rounded-xl text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60"
                   onClick={handleSaveAccountSettings}
+                  disabled={isDeletingCurrentAccount}
                 >
                   Save Changes
                 </button>
@@ -2048,11 +2346,11 @@ const groupedPrizes: GroupedPrize[] = Object.values(
                 ) : (
                   <div className="space-y-3">
                     {unifiedHistoryFeed.map((item) => {
-                      if (item.kind === "lifecycle") {
+                      if (item.kind === "taskLifecycle") {
                         const lifecycle = item.lifecycle;
                         return (
                           <div
-                            key={`lifecycle-${lifecycle.bountyAssignmentId}`}
+                            key={`task-lifecycle-${lifecycle.bountyAssignmentId}`}
                             className="bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-100 dark:border-gray-700"
                           >
                             <div className="flex items-start justify-between gap-3 mb-3">
@@ -2081,7 +2379,7 @@ const groupedPrizes: GroupedPrize[] = Object.values(
                                   <span className="mt-1 w-2 h-2 rounded-full bg-indigo-300 dark:bg-indigo-600 shrink-0"></span>
                                   <div className="flex-1">
                                     <p className="font-semibold text-gray-800 dark:text-gray-100">
-                                      {TASK_ACTION_LABELS[event.action] || event.action.replaceAll("_", " ")}
+                                      {ACTION_LABELS[event.action] || event.action.replaceAll("_", " ")}
                                     </p>
                                     <p className="text-[11px] text-gray-500 dark:text-gray-400">
                                       {new Date(event.timestamp).toLocaleString()} by {event.assignerName}
@@ -2120,6 +2418,71 @@ const groupedPrizes: GroupedPrize[] = Object.values(
                         );
                       }
 
+                      if (item.kind === "rewardLifecycle") {
+                        const lifecycle = item.lifecycle;
+                        return (
+                          <div
+                            key={`reward-lifecycle-${lifecycle.rewardAssignmentId}`}
+                            className="bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-100 dark:border-gray-700"
+                          >
+                            <div className="flex items-start justify-between gap-3 mb-3">
+                              <div className="flex items-start gap-3">
+                                <span className="text-2xl">{lifecycle.rewardEmoji}</span>
+                                <div>
+                                  <p className="text-sm font-bold text-gray-800 dark:text-white">{lifecycle.rewardTitle}</p>
+                                  {lifecycle.rewardOrigin === "STORE_PURCHASE" && (
+                                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                                      Store purchase request
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                              <span className="px-2 py-1 rounded-full text-[11px] font-bold bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300">
+                                {lifecycle.latestStatus}
+                              </span>
+                            </div>
+
+                            <div className="space-y-2 mb-3">
+                              {lifecycle.events.map((event) => (
+                                <div
+                                  key={event.id}
+                                  className="flex items-start gap-2 text-xs text-gray-600 dark:text-gray-300"
+                                >
+                                  <span className="mt-1 w-2 h-2 rounded-full bg-purple-300 dark:bg-purple-600 shrink-0"></span>
+                                  <div className="flex-1">
+                                    <p className="font-semibold text-gray-800 dark:text-gray-100">
+                                      {ACTION_LABELS[event.action] || event.action.replaceAll("_", " ")}
+                                    </p>
+                                    <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                                      {new Date(event.timestamp).toLocaleString()} by {event.assignerName}
+                                    </p>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+
+                            {lifecycle.rewardOrigin === "STORE_PURCHASE" && (
+                              <div className="mb-3 px-3 py-2 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 text-xs font-semibold text-amber-700 dark:text-amber-300">
+                                {lifecycle.refundedTickets
+                                  ? `Refunded ${lifecycle.refundedTickets} tickets`
+                                  : lifecycle.ticketCost
+                                  ? `Store cost: ${lifecycle.ticketCost} tickets`
+                                  : "Store purchase flow"}
+                              </div>
+                            )}
+
+                            <div className="flex flex-wrap gap-2">
+                              <span
+                                title={lifecycle.rewardAssignmentId}
+                                className="px-2 py-1 rounded-full text-[11px] bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300"
+                              >
+                                Reward Ref: {lifecycle.rewardAssignmentId.slice(0, 8)}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      }
+
                       const event = item.event;
                       return (
                         <div
@@ -2130,7 +2493,7 @@ const groupedPrizes: GroupedPrize[] = Object.values(
                           <div className="flex-1">
                             <h4 className="font-bold text-gray-800 dark:text-white">{event.title}</h4>
                             <p className="text-xs text-gray-500 dark:text-gray-400">
-                              {new Date(event.timestamp).toLocaleDateString()} • {(TASK_ACTION_LABELS[event.action] || event.action.replaceAll("_", " "))}
+                              {new Date(event.timestamp).toLocaleDateString()} • {(ACTION_LABELS[event.action] || event.action.replaceAll("_", " "))}
                               <span className="block text-[10px] text-indigo-500">By {event.assignerName}</span>
                             </p>
                           </div>

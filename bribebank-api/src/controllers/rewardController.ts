@@ -7,6 +7,10 @@ import { broadcastToFamily } from "../realtime/eventBus.js";
 import { SseEvent } from "../types/sseEvents";
 import { addHistoryEvent } from "../services/historyService.js";
 import { addNotification } from "../services/notificationService.js";
+import {
+  buildRewardLifecycleMetadata,
+  rewardOriginFromTitle,
+} from "../lib/rewardLifecycleMetadata.js";
 
 // --- reward templates ----------------------------------------
 
@@ -281,6 +285,11 @@ export const assignPrize = async (req: Request, res: Response) => {
           emoji,
           action: "ASSIGNED_REWARD",
           assignerName: parentName,
+          metadata: buildRewardLifecycleMetadata({
+            rewardAssignmentId: created.id,
+            rewardOrigin: "STANDARD",
+            linkedAction: "ASSIGNED_REWARD",
+          }),
         },
         tx
       );
@@ -386,6 +395,11 @@ export const claimAssignedPrize = async (req: Request, res: Response) => {
       action: "REWARD_CLAIMED",
       // actor = child
       assignerName: childName,
+      metadata: buildRewardLifecycleMetadata({
+        rewardAssignmentId: assignment.id,
+        rewardOrigin: rewardOriginFromTitle(assignment.title),
+        linkedAction: "REWARD_CLAIMED",
+      }),
     });
 
     // Notify all parents in the family
@@ -438,6 +452,142 @@ export const claimAssignedPrize = async (req: Request, res: Response) => {
     return res
       .status(500)
       .json({ error: "INTERNAL_SERVER_ERROR" });
+  }
+};
+
+export const cancelClaimedPrize = async (req: Request, res: Response) => {
+  const { id } = req.params;
+
+  if (!id) {
+    return res.status(400).json({ error: "MISSING_ASSIGNMENT_ID" });
+  }
+
+  try {
+    const assignment = await prisma.assignedPrize.findUnique({
+      where: { id },
+    });
+
+    if (!assignment) {
+      return res.status(404).json({ error: "NOT_FOUND" });
+    }
+
+    const user = await assertFamilyMember(req, assignment.familyId);
+
+    // Only assigned child can cancel their own claim request.
+    if (user.id !== assignment.userId) {
+      return res.status(403).json({ error: "ONLY_ASSIGNEE_CAN_CANCEL" });
+    }
+
+    if (assignment.status !== PrizeStatus.PENDING_APPROVAL) {
+      return res.status(400).json({ error: "INVALID_STATUS" });
+    }
+
+    const childName = user.displayName || user.username || "Child";
+    const title = assignment.title || "Reward";
+    const emoji = assignment.emoji || "🎁";
+    const isStorePurchase = title.startsWith("STORE:");
+    const displayTitle = isStorePurchase ? title.substring(7).trim() : title;
+
+    await prisma.$transaction(async (tx) => {
+      let refundAmount = 0;
+
+      if (isStorePurchase) {
+        const storeItem = await tx.storeItem.findFirst({
+          where: {
+            familyId: assignment.familyId,
+            title: displayTitle,
+          },
+          select: { cost: true },
+        });
+
+        refundAmount = storeItem?.cost ?? 0;
+      }
+
+      if (isStorePurchase && refundAmount > 0) {
+        await tx.user.update({
+          where: { id: assignment.userId },
+          data: {
+            ticketBalance: {
+              increment: refundAmount,
+            },
+          },
+        });
+
+        await addHistoryEvent(
+          {
+            familyId: assignment.familyId,
+            userId: assignment.userId,
+            userName: childName,
+            emoji: "🎟️",
+            title: `Refunded ${refundAmount} tickets`,
+            action: "RECEIVED_TICKETS",
+            assignerName: childName,
+            metadata: buildRewardLifecycleMetadata({
+              rewardAssignmentId: assignment.id,
+              rewardOrigin: "STORE_PURCHASE",
+              linkedAction: "RECEIVED_TICKETS",
+              refundedTickets: refundAmount,
+            }),
+          },
+          tx
+        );
+      }
+
+      if (isStorePurchase) {
+        // Store purchases are one-time purchase requests.
+        // On child cancel we refund and remove the pending assignment so it cannot be reused for free.
+        await tx.assignedPrize.delete({
+          where: { id },
+        });
+      } else {
+        await tx.assignedPrize.update({
+          where: { id },
+          data: {
+            status: PrizeStatus.AVAILABLE,
+            claimedAt: null,
+          },
+        });
+      }
+
+      await addHistoryEvent(
+        {
+          familyId: assignment.familyId,
+          userId: assignment.userId,
+          userName: childName,
+          emoji,
+          title,
+          action: "REWARD_CLAIM_CANCELLED",
+          assignerName: childName,
+          metadata: buildRewardLifecycleMetadata({
+            rewardAssignmentId: assignment.id,
+            rewardOrigin: rewardOriginFromTitle(assignment.title),
+            linkedAction: "REWARD_CLAIM_CANCELLED",
+            refundedTickets:
+              isStorePurchase && refundAmount > 0 ? refundAmount : undefined,
+          }),
+        },
+        tx
+      );
+
+    });
+
+    const event: SseEvent = {
+      type: "WALLET_UPDATE",
+      familyId: assignment.familyId,
+      reason: "REWARD_ASSIGNED",
+      timestamp: Date.now(),
+    };
+
+    broadcastToFamily(assignment.familyId, event);
+
+    return res.status(204).send();
+  } catch (err: any) {
+    if (err && typeof err === "object" && "status" in err) {
+      return res.status(err.status).json({ error: err.error });
+    }
+
+    console.error("cancelClaimedPrize error:", err);
+    return res.status(500).json({ error: "INTERNAL_SERVER_ERROR" });
   }
 };
 
@@ -495,6 +645,11 @@ export const approveAssignedPrize = async (req: Request, res: Response) => {
       title,
       action: "REWARD_APPROVED",
       assignerName: parentName,
+      metadata: buildRewardLifecycleMetadata({
+        rewardAssignmentId: assignment.id,
+        rewardOrigin: rewardOriginFromTitle(assignment.title),
+        linkedAction: "REWARD_APPROVED",
+      }),
     });
 
     await addNotification({
@@ -622,6 +777,12 @@ export const rejectAssignedPrize = async (req: Request, res: Response) => {
         title: `Refunded ${refundAmount} tickets`,
         action: "RECEIVED_TICKETS",
         assignerName: parent.displayName || parent.username || "Parent",
+        metadata: buildRewardLifecycleMetadata({
+          rewardAssignmentId: assignment.id,
+          rewardOrigin: "STORE_PURCHASE",
+          linkedAction: "RECEIVED_TICKETS",
+          refundedTickets: refundAmount,
+        }),
       });
     }
 
@@ -636,6 +797,12 @@ export const rejectAssignedPrize = async (req: Request, res: Response) => {
       title: title,
       action: "REWARD_REJECTED",
       assignerName: parentName,
+      metadata: buildRewardLifecycleMetadata({
+        rewardAssignmentId: assignment.id,
+        rewardOrigin: rewardOriginFromTitle(assignment.title),
+        linkedAction: "REWARD_REJECTED",
+        refundedTickets: isStorePurchase ? refundAmount : undefined,
+      }),
     });
 
     await addNotification({

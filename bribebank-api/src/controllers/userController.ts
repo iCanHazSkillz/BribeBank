@@ -4,6 +4,9 @@ import { prisma } from "../lib/prisma.js";
 import { assertFamilyMember, assertParent, getRequestUser } from "../lib/authHelpers.js";
 import bcrypt from "bcryptjs";
 import { processAvatar } from "../lib/imageProcessor.js";
+import { deleteUserWithRules } from "../services/accountDeletionService.js";
+import { broadcastToFamily } from "../realtime/eventBus.js";
+import { SseEvent } from "../types/sseEvents.js";
 
 const AVATAR_COLORS = [
   "bg-indigo-500",
@@ -319,50 +322,55 @@ export const deleteUser = async (req: Request, res: Response) => {
   }
 
   try {
-    // 1) Find the target user
     const target = await prisma.user.findUnique({
       where: { id },
+      select: {
+        id: true,
+        familyId: true,
+      },
     });
 
     if (!target) {
       return res.status(404).json({ error: "NOT_FOUND" });
     }
 
-    // 2) AuthZ: requester must be a parent in the same family
-    const requester = await assertFamilyMember(req, target.familyId);
-    assertParent(requester);
-
-    // Optional extra safety: never allow backend self-delete
-    if (requester.id === target.id) {
-      return res.status(400).json({ error: "CANNOT_DELETE_SELF" });
+    const requester = await getRequestUser(req);
+    if (!requester) {
+      return res.status(401).json({ error: "UNAUTHENTICATED" });
     }
 
-    // 3) Delete dependent rows first, then the user, in a transaction
-    await prisma.$transaction([
-      prisma.notification.deleteMany({
-        where: { userId: id },
-      }),
-      prisma.historyEvent.deleteMany({
-        where: { userId: id },
-      }),
-      prisma.bountyAssignment.deleteMany({
-        where: { userId: id },
-      }),
-      prisma.assignedPrize.deleteMany({
-        where: { userId: id },
-      }),
-      prisma.claim.deleteMany({
-        where: { userId: id },
-      }),
-      prisma.user.delete({
-        where: { id },
-      }),
-    ]);
+    if (requester.familyId !== target.familyId) {
+      return res.status(403).json({ error: "FORBIDDEN" });
+    }
+
+    const isSelfDelete = requester.id === target.id;
+    if (!isSelfDelete) {
+      assertParent(requester);
+    }
+
+    const result = await deleteUserWithRules(target.id, {
+      source: "APP_USER",
+      actorUserId: requester.id,
+      actorLabel: requester.username,
+    });
+
+    if (result.mode === "single_user_delete") {
+      const event: SseEvent = {
+        type: "WALLET_UPDATE",
+        familyId: target.familyId,
+        reason: "FAMILY_MEMBERS_UPDATED",
+        timestamp: Date.now(),
+      };
+      broadcastToFamily(target.familyId, event);
+    }
 
     return res.status(204).send();
   } catch (err: any) {
+    if (err && typeof err === "object" && "status" in err && "code" in err) {
+      return res.status(err.status).json({ error: err.code });
+    }
+
     if (err && typeof err === "object" && "status" in err) {
-      // bubble up assertFamilyMember / assertParent errors
       return res.status(err.status).json({ error: err.error });
     }
 

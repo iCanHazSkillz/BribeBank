@@ -8,6 +8,7 @@ import {
   getFamilyAssignedPrizes,
   assignPrize,
   claimAssignedPrize,
+  cancelClaimedPrize,
   approveAssignedPrize,
   rejectAssignedPrize,
   deleteAssignedPrize,
@@ -36,6 +37,11 @@ router.post(
   "/assigned-prizes/:id/claim",
   authMiddleware,
   claimAssignedPrize
+);
+router.post(
+  "/assigned-prizes/:id/cancel",
+  authMiddleware,
+  cancelClaimedPrize
 );
 router.post(
   "/assigned-prizes/:id/approve",

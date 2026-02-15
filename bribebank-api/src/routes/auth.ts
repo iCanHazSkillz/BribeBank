@@ -7,7 +7,8 @@ import {
     getMe,
     getRecoveryKeyStatus,
     regenerateRecoveryKey,
-    resetForgottenPassword
+    resetForgottenPassword,
+    deleteCurrentFamily
 } from "../controllers/authController.js";
 import { authMiddleware } from "../middleware/authMiddleware.js";
 
@@ -20,6 +21,7 @@ router.post("/regenerate-code", authMiddleware, regenerateCode);
 router.get("/me", authMiddleware, getMe);
 router.get("/recovery-key/status", authMiddleware, getRecoveryKeyStatus);
 router.post("/recovery-key/regenerate", authMiddleware, regenerateRecoveryKey);
+router.delete("/family", authMiddleware, deleteCurrentFamily);
 router.post("/forgot-password/reset", resetForgottenPassword);
 
 export default router;

@@ -15,6 +15,7 @@ The app supports real-time updates through SSE and web push notifications.
 
 ### Parent/Admin features
 - Family and user management (parent/child roles)
+- In-app account self-delete with typed confirmation (`DELETE`)
 - Parent password recovery via family recovery key
 - Reward template CRUD and assignment
 - Bounty template CRUD, assignment, verification, denial, and cancellation
@@ -32,6 +33,7 @@ The app supports real-time updates through SSE and web push notifications.
 - History and unread notifications
 - Store purchases with ticket balance
 - Wheel spin experience (if enabled by family)
+- In-app account self-delete from profile menu with typed confirmation (`DELETE`)
 
 ## Tech Stack
 
@@ -177,6 +179,41 @@ Notes:
 - By default it rotates the family recovery key and prints the new key once.
 - Recovery actions are audited as `MASTER_PASSWORD_RECOVERY` history events.
 - If you see `Unknown argument sessionVersion` or `passwordRecoveryKeyHash`, your local Prisma client is stale. Run `npx prisma generate` and retry.
+
+## Self-Hoster User/Family Management
+BribeBank also includes host-level listing and deletion tooling.
+
+### Docker assumptions (production)
+- Run host tooling from the running API container (`bribebank-api`).
+- Self-hoster management is CLI-only (no self-hoster HTTP API).
+
+### CLI list/delete commands (inside running container)
+
+Run directly from host against the running container:
+
+```bash
+docker compose exec bribebank-api node dist/scripts/selfHosterList.js --families
+docker compose exec bribebank-api node dist/scripts/selfHosterList.js --users
+docker compose exec bribebank-api node dist/scripts/selfHosterList.js --users --family-id <familyId>
+docker compose exec bribebank-api node dist/scripts/selfHosterDelete.js --user-id <userId> --yes
+docker compose exec bribebank-api node dist/scripts/selfHosterDelete.js --family-id <familyId> --yes
+```
+
+Or open a shell first:
+
+```bash
+docker compose exec bribebank-api sh
+node dist/scripts/selfHosterList.js --families
+node dist/scripts/selfHosterList.js --users --family-id <familyId>
+node dist/scripts/selfHosterDelete.js --user-id <userId> --yes
+node dist/scripts/selfHosterDelete.js --family-id <familyId> --yes
+```
+
+Notes:
+- Deletion commands require `--yes`.
+- User deletion follows app deletion rules:
+  - deleting the final account deletes the family
+  - deleting a parent that would leave zero parents also tears down the family
 
 ## Agent and Contract Docs
 - System map: `docs/agent/system-map.md`
