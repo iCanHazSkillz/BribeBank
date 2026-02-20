@@ -16,8 +16,33 @@
       "Added account security options to Settings tab for passkey and PIN login management."
     ],
     "fixes": [
-      "Fixed activity feed wording on sender and receiver when sending tickets to a child."
+      "Fixed activity feed wording on sender and receiver when sending tickets to a child.",
+      "Fixed app icon not updating on Android after the latest release."
     ]
+  },
+  "releases": {
+    "0.3.1": {
+      "title": "New Recurring Tasks, Streaks Can Earn You Extra Rewards, And More!",
+      "date": "2026-02-20",
+      "features": [
+        "Recurring task series can now be enabled per task template with daily, weekly, monthly, or yearly cadence options.",
+        "Recurring task streaks with milestone rewards (ticket or custom) are now supported.",
+        "Parents can now pause or resume recurring series directly from the Manage activity feed.",
+        "Family timezone can now be explicitly configured, with container timezone fallback when unset."
+      ],
+      "improvements": [
+        "Renamed the Family Tab to Settings for more intuitive navigation and clarity.",
+        "Added family timezone configuration in Settings tab with smart defaults for better scheduling and consistency across timezones.",
+        "Redesigned app icons and splash screens for a fresh new look.",
+        "Better caching of credentials for easier login experiences, especially on mobile.",
+        "Added date and time to notifications for better context on recent activity.",
+        "Moved Ticket Conversion Rate to Settings tab",
+        "Added account security options to Settings tab for passkey and PIN login management."
+      ],
+      "fixes": [
+        "Fixed activity feed wording on sender and receiver when sending tickets to a child.",
+        "Fixed app icon not updating on Android after the latest release."
+      ]
   },
   "releases": {
     "0.3.0": {

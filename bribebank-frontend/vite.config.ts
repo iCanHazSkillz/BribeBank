@@ -10,19 +10,25 @@ export default defineConfig(({ mode }) => {
     const buildId = Date.now().toString();
     const releaseVersion = env.RELEASE_VERSION || packageJson.version || '0.0.0';
     
-    // Plugin to inject build timestamp into service worker
+    // Plugin to inject build timestamp into PWA assets
     const swTimestampPlugin = {
       name: 'sw-timestamp',
       apply: 'build',
       writeBundle() {
         try {
-          const swPath = 'dist/service-worker.js';
-          let swContent = readFileSync(swPath, 'utf-8');
-          swContent = swContent.replace(/{{BUILD_TIMESTAMP}}/g, buildId);
-          writeFileSync(swPath, swContent);
-          console.log(`✓ Service Worker cache busted with build id: ${buildId}`);
+          const filesToPatch = [
+            'dist/service-worker.js',
+            'dist/manifest.webmanifest',
+            'dist/index.html',
+          ];
+          for (const filePath of filesToPatch) {
+            let content = readFileSync(filePath, 'utf-8');
+            content = content.replace(/{{BUILD_TIMESTAMP}}/g, buildId);
+            writeFileSync(filePath, content);
+          }
+          console.log(`✓ PWA assets cache busted with build id: ${buildId}`);
         } catch (error: any) {
-          console.warn(`⚠ Could not update service worker timestamp:`, error.message);
+          console.warn(`⚠ Could not update PWA asset timestamps:`, error.message);
         }
       }
     };
