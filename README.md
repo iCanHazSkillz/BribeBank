@@ -19,9 +19,13 @@ The app supports real-time updates through SSE and web push notifications.
 - Parent password recovery via family recovery key
 - Reward template CRUD and assignment
 - Bounty template CRUD, assignment, verification, denial, and cancellation
+- Recurring task series (daily/weekly/monthly/yearly) with schedule selectors
+- Parent pause/resume controls for recurring series in Manage activity feed
+- Recurring streak counters and milestone rewards (tickets or custom)
 - Optional task deadlines and deadline warning notifications
 - Optional photo proof for task completion
 - Ticket grants and conversion-rate configuration
+- Family timezone setting for recurrence scheduling (container timezone fallback until set)
 - Store item CRUD and purchase tracking
 - Wheel segment configuration, reset, and spins
 - Template export/import (rewards and bounties)
@@ -30,6 +34,7 @@ The app supports real-time updates through SSE and web push notifications.
 ### Child features
 - Wallet of assigned rewards
 - Task workflow (accept/complete/resubmit denied work)
+- Recurring task cards with streak display and paused-state lockout when parent pauses series
 - History and unread notifications
 - Store purchases with ticket balance
 - Wheel spin experience (if enabled by family)
@@ -139,6 +144,7 @@ docker compose up -d
 - Backend `JWT_SECRET` and `DATABASE_URL` are loaded through backend env.
 - Password changes immediately invalidate old sessions by bumping a server-side `sessionVersion`.
 - Admin deep links support both `adminTab=manage` and legacy `adminTab=approvals` (mapped to Manage).
+- Recurring scheduling uses `family.timezone` when set; otherwise it falls back to container timezone (or UTC).
 
 ## PWA Update Behavior
 - App update checks happen on startup and when the app returns to foreground.
@@ -241,7 +247,6 @@ rg "type:" bribebank-api/src/types/sseEvents.ts bribebank-frontend/types/sseEven
 ```
 
 ## Roadmap Ideas
-- Scheduled/recurring bounties
 - Exportable history for parents
 - Additional reporting/analytics for family activity
 

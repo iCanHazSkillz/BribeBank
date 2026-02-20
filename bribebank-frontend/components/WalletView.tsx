@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { AssignedPrize, PrizeStatus, PrizeTemplate, User, PrizeType, HistoryEvent, AppNotification, BountyAssignment, BountyTemplate, BountyStatus, StoreItem } from '../types';
+import { AssignedPrize, PrizeStatus, PrizeTemplate, User, PrizeType, HistoryEvent, AppNotification, AssignedBounty, BountyTemplate, BountyStatus, StoreItem } from '../types';
 import { storageService } from '../services/storageService';
 import { API_BASE } from "../config";
 import { PrizeCard } from './PrizeCard';
 import { DeadlineDisplay } from './DeadlineDisplay';
-import { History, Ticket, Bell, X, CheckCircle, XCircle, ListTodo, Play, Trash2, ThumbsUp, ThumbsDown, gift, ShoppingBag, Link as LinkIcon, Image as ImageIcon, Settings, User as UserIcon, Search, ArrowUp, Sun, Moon, Clock } from 'lucide-react';
+import { History, Ticket, Bell, X, CheckCircle, XCircle, ListTodo, Play, Trash2, ThumbsUp, ThumbsDown, ShoppingBag, Link as LinkIcon, Image as ImageIcon, Settings, User as UserIcon, Search, ArrowUp, Sun, Moon, Clock } from 'lucide-react';
 import { SseEvent } from "../types/sseEvents";
 import { useTheme } from '../contexts/ThemeContext';
 
@@ -112,10 +112,16 @@ const TASK_ACTION_LABELS: Record<string, string> = {
   DENIED_TASK: "Parent denied task",
   TASK_CANCELLED: "Task cancelled",
   TASK_MISSED_FCFS: "Missed (claimed by another child)",
+  TASK_EXPIRED_RECURRING: "Missed recurring occurrence",
+  TASK_RECURRING_PAUSED: "Series paused",
+  TASK_RECURRING_RESUMED: "Series resumed",
+  TASK_RECURRING_STOPPED: "Series stopped",
   TASK_REFUSED: "Task refused",
   TASK_REJECTED_AFTER_DENIAL: "Denied task rejected",
   EARNED_TICKETS: "Tickets awarded",
   TASK_REWARD_GRANTED: "Reward granted",
+  EARNED_STREAK_TICKETS: "Streak tickets awarded",
+  STREAK_REWARD_GRANTED: "Streak reward granted",
 };
 
 const REWARD_ACTION_LABELS: Record<string, string> = {
@@ -133,6 +139,13 @@ const ACTION_LABELS: Record<string, string> = {
   ...REWARD_ACTION_LABELS,
 };
 
+const getFeedActionLabel = (action: string): string => {
+  if (action === "RECEIVED_TICKETS") {
+    return "Tickets sent";
+  }
+  return ACTION_LABELS[action] || action.replaceAll("_", " ");
+};
+
 const getTaskLifecycleStatus = (
   action: string,
   metadata?: ParsedTaskLifecycleMetadata
@@ -147,11 +160,21 @@ const getTaskLifecycleStatus = (
     case "TASK_CANCELLED":
       return "Cancelled";
     case "TASK_MISSED_FCFS":
+    case "TASK_EXPIRED_RECURRING":
       return "Missed";
+    case "TASK_RECURRING_PAUSED":
+      return "Paused";
+    case "TASK_RECURRING_RESUMED":
+      return "Assigned";
+    case "TASK_RECURRING_STOPPED":
+      return "Stopped";
     case "TASK_COMPLETED":
       return "Awaiting parent";
     case "TASK_ACCEPTED":
       return "In progress";
+    case "EARNED_STREAK_TICKETS":
+    case "STREAK_REWARD_GRANTED":
+      return "Verified";
     case "TASK_REFUSED":
     case "TASK_REJECTED_AFTER_DENIAL":
       return "Cancelled";
@@ -190,7 +213,7 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab,
   }); 
   // Data State
   const [myPrizes, setMyPrizes] = useState<AssignedPrize[]>([]);
-  const [myBounties, setMyBounties] = useState<BountyAssignment[]>([]);
+  const [myBounties, setMyBounties] = useState<AssignedBounty[]>([]);
   const [templates, setTemplates] = useState<PrizeTemplate[]>([]);
   const [bountyTemplates, setBountyTemplates] = useState<BountyTemplate[]>([]);
   const [historyEvents, setHistoryEvents] = useState<HistoryEvent[]>([]);
@@ -226,6 +249,27 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab,
   const [settingsPassword, setSettingsPassword] = useState('');
   const [settingsAvatarColor, setSettingsAvatarColor] = useState(currentUser.avatarColor);
   const [settingsAvatarUrl, setSettingsAvatarUrl] = useState(currentUser.avatarUrl || '');
+  const [securityStatus, setSecurityStatus] = useState<{
+    hasPasskey: boolean;
+    hasDeviceTokenMethod: boolean;
+    setupPromptSeen: boolean;
+    needsInitialSetupPrompt: boolean;
+  } | null>(null);
+  const [passkeyList, setPasskeyList] = useState<Array<{ id: string; createdAt: string; lastUsedAt?: string | null; transports: string[] }>>([]);
+  const [devicePinEnabled, setDevicePinEnabled] = useState(false);
+  const [pinHealth, setPinHealth] = useState<{
+    localConfigured: boolean;
+    locked: boolean;
+    failedAttempts: number;
+    serverLinked: boolean | null;
+    needsRelink: boolean;
+  } | null>(null);
+  const [settingsPin, setSettingsPin] = useState('');
+  const [settingsPinConfirm, setSettingsPinConfirm] = useState('');
+  const [settingsRelinkPin, setSettingsRelinkPin] = useState('');
+  const [securityError, setSecurityError] = useState('');
+  const [isSecurityLoading, setIsSecurityLoading] = useState(false);
+  const [isSecuritySaving, setIsSecuritySaving] = useState(false);
   const [showDeleteAccountConfirm, setShowDeleteAccountConfirm] = useState(false);
   const [deleteAccountConfirmInput, setDeleteAccountConfirmInput] = useState('');
   const [deleteAccountError, setDeleteAccountError] = useState('');
@@ -240,6 +284,7 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab,
   const cropCanvasRef = useRef<HTMLCanvasElement>(null);
 
   const AVATAR_COLORS = ['bg-pink-400', 'bg-teal-400', 'bg-blue-500', 'bg-purple-500', 'bg-orange-400', 'bg-green-500', 'bg-red-400', 'bg-indigo-500'];
+  const passkeySupported = storageService.isPasskeySupported();
 
   type ConfirmOptions = {
     title: string;
@@ -497,6 +542,12 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab,
     isDenied: boolean = false,
     requiresPhoto: boolean = false
   ) => {
+    const assignment = myBounties.find((item) => item.id === assignmentId);
+    if (assignment?.seriesPaused) {
+      setToast({ message: "This recurring task is paused by parent.", type: "info" });
+      return;
+    }
+
     try {
       if (action === 'start') {
         await storageService.updateBountyStatus(
@@ -550,7 +601,11 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab,
       }
     } catch (err) {
       console.error("handleBountyAction error:", err);
-      setToast({ message: "Something went wrong with this task.", type: 'error' });
+      const message =
+        err instanceof Error && err.message === "SERIES_PAUSED"
+          ? "This recurring task is paused by parent."
+          : "Something went wrong with this task.";
+      setToast({ message, type: err instanceof Error && err.message === "SERIES_PAUSED" ? "info" : "error" });
     }
   };
 
@@ -575,6 +630,12 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab,
   const handleSubmitWithPhoto = async () => {
     if (!photoUploadModal || !uploadedPhoto) return;
 
+    const assignment = myBounties.find((item) => item.id === photoUploadModal.assignmentId);
+    if (assignment?.seriesPaused) {
+      setToast({ message: "This recurring task is paused by parent.", type: "info" });
+      return;
+    }
+
     try {
       await storageService.updateBountyStatus(
         photoUploadModal.assignmentId,
@@ -596,7 +657,11 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab,
       }
     } catch (err) {
       console.error("handleSubmitWithPhoto error:", err);
-      setToast({ message: "Failed to submit task", type: 'error' });
+      const message =
+        err instanceof Error && err.message === "SERIES_PAUSED"
+          ? "This recurring task is paused by parent."
+          : "Failed to submit task";
+      setToast({ message, type: err instanceof Error && err.message === "SERIES_PAUSED" ? "info" : "error" });
     }
   };
 
@@ -725,7 +790,136 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab,
     setShowDeleteAccountConfirm(false);
     setDeleteAccountConfirmInput('');
     setDeleteAccountError('');
+    setSettingsPin('');
+    setSettingsPinConfirm('');
+    setSettingsRelinkPin('');
+    setPinHealth(null);
+    setSecurityError('');
     setShowAccountSettings(true);
+    void loadSecuritySettings();
+  };
+
+  const loadSecuritySettings = async () => {
+    try {
+      setIsSecurityLoading(true);
+      const [status, passkeys, pinStatus] = await Promise.all([
+        storageService.getQuickLoginStatus(),
+        storageService.listPasskeys(),
+        storageService.getPinQuickLoginHealth(currentUser.username),
+      ]);
+      setSecurityStatus(status);
+      setPasskeyList(passkeys);
+      setPinHealth(pinStatus);
+      setDevicePinEnabled(!!pinStatus.localConfigured);
+    } catch (err: any) {
+      setSecurityError(err?.message || "Failed to load security settings.");
+    } finally {
+      setIsSecurityLoading(false);
+    }
+  };
+
+  const handleAddPasskey = async () => {
+    try {
+      setIsSecuritySaving(true);
+      setSecurityError('');
+      await storageService.registerPasskey();
+      await loadSecuritySettings();
+      setToast({ message: "Passkey added.", type: "success" });
+    } catch (err: any) {
+      setSecurityError(err?.message || "Failed to add passkey.");
+    } finally {
+      setIsSecuritySaving(false);
+    }
+  };
+
+  const handleRemovePasskey = async (passkeyId: string) => {
+    const ok = await confirm({
+      title: "Remove passkey?",
+      message: "You will no longer be able to use this passkey for login.",
+      confirmLabel: "Remove",
+      cancelLabel: "Keep",
+      destructive: true,
+    });
+    if (!ok) return;
+
+    try {
+      setIsSecuritySaving(true);
+      setSecurityError('');
+      await storageService.removePasskey(passkeyId);
+      await loadSecuritySettings();
+      setToast({ message: "Passkey removed.", type: "success" });
+    } catch (err: any) {
+      setSecurityError(err?.message || "Failed to remove passkey.");
+    } finally {
+      setIsSecuritySaving(false);
+    }
+  };
+
+  const handleSavePinQuickLogin = async () => {
+    if (!/^\d{4}$/.test(settingsPin)) {
+      setSecurityError("PIN must be exactly 4 digits.");
+      return;
+    }
+    if (settingsPin !== settingsPinConfirm) {
+      setSecurityError("PIN confirmation does not match.");
+      return;
+    }
+
+    try {
+      setIsSecuritySaving(true);
+      setSecurityError('');
+      await storageService.enablePinQuickLogin(settingsPin);
+      setSettingsPin('');
+      setSettingsPinConfirm('');
+      setSettingsRelinkPin('');
+      await loadSecuritySettings();
+      setToast({ message: devicePinEnabled ? "PIN updated." : "PIN enabled.", type: "success" });
+    } catch (err: any) {
+      setSecurityError(err?.message || "Failed to save PIN.");
+    } finally {
+      setIsSecuritySaving(false);
+    }
+  };
+
+  const handleDisablePinQuickLogin = async () => {
+    try {
+      setIsSecuritySaving(true);
+      setSecurityError('');
+      await storageService.disablePinQuickLogin();
+      setSettingsPin('');
+      setSettingsPinConfirm('');
+      setSettingsRelinkPin('');
+      await loadSecuritySettings();
+      setToast({ message: "PIN disabled.", type: "info" });
+    } catch (err: any) {
+      setSecurityError(err?.message || "Failed to disable PIN.");
+    } finally {
+      setIsSecuritySaving(false);
+    }
+  };
+
+  const handleRelinkPinQuickLogin = async () => {
+    if (!/^\d{4}$/.test(settingsRelinkPin)) {
+      setSecurityError("PIN must be exactly 4 digits.");
+      return;
+    }
+
+    try {
+      setIsSecuritySaving(true);
+      setSecurityError('');
+      await storageService.repairPinQuickLogin(settingsRelinkPin);
+      setSettingsRelinkPin('');
+      await loadSecuritySettings();
+      setToast({ message: "PIN relinked.", type: "success" });
+    } catch (err: any) {
+      if (err?.message === "INVALID_PIN") {
+        setSecurityError("Invalid PIN.");
+      } else {
+        setSecurityError(err?.message || "Failed to relink PIN.");
+      }
+    } finally {
+      setIsSecuritySaving(false);
+    }
   };
 
   const handleCancelClaim = async (assignmentId: string) => {
@@ -1026,12 +1220,17 @@ const groupedPrizes: GroupedPrize[] = Object.values(
     : groupedPrizes;
 
 
-  // Active Bounties - show all tasks not yet verified
-  const activeBounties = myBounties.filter(b => b.status !== BountyStatus.VERIFIED);
+  // Show non-recurring tasks until verified; recurring tasks show only the current occurrence.
+  const activeBounties = myBounties.filter((b) => {
+    if (b.isRecurring) {
+      return !!b.isCurrentOccurrence;
+    }
+    return b.status !== BountyStatus.VERIFIED;
+  });
 
   // Badge count - only tasks requiring user action
   const actionRequiredBounties = myBounties.filter(
-    b => b.status === BountyStatus.OFFERED || b.status === BountyStatus.DENIED
+    b => !b.seriesPaused && (b.status === BountyStatus.OFFERED || b.status === BountyStatus.DENIED)
   );
 
   // Filter tasks by search term
@@ -1043,28 +1242,6 @@ const groupedPrizes: GroupedPrize[] = Object.values(
                template.description?.toLowerCase().includes(searchTerm.toLowerCase());
       })
     : activeBounties;
-
-  // Get denial message for denied tasks
-  const getDenialMessage = (assignment: BountyAssignment): string | null => {
-    if (assignment.denialReason) {
-      const reasonMessages: Record<string, string> = {
-        'NOT_COMPLETED_ADEQUATELY': 'Task not completed to adequate standard',
-        'TOO_OLD_NO_LONGER_REQUIRED': 'Task too old and no longer required',
-        'NOT_COMPLETED': 'Task not completed',
-        'INSTRUCTIONS_NOT_FOLLOWED': 'Didn\'t follow the instructions',
-        'LOW_EFFORT': 'Not enough effort / rushed',
-        'COMPLETED_AFTER_DEADLINE': 'Completed after the deadline',
-      };
-      const reasonText = reasonMessages[assignment.denialReason] || 'Task was denied';
-      
-      // Include notes if they exist
-      if (assignment.denialNotes) {
-        return `${reasonText}: ${assignment.denialNotes}`;
-      }
-      return reasonText;
-    }
-    return null;
-  };
 
   // Filter store items by search term
   const filteredStoreItems = searchTerm.trim()
@@ -1368,7 +1545,7 @@ const groupedPrizes: GroupedPrize[] = Object.values(
                 notifications.map(note => (
                   <div key={note.id} className="p-3 mb-1 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 rounded-xl border border-gray-100 dark:border-gray-600 transition-colors relative group">
                     <p className="text-sm text-gray-800 dark:text-gray-200 pr-6">{note.message}</p>
-                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">{new Date(note.timestamp).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}</p>
+                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">{new Date(note.timestamp).toLocaleString()}</p>
                     <button onClick={(e) => { e.stopPropagation(); handleDismissNotification(note.id); }} className="absolute top-2 right-2 text-gray-300 hover:text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity"><X size={14}/></button>
                   </div>
                 ))
@@ -1844,21 +2021,21 @@ const groupedPrizes: GroupedPrize[] = Object.values(
         {/* Account Settings Modal */}
         {showAccountSettings && (
           <div
-            className="fixed inset-0 bg-black/60 z-[80] flex items-center justify-center"
+            className="fixed inset-0 bg-black/60 z-[80] flex items-start sm:items-center justify-center p-3 sm:p-4 overflow-y-auto"
             onClick={handleCloseAccountSettings}
           >
             <div
-              className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-md p-6 mx-4"
+              className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-md max-h-[calc(100dvh-1.5rem)] sm:max-h-[calc(100dvh-2rem)] p-4 sm:p-6 mx-auto my-2 flex flex-col overflow-hidden"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="flex items-center gap-2 mb-4">
+              <div className="flex items-center gap-2 mb-4 shrink-0">
                 <Settings size={24} className="text-gray-700 dark:text-gray-200" />
                 <h3 className="text-lg font-bold text-gray-900 dark:text-white">
                   Account Settings
                 </h3>
               </div>
 
-              <div className="space-y-4">
+              <div className="space-y-4 overflow-y-auto pr-1">
                 {/* Profile Picture */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
@@ -1983,6 +2160,132 @@ const groupedPrizes: GroupedPrize[] = Object.values(
                   />
                 </div>
 
+                <div className="pt-4 border-t border-gray-200 dark:border-gray-700 space-y-3">
+                  <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-100">Security</h4>
+
+                  {isSecurityLoading ? (
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Loading security settings...</p>
+                  ) : (
+                    <>
+                      <div className="p-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">Passkeys</p>
+                          <button
+                            type="button"
+                            onClick={handleAddPasskey}
+                            disabled={!passkeySupported || isSecuritySaving}
+                            className="px-3 py-1.5 text-xs rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-60"
+                          >
+                            Add Passkey
+                          </button>
+                        </div>
+                        {!passkeySupported && (
+                          <p className="text-xs text-amber-600 dark:text-amber-300">
+                            Passkeys unavailable on this device/browser.
+                          </p>
+                        )}
+                        {passkeyList.length === 0 ? (
+                          <p className="text-xs text-gray-500 dark:text-gray-400">No passkeys configured.</p>
+                        ) : (
+                          <div className="space-y-2">
+                            {passkeyList.map((passkey) => (
+                              <div key={passkey.id} className="flex items-center justify-between gap-2 text-xs">
+                                <div className="text-gray-700 dark:text-gray-300">
+                                  Added {new Date(passkey.createdAt).toLocaleDateString()}
+                                  {passkey.lastUsedAt ? ` • Last used ${new Date(passkey.lastUsedAt).toLocaleString()}` : ""}
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => void handleRemovePasskey(passkey.id)}
+                                  disabled={isSecuritySaving}
+                                  className="px-2 py-1 rounded-md border border-red-200 dark:border-red-700 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-60"
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="p-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">PIN Quick Login (this device)</p>
+                          {pinHealth?.localConfigured && (
+                            <button
+                              type="button"
+                              onClick={handleDisablePinQuickLogin}
+                              disabled={isSecuritySaving}
+                              className="px-3 py-1.5 text-xs rounded-lg border border-red-200 dark:border-red-700 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-60"
+                            >
+                              Disable PIN
+                            </button>
+                          )}
+                        </div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                          Status: {!pinHealth?.localConfigured ? "Disabled" : pinHealth.needsRelink ? "Needs relink" : "Enabled"}.
+                        </p>
+                        {pinHealth?.needsRelink ? (
+                          <>
+                            <input
+                              type="password"
+                              inputMode="numeric"
+                              maxLength={4}
+                              value={settingsRelinkPin}
+                              onChange={(e) => setSettingsRelinkPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                              placeholder="Current PIN"
+                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg"
+                            />
+                            <button
+                              type="button"
+                              onClick={handleRelinkPinQuickLogin}
+                              disabled={isSecuritySaving}
+                              className="w-full py-2 rounded-lg bg-amber-600 text-white text-sm font-semibold hover:bg-amber-700 disabled:opacity-60"
+                            >
+                              Relink PIN
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              <input
+                                type="password"
+                                inputMode="numeric"
+                                maxLength={4}
+                                value={settingsPin}
+                                onChange={(e) => setSettingsPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                                placeholder={devicePinEnabled ? "New PIN" : "Set PIN"}
+                                className="px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg"
+                              />
+                              <input
+                                type="password"
+                                inputMode="numeric"
+                                maxLength={4}
+                                value={settingsPinConfirm}
+                                onChange={(e) => setSettingsPinConfirm(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                                placeholder="Confirm PIN"
+                                className="px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg"
+                              />
+                            </div>
+                            <button
+                              type="button"
+                              onClick={handleSavePinQuickLogin}
+                              disabled={isSecuritySaving}
+                              className="w-full py-2 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 disabled:opacity-60"
+                            >
+                              {devicePinEnabled ? "Update PIN" : "Enable PIN"}
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </>
+                  )}
+
+                  {securityError && (
+                    <p className="text-xs text-red-600 dark:text-red-400">{securityError}</p>
+                  )}
+                </div>
+
                 <div className="pt-4 border-t border-red-200 dark:border-red-900/40">
                   {!showDeleteAccountConfirm ? (
                     <button
@@ -2047,7 +2350,7 @@ const groupedPrizes: GroupedPrize[] = Object.values(
                 </div>
               </div>
 
-              <div className="flex justify-end gap-3 mt-6">
+              <div className="flex justify-end gap-3 mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 shrink-0">
                 <button
                   type="button"
                   className="px-4 py-2 text-sm rounded-xl border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700"
@@ -2112,7 +2415,14 @@ const groupedPrizes: GroupedPrize[] = Object.values(
                     };
 
                     const denialReasonText = getDenialReasonText();
-                    const denialMessage = getDenialMessage(b);
+                    const isSeriesPaused = !!b.seriesPaused;
+                    const isRecurringCycleClosed =
+                      !!b.isRecurring &&
+                      (b.status === BountyStatus.COMPLETED || b.status === BountyStatus.VERIFIED);
+                    const nextOccurrenceLabel =
+                      b.nextOccurrenceAt && b.nextOccurrenceAt > Date.now()
+                        ? new Date(b.nextOccurrenceAt).toLocaleString()
+                        : null;
                     
                     // Get the parent's name from the assignment
                     const parentName = b.assignerName || 'Parent';
@@ -2130,12 +2440,16 @@ const groupedPrizes: GroupedPrize[] = Object.values(
                                 requiresPhoto={t.requiresPhoto}
                                 actionLabel={null} // We render custom buttons below
                                 onClick={undefined} // Remove click handler from card body
-                                disabled={b.status === BountyStatus.COMPLETED || b.status === BountyStatus.DENIED}
+                                disabled={b.status === BountyStatus.DENIED || isSeriesPaused || isRecurringCycleClosed}
                                 themeColor={
                                   b.status === BountyStatus.DENIED
                                     ? "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-gray-900 dark:text-white"
                                     : t.themeColor || "bg-white border-indigo-200 text-gray-900"
                                 }
+                                isRecurring={!!b.isRecurring}
+                                streakEnabled={!!b.streakEnabled}
+                                currentStreak={b.currentStreak || 0}
+                                seriesPaused={isSeriesPaused}
                                 customActions={
                                     <div className="flex flex-col gap-2 mt-2">
                                         {/* Deadline Display - Show countdown for active tasks */}
@@ -2152,8 +2466,41 @@ const groupedPrizes: GroupedPrize[] = Object.values(
                                             {b.denialNotes && <div><span className="font-semibold">Note from {parentName}:</span> {b.denialNotes}</div>}
                                           </div>
                                         )}
+                                        {isSeriesPaused && (
+                                          <div className="text-sm font-medium bg-amber-50 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300 p-2 rounded-lg border border-amber-200 dark:border-amber-700">
+                                            Paused by parent. This recurring task is temporarily unavailable.
+                                            {b.seriesPausedAt ? ` Paused at ${new Date(b.seriesPausedAt).toLocaleString()}.` : ""}
+                                            {b.seriesAutoResumeSkipAt
+                                              ? ` It will auto-resume after skipping ${new Date(
+                                                  b.seriesAutoResumeSkipAt
+                                                ).toLocaleString()}.`
+                                              : ""}
+                                          </div>
+                                        )}
+                                        {isRecurringCycleClosed && (
+                                          <div className="text-sm font-medium bg-indigo-50 dark:bg-indigo-900/30 text-indigo-800 dark:text-indigo-300 p-2 rounded-lg border border-indigo-200 dark:border-indigo-700">
+                                            This recurring task is completed for the current cycle.
+                                            {nextOccurrenceLabel
+                                              ? ` It will be available again at ${nextOccurrenceLabel}.`
+                                              : " It will be available again on the next scheduled occurrence."}
+                                          </div>
+                                        )}
                                         <div className="flex gap-2 mt-4">
-                                            {b.status === BountyStatus.OFFERED ? (
+                                            {isSeriesPaused ? (
+                                                <button
+                                                    disabled
+                                                    className="w-full py-2 bg-gray-100 dark:bg-gray-700 text-gray-400 font-bold rounded-xl border border-gray-200 dark:border-gray-600 cursor-not-allowed text-sm"
+                                                >
+                                                    Paused by parent
+                                                </button>
+                                            ) : isRecurringCycleClosed ? (
+                                                <button
+                                                    disabled
+                                                    className="w-full py-2 bg-gray-100 dark:bg-gray-700 text-gray-400 font-bold rounded-xl border border-gray-200 dark:border-gray-600 cursor-not-allowed text-sm"
+                                                >
+                                                    {nextOccurrenceLabel ? `Returns ${nextOccurrenceLabel}` : "Waiting for next occurrence"}
+                                                </button>
+                                            ) : b.status === BountyStatus.OFFERED ? (
                                                 <>
                                                     <button 
                                                         onClick={(e) => { e.stopPropagation(); handleBountyAction(b.id, 'reject'); }} 
@@ -2493,8 +2840,10 @@ const groupedPrizes: GroupedPrize[] = Object.values(
                           <div className="flex-1">
                             <h4 className="font-bold text-gray-800 dark:text-white">{event.title}</h4>
                             <p className="text-xs text-gray-500 dark:text-gray-400">
-                              {new Date(event.timestamp).toLocaleDateString()} • {(ACTION_LABELS[event.action] || event.action.replaceAll("_", " "))}
-                              <span className="block text-[10px] text-indigo-500">By {event.assignerName}</span>
+                              {new Date(event.timestamp).toLocaleString()}
+                              <span className="block text-[10px] text-indigo-500">
+                                {getFeedActionLabel(event.action)} by {event.assignerName}
+                              </span>
                             </p>
                           </div>
                         </div>

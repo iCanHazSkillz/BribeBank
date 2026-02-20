@@ -1,5 +1,14 @@
 import { Request, Response } from "express";
-import { BountyStatus, Role, PrizeStatus, PrizeType, DenialReason } from "@prisma/client";
+import {
+  BountyStatus,
+  DenialReason,
+  Prisma,
+  PrizeStatus,
+  PrizeType,
+  RecurrenceCadence,
+  RecurrencePattern,
+  Role,
+} from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { assertFamilyMember, assertParent, getRequestUser } from "../lib/authHelpers.js";
 import { broadcastToFamily } from "../realtime/eventBus.js";
@@ -8,6 +17,9 @@ import { SseEvent } from "../types/sseEvents";
 import { addHistoryEvent } from "../services/historyService.js";
 import { addNotification } from "../services/notificationService.js";
 import { processTaskPhoto } from "../lib/imageProcessor.js";
+import { computeInitialNextOccurrence } from "../services/recurrenceMonitor.js";
+import { RecurrenceConfig } from "../lib/recurrenceSchedule.js";
+import { getEffectiveTimezone } from "../lib/timezone.js";
 
 type TaskLifecycleMetadata = {
   version: 1;
@@ -35,6 +47,472 @@ const buildTaskLifecycleMetadata = (
     ...data,
   } satisfies TaskLifecycleMetadata);
 
+type StreakMilestoneInput = {
+  threshold: number;
+  rewardType: "TICKETS" | "CUSTOM";
+  rewardValue: string;
+};
+
+type NormalizedRecurrenceInput = {
+  recurrenceEnabled: boolean;
+  recurrenceCadence: RecurrenceCadence | null;
+  recurrencePattern: RecurrencePattern | null;
+  recurrenceDayOfWeek: number | null;
+  recurrenceDayOfMonth: number | null;
+  recurrenceWeekOfMonth: number | null;
+  recurrenceMonthOfYear: number | null;
+  streakEnabled: boolean;
+  streakMilestones: StreakMilestoneInput[];
+};
+
+function asNumberOrNull(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+function asBooleanWithDefault(value: unknown, defaultValue: boolean): boolean {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true") return true;
+    if (normalized === "false") return false;
+  }
+
+  return defaultValue;
+}
+
+function parseStreakMilestones(raw: unknown): StreakMilestoneInput[] {
+  if (!Array.isArray(raw)) return [];
+
+  return raw
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") return null;
+      const item = entry as Record<string, unknown>;
+      const threshold = asNumberOrNull(item.threshold);
+      const rewardType =
+        item.rewardType === "TICKETS" || item.rewardType === "CUSTOM"
+          ? item.rewardType
+          : null;
+      const rewardValue =
+        typeof item.rewardValue === "string" ? item.rewardValue.trim() : "";
+
+      if (!threshold || threshold < 1 || !rewardType || !rewardValue) {
+        return null;
+      }
+
+      return {
+        threshold: Math.floor(threshold),
+        rewardType,
+        rewardValue,
+      } satisfies StreakMilestoneInput;
+    })
+    .filter((v): v is StreakMilestoneInput => !!v)
+    .sort((a, b) => a.threshold - b.threshold);
+}
+
+function normalizeRecurrenceInput(payload: Record<string, unknown>): NormalizedRecurrenceInput {
+  const recurrenceEnabled = !!payload.recurrenceEnabled;
+  const recurrenceCadence =
+    typeof payload.recurrenceCadence === "string" &&
+    Object.values(RecurrenceCadence).includes(payload.recurrenceCadence as RecurrenceCadence)
+      ? (payload.recurrenceCadence as RecurrenceCadence)
+      : null;
+  const recurrencePattern =
+    typeof payload.recurrencePattern === "string" &&
+    Object.values(RecurrencePattern).includes(payload.recurrencePattern as RecurrencePattern)
+      ? (payload.recurrencePattern as RecurrencePattern)
+      : null;
+
+  const recurrenceDayOfWeek = asNumberOrNull(payload.recurrenceDayOfWeek);
+  const recurrenceDayOfMonth = asNumberOrNull(payload.recurrenceDayOfMonth);
+  const recurrenceWeekOfMonth = asNumberOrNull(payload.recurrenceWeekOfMonth);
+  const recurrenceMonthOfYear = asNumberOrNull(payload.recurrenceMonthOfYear);
+  const streakEnabled = !!payload.streakEnabled;
+  const streakMilestones = parseStreakMilestones(payload.streakMilestones);
+
+  return {
+    recurrenceEnabled,
+    recurrenceCadence,
+    recurrencePattern,
+    recurrenceDayOfWeek,
+    recurrenceDayOfMonth,
+    recurrenceWeekOfMonth,
+    recurrenceMonthOfYear,
+    streakEnabled,
+    streakMilestones,
+  };
+}
+
+function validateRecurrenceInput(input: NormalizedRecurrenceInput, isFCFS: boolean): string | null {
+  if (!input.recurrenceEnabled) {
+    return null;
+  }
+
+  if (isFCFS) {
+    return "RECURRING_NOT_ALLOWED_WITH_FCFS";
+  }
+
+  if (!input.recurrenceCadence) {
+    return "RECURRENCE_CADENCE_REQUIRED";
+  }
+
+  if (input.recurrenceCadence === RecurrenceCadence.WEEKLY) {
+    if (
+      input.recurrenceDayOfWeek === null ||
+      input.recurrenceDayOfWeek < 0 ||
+      input.recurrenceDayOfWeek > 6
+    ) {
+      return "WEEKLY_REQUIRES_DAY_OF_WEEK";
+    }
+  }
+
+  if (input.recurrenceCadence === RecurrenceCadence.MONTHLY) {
+    if (!input.recurrencePattern) {
+      return "MONTHLY_REQUIRES_PATTERN";
+    }
+    if (input.recurrencePattern === RecurrencePattern.DAY_OF_MONTH) {
+      if (
+        input.recurrenceDayOfMonth === null ||
+        input.recurrenceDayOfMonth < 1 ||
+        input.recurrenceDayOfMonth > 31
+      ) {
+        return "MONTHLY_DAY_OF_MONTH_REQUIRES_VALID_DAY";
+      }
+    } else {
+      if (
+        input.recurrenceWeekOfMonth === null ||
+        input.recurrenceWeekOfMonth < 1 ||
+        input.recurrenceWeekOfMonth > 5 ||
+        input.recurrenceDayOfWeek === null ||
+        input.recurrenceDayOfWeek < 0 ||
+        input.recurrenceDayOfWeek > 6
+      ) {
+        return "MONTHLY_DAY_OF_WEEK_REQUIRES_WEEK_AND_WEEKDAY";
+      }
+    }
+  }
+
+  if (input.recurrenceCadence === RecurrenceCadence.YEARLY) {
+    if (!input.recurrencePattern) {
+      return "YEARLY_REQUIRES_PATTERN";
+    }
+    if (
+      input.recurrenceMonthOfYear === null ||
+      input.recurrenceMonthOfYear < 1 ||
+      input.recurrenceMonthOfYear > 12
+    ) {
+      return "YEARLY_REQUIRES_MONTH";
+    }
+    if (input.recurrencePattern === RecurrencePattern.DAY_OF_MONTH) {
+      if (
+        input.recurrenceDayOfMonth === null ||
+        input.recurrenceDayOfMonth < 1 ||
+        input.recurrenceDayOfMonth > 31
+      ) {
+        return "YEARLY_DAY_OF_MONTH_REQUIRES_VALID_DAY";
+      }
+    } else {
+      if (
+        input.recurrenceWeekOfMonth === null ||
+        input.recurrenceWeekOfMonth < 1 ||
+        input.recurrenceWeekOfMonth > 5 ||
+        input.recurrenceDayOfWeek === null ||
+        input.recurrenceDayOfWeek < 0 ||
+        input.recurrenceDayOfWeek > 6
+      ) {
+        return "YEARLY_DAY_OF_WEEK_REQUIRES_WEEK_AND_WEEKDAY";
+      }
+    }
+  }
+
+  if (input.streakEnabled && !input.recurrenceEnabled) {
+    return "STREAK_REQUIRES_RECURRING";
+  }
+
+  if (input.streakEnabled) {
+    const seen = new Set<number>();
+    for (const milestone of input.streakMilestones) {
+      if (seen.has(milestone.threshold)) {
+        return "DUPLICATE_STREAK_THRESHOLD";
+      }
+      seen.add(milestone.threshold);
+    }
+  }
+
+  return null;
+}
+
+function bountyRecurrenceConfig(bounty: {
+  recurrenceCadence: RecurrenceCadence | null;
+  recurrencePattern: RecurrencePattern | null;
+  recurrenceDayOfWeek: number | null;
+  recurrenceDayOfMonth: number | null;
+  recurrenceWeekOfMonth: number | null;
+  recurrenceMonthOfYear: number | null;
+}): RecurrenceConfig {
+  if (!bounty.recurrenceCadence) {
+    throw new Error("BOUNTY_RECURRENCE_NOT_CONFIGURED");
+  }
+  return {
+    cadence: bounty.recurrenceCadence,
+    pattern: bounty.recurrencePattern,
+    dayOfWeek: bounty.recurrenceDayOfWeek,
+    dayOfMonth: bounty.recurrenceDayOfMonth,
+    weekOfMonth: bounty.recurrenceWeekOfMonth,
+    monthOfYear: bounty.recurrenceMonthOfYear,
+  };
+}
+
+async function createRecurringAssignment(
+  tx: Prisma.TransactionClient,
+  params: {
+    familyId: string;
+    bountyId: string;
+    userId: string;
+    assignedBy: string;
+    seriesId: string;
+    occurrenceStartAt: Date;
+  }
+) {
+  return tx.bountyAssignment.create({
+    data: {
+      familyId: params.familyId,
+      bountyId: params.bountyId,
+      userId: params.userId,
+      assignedBy: params.assignedBy,
+      status: BountyStatus.OFFERED,
+      recurrenceSeriesId: params.seriesId,
+      occurrenceStartAt: params.occurrenceStartAt,
+    },
+    include: {
+      bounty: true,
+      user: {
+        select: { id: true, displayName: true, role: true },
+      },
+    },
+  });
+}
+
+async function awardStreakMilestonesIfEligible(
+  tx: Prisma.TransactionClient,
+  params: {
+    assignment: {
+      id: string;
+      familyId: string;
+      userId: string;
+      bountyId: string;
+      recurrenceSeriesId: string | null;
+      streakCountAtClose: number | null;
+      streakGenerationAtClose: number | null;
+    };
+    bounty: {
+      title: string;
+      emoji: string;
+      streakEnabled: boolean;
+      streakMilestones: Array<{
+        id: string;
+        threshold: number;
+        rewardType: string;
+        rewardValue: string;
+      }>;
+    };
+    series: {
+      currentStreak: number;
+      streakGeneration: number;
+    } | null;
+    parentName: string;
+    childName: string;
+  }
+): Promise<
+  Array<{
+    type: "TICKETS" | "CUSTOM";
+    threshold: number;
+    rewardValue: string;
+    ticketsAwarded?: number;
+    rewardAssignmentId?: string;
+  }>
+> {
+  const { assignment, bounty, series, parentName, childName } = params;
+  if (
+    !assignment.recurrenceSeriesId ||
+    !bounty.streakEnabled ||
+    !bounty.streakMilestones.length
+  ) {
+    return [];
+  }
+
+  const streakCount =
+    assignment.streakCountAtClose ??
+    (series ? series.currentStreak + 1 : null);
+  const streakGeneration =
+    assignment.streakGenerationAtClose ??
+    series?.streakGeneration ??
+    0;
+
+  if (!streakCount || streakCount < 1) {
+    return [];
+  }
+
+  const existing = await tx.bountyStreakAward.findMany({
+    where: {
+      seriesId: assignment.recurrenceSeriesId,
+      streakGeneration,
+    },
+    select: { milestoneId: true },
+  });
+  const existingMilestoneIds = new Set(existing.map((item) => item.milestoneId));
+
+  const granted: Array<{
+    type: "TICKETS" | "CUSTOM";
+    threshold: number;
+    rewardValue: string;
+    ticketsAwarded?: number;
+    rewardAssignmentId?: string;
+  }> = [];
+
+  for (const milestone of bounty.streakMilestones) {
+    if (milestone.threshold > streakCount || existingMilestoneIds.has(milestone.id)) {
+      continue;
+    }
+
+    if (milestone.rewardType === "TICKETS") {
+      const ticketsAwarded = parseInt(milestone.rewardValue, 10);
+      if (!Number.isFinite(ticketsAwarded) || ticketsAwarded <= 0) {
+        continue;
+      }
+
+      await tx.user.update({
+        where: { id: assignment.userId },
+        data: {
+          ticketBalance: { increment: ticketsAwarded },
+        },
+      });
+
+      await tx.bountyStreakAward.create({
+        data: {
+          seriesId: assignment.recurrenceSeriesId,
+          milestoneId: milestone.id,
+          bountyAssignmentId: assignment.id,
+          streakGeneration,
+          threshold: milestone.threshold,
+          rewardType: "TICKETS",
+          rewardValue: String(ticketsAwarded),
+          ticketsAwarded,
+        },
+      });
+
+      await addHistoryEvent(
+        {
+          familyId: assignment.familyId,
+          userId: assignment.userId,
+          userName: childName,
+          title: `Streak ${milestone.threshold}`,
+          emoji: "🔥",
+          action: "EARNED_STREAK_TICKETS",
+          assignerName: parentName,
+          metadata: buildTaskLifecycleMetadata({
+            bountyAssignmentId: assignment.id,
+            bountyId: assignment.bountyId,
+            rewardType: "TICKETS",
+            rewardValue: String(ticketsAwarded),
+            linkedAction: "EARNED_STREAK_TICKETS",
+          }),
+        },
+        tx
+      );
+
+      await addNotification(
+        {
+          userId: assignment.userId,
+          message: `Streak milestone hit! +${ticketsAwarded} tickets for ${milestone.threshold} in a row on "${bounty.title}".`,
+        },
+        tx
+      );
+
+      granted.push({
+        type: "TICKETS",
+        threshold: milestone.threshold,
+        rewardValue: String(ticketsAwarded),
+        ticketsAwarded,
+      });
+      continue;
+    }
+
+    if (milestone.rewardType === "CUSTOM") {
+      const createdReward = await tx.assignedPrize.create({
+        data: {
+          familyId: assignment.familyId,
+          userId: assignment.userId,
+          assignedBy: parentName,
+          status: PrizeStatus.AVAILABLE,
+          title: milestone.rewardValue,
+          emoji: "🔥",
+          description: `Streak reward for ${milestone.threshold} in a row on "${bounty.title}"`,
+          type: PrizeType.PRIVILEGE,
+          themeColor: "bg-orange-100 text-orange-800 border-orange-200",
+        },
+      });
+
+      await tx.bountyStreakAward.create({
+        data: {
+          seriesId: assignment.recurrenceSeriesId,
+          milestoneId: milestone.id,
+          bountyAssignmentId: assignment.id,
+          streakGeneration,
+          threshold: milestone.threshold,
+          rewardType: "CUSTOM",
+          rewardValue: milestone.rewardValue,
+          rewardAssignmentId: createdReward.id,
+        },
+      });
+
+      await addHistoryEvent(
+        {
+          familyId: assignment.familyId,
+          userId: assignment.userId,
+          userName: childName,
+          title: milestone.rewardValue,
+          emoji: "🔥",
+          action: "STREAK_REWARD_GRANTED",
+          assignerName: parentName,
+          metadata: buildTaskLifecycleMetadata({
+            bountyAssignmentId: assignment.id,
+            bountyId: assignment.bountyId,
+            rewardAssignmentId: createdReward.id,
+            rewardType: "CUSTOM",
+            rewardValue: milestone.rewardValue,
+            linkedAction: "STREAK_REWARD_GRANTED",
+          }),
+        },
+        tx
+      );
+
+      await addNotification(
+        {
+          userId: assignment.userId,
+          message: `Streak milestone hit! Reward "${milestone.rewardValue}" added for ${milestone.threshold} in a row on "${bounty.title}".`,
+        },
+        tx
+      );
+
+      granted.push({
+        type: "CUSTOM",
+        threshold: milestone.threshold,
+        rewardValue: milestone.rewardValue,
+        rewardAssignmentId: createdReward.id,
+      });
+    }
+  }
+
+  return granted;
+}
+
 /**
  * GET /families/:familyId/bounties
  * List all bounty templates for a family
@@ -53,6 +531,11 @@ export const getFamilyBounties = async (req: Request, res: Response) => {
     const bounties = await prisma.bounty.findMany({
       where: { familyId },
       orderBy: { createdAt: "desc" },
+      include: {
+        streakMilestones: {
+          orderBy: { threshold: "asc" },
+        },
+      },
     });
 
     return res.json(bounties);
@@ -74,7 +557,18 @@ export const getFamilyBounties = async (req: Request, res: Response) => {
  */
 export const createBounty = async (req: Request, res: Response) => {
   const { familyId } = req.params;
-  const { title, emoji, rewardType, rewardValue, isFCFS, rewardTemplateId, themeColor, deadlineHours, requiresPhoto } = req.body;
+  const payload = req.body as Record<string, unknown>;
+  const {
+    title,
+    emoji,
+    rewardType,
+    rewardValue,
+    isFCFS,
+    rewardTemplateId,
+    themeColor,
+    deadlineHours,
+    requiresPhoto,
+  } = payload;
 
   if (!familyId) {
     return res.status(400).json({ error: "MISSING_FAMILY_ID" });
@@ -91,23 +585,76 @@ export const createBounty = async (req: Request, res: Response) => {
     }
   }
 
+  const recurrenceInput = normalizeRecurrenceInput(payload);
+  const recurrenceError = validateRecurrenceInput(recurrenceInput, !!isFCFS);
+  if (recurrenceError) {
+    return res.status(400).json({ error: recurrenceError });
+  }
+  if (recurrenceInput.recurrenceEnabled && deadlineHours) {
+    return res.status(400).json({ error: "RECURRING_NOT_ALLOWED_WITH_DEADLINE" });
+  }
+
   try {
     const user = await assertFamilyMember(req, familyId);
     assertParent(user);
 
-    const bounty = await prisma.bounty.create({
-      data: {
-        familyId,
-        title,
-        emoji,
-        rewardType: rewardType ?? null,
-        rewardValue,
-        isFCFS: !!isFCFS,
-        rewardTemplateId: rewardTemplateId ?? null,
-        themeColor: themeColor ?? null,
-        deadlineHours: deadlineHours ? Number(deadlineHours) : null,
-        requiresPhoto: !!requiresPhoto,
-      },
+    const bounty = await prisma.$transaction(async (tx) => {
+      const created = await tx.bounty.create({
+        data: {
+          familyId,
+          title: String(title),
+          emoji: String(emoji),
+          rewardType: typeof rewardType === "string" ? rewardType : null,
+          rewardValue: String(rewardValue),
+          isFCFS: !!isFCFS,
+          rewardTemplateId: typeof rewardTemplateId === "string" ? rewardTemplateId : null,
+          themeColor: typeof themeColor === "string" ? themeColor : null,
+          deadlineHours: deadlineHours ? Number(deadlineHours) : null,
+          requiresPhoto: !!requiresPhoto,
+          recurrenceEnabled: recurrenceInput.recurrenceEnabled,
+          recurrenceCadence: recurrenceInput.recurrenceEnabled
+            ? recurrenceInput.recurrenceCadence
+            : null,
+          recurrencePattern: recurrenceInput.recurrenceEnabled
+            ? recurrenceInput.recurrencePattern
+            : null,
+          recurrenceDayOfWeek: recurrenceInput.recurrenceEnabled
+            ? recurrenceInput.recurrenceDayOfWeek
+            : null,
+          recurrenceDayOfMonth: recurrenceInput.recurrenceEnabled
+            ? recurrenceInput.recurrenceDayOfMonth
+            : null,
+          recurrenceWeekOfMonth: recurrenceInput.recurrenceEnabled
+            ? recurrenceInput.recurrenceWeekOfMonth
+            : null,
+          recurrenceMonthOfYear: recurrenceInput.recurrenceEnabled
+            ? recurrenceInput.recurrenceMonthOfYear
+            : null,
+          streakEnabled: recurrenceInput.recurrenceEnabled
+            ? recurrenceInput.streakEnabled
+            : false,
+        },
+      });
+
+      if (recurrenceInput.recurrenceEnabled && recurrenceInput.streakEnabled) {
+        if (recurrenceInput.streakMilestones.length > 0) {
+          await tx.bountyStreakMilestone.createMany({
+            data: recurrenceInput.streakMilestones.map((m) => ({
+              bountyId: created.id,
+              threshold: m.threshold,
+              rewardType: m.rewardType,
+              rewardValue: m.rewardValue,
+            })),
+          });
+        }
+      }
+
+      return tx.bounty.findUnique({
+        where: { id: created.id },
+        include: {
+          streakMilestones: true,
+        },
+      });
     });
 
     const event: SseEvent = {
@@ -139,7 +686,18 @@ export const createBounty = async (req: Request, res: Response) => {
  */
 export const updateBounty = async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { title, emoji, rewardType, rewardValue, isFCFS, rewardTemplateId, themeColor, deadlineHours, requiresPhoto } = req.body;
+  const payload = req.body as Record<string, unknown>;
+  const {
+    title,
+    emoji,
+    rewardType,
+    rewardValue,
+    isFCFS,
+    rewardTemplateId,
+    themeColor,
+    deadlineHours,
+    requiresPhoto,
+  } = payload;
 
   if (!id) {
     return res.status(400).json({ error: "MISSING_BOUNTY_ID" });
@@ -148,6 +706,11 @@ export const updateBounty = async (req: Request, res: Response) => {
   try {
     const existing = await prisma.bounty.findUnique({
       where: { id },
+      include: {
+        streakMilestones: {
+          orderBy: { threshold: "asc" },
+        },
+      },
     });
 
     if (!existing) {
@@ -160,28 +723,151 @@ export const updateBounty = async (req: Request, res: Response) => {
     
     // Validate deadlineHours if provided
     if (deadlineHours !== undefined && deadlineHours !== null) {
-      if (typeof deadlineHours !== 'number' || deadlineHours < 1) {
+      const hours = Number(deadlineHours);
+      if (!Number.isFinite(hours) || hours < 1) {
         return res.status(400).json({ error: "DEADLINE_MUST_BE_AT_LEAST_1_HOUR" });
       }
     }
     
-    const updated = await prisma.bounty.update({
-      where: { id },
-      data: {
-        title: title ?? existing.title,
-        emoji: emoji ?? existing.emoji,
-        rewardType: rewardType !== undefined ? rewardType : existing.rewardType,
-        rewardValue: rewardValue ?? existing.rewardValue,
-        isFCFS:
-          typeof isFCFS === "boolean" ? isFCFS : existing.isFCFS,
-        rewardTemplateId:
-          rewardTemplateId !== undefined
-            ? rewardTemplateId
-            : existing.rewardTemplateId,
-        themeColor: themeColor ?? undefined,
-        deadlineHours: deadlineHours !== undefined ? deadlineHours : existing.deadlineHours,
-        requiresPhoto: typeof requiresPhoto === "boolean" ? requiresPhoto : existing.requiresPhoto,
-      },
+    const recurrenceInput = normalizeRecurrenceInput({
+      recurrenceEnabled:
+        payload.recurrenceEnabled !== undefined
+          ? payload.recurrenceEnabled
+          : existing.recurrenceEnabled,
+      recurrenceCadence:
+        payload.recurrenceCadence !== undefined
+          ? payload.recurrenceCadence
+          : existing.recurrenceCadence,
+      recurrencePattern:
+        payload.recurrencePattern !== undefined
+          ? payload.recurrencePattern
+          : existing.recurrencePattern,
+      recurrenceDayOfWeek:
+        payload.recurrenceDayOfWeek !== undefined
+          ? payload.recurrenceDayOfWeek
+          : existing.recurrenceDayOfWeek,
+      recurrenceDayOfMonth:
+        payload.recurrenceDayOfMonth !== undefined
+          ? payload.recurrenceDayOfMonth
+          : existing.recurrenceDayOfMonth,
+      recurrenceWeekOfMonth:
+        payload.recurrenceWeekOfMonth !== undefined
+          ? payload.recurrenceWeekOfMonth
+          : existing.recurrenceWeekOfMonth,
+      recurrenceMonthOfYear:
+        payload.recurrenceMonthOfYear !== undefined
+          ? payload.recurrenceMonthOfYear
+          : existing.recurrenceMonthOfYear,
+      streakEnabled:
+        payload.streakEnabled !== undefined
+          ? payload.streakEnabled
+          : existing.streakEnabled,
+      streakMilestones:
+        payload.streakMilestones !== undefined
+          ? payload.streakMilestones
+          : existing.streakMilestones.map((m) => ({
+              threshold: m.threshold,
+              rewardType: m.rewardType,
+              rewardValue: m.rewardValue,
+            })),
+    });
+    const normalizedIsFcfs =
+      typeof isFCFS === "boolean" ? isFCFS : existing.isFCFS;
+    const recurrenceError = validateRecurrenceInput(
+      recurrenceInput,
+      normalizedIsFcfs
+    );
+    if (recurrenceError) {
+      return res.status(400).json({ error: recurrenceError });
+    }
+    const normalizedDeadlineHours =
+      deadlineHours !== undefined
+        ? deadlineHours
+          ? Number(deadlineHours)
+          : null
+        : existing.deadlineHours;
+    if (recurrenceInput.recurrenceEnabled && normalizedDeadlineHours) {
+      return res.status(400).json({ error: "RECURRING_NOT_ALLOWED_WITH_DEADLINE" });
+    }
+    
+    const updated = await prisma.$transaction(async (tx) => {
+      const next = await tx.bounty.update({
+        where: { id },
+        data: {
+          title: title ? String(title) : existing.title,
+          emoji: emoji ? String(emoji) : existing.emoji,
+          rewardType:
+            rewardType !== undefined && typeof rewardType === "string"
+              ? rewardType
+              : existing.rewardType,
+          rewardValue: rewardValue ? String(rewardValue) : existing.rewardValue,
+          isFCFS: normalizedIsFcfs,
+          rewardTemplateId:
+            rewardTemplateId !== undefined
+              ? (typeof rewardTemplateId === "string" ? rewardTemplateId : null)
+              : existing.rewardTemplateId,
+          themeColor:
+            themeColor !== undefined
+              ? (typeof themeColor === "string" ? themeColor : null)
+              : existing.themeColor,
+          deadlineHours:
+            deadlineHours !== undefined
+              ? deadlineHours
+                ? Number(deadlineHours)
+                : null
+              : existing.deadlineHours,
+          requiresPhoto:
+            typeof requiresPhoto === "boolean"
+              ? requiresPhoto
+              : existing.requiresPhoto,
+          recurrenceEnabled: recurrenceInput.recurrenceEnabled,
+          recurrenceCadence: recurrenceInput.recurrenceEnabled
+            ? recurrenceInput.recurrenceCadence
+            : null,
+          recurrencePattern: recurrenceInput.recurrenceEnabled
+            ? recurrenceInput.recurrencePattern
+            : null,
+          recurrenceDayOfWeek: recurrenceInput.recurrenceEnabled
+            ? recurrenceInput.recurrenceDayOfWeek
+            : null,
+          recurrenceDayOfMonth: recurrenceInput.recurrenceEnabled
+            ? recurrenceInput.recurrenceDayOfMonth
+            : null,
+          recurrenceWeekOfMonth: recurrenceInput.recurrenceEnabled
+            ? recurrenceInput.recurrenceWeekOfMonth
+            : null,
+          recurrenceMonthOfYear: recurrenceInput.recurrenceEnabled
+            ? recurrenceInput.recurrenceMonthOfYear
+            : null,
+          streakEnabled: recurrenceInput.recurrenceEnabled
+            ? recurrenceInput.streakEnabled
+            : false,
+        },
+      });
+
+      await tx.bountyStreakMilestone.deleteMany({
+        where: { bountyId: id },
+      });
+
+      if (
+        recurrenceInput.recurrenceEnabled &&
+        recurrenceInput.streakEnabled &&
+        recurrenceInput.streakMilestones.length
+      ) {
+        await tx.bountyStreakMilestone.createMany({
+          data: recurrenceInput.streakMilestones.map((m) => ({
+            bountyId: id,
+            threshold: m.threshold,
+            rewardType: m.rewardType,
+            rewardValue: m.rewardValue,
+          })),
+        });
+      }
+
+      return tx.bounty.findUnique({
+        where: { id: next.id },
+        include: { streakMilestones: true },
+      });
     });
 
     const event: SseEvent = {
@@ -282,6 +968,17 @@ export const getFamilyBountyAssignments = async (
       orderBy: { assignedAt: "desc" },
       include: {
         bounty: true,
+        recurrenceSeries: {
+          select: {
+            id: true,
+            pausedAt: true,
+            autoResumeSkipAt: true,
+            currentStreak: true,
+            active: true,
+            nextOccurrenceAt: true,
+            currentAssignmentId: true,
+          },
+        },
         user: {
           select: {
             id: true,
@@ -303,6 +1000,18 @@ export const getFamilyBountyAssignments = async (
         return {
           ...assignment,
           assignerName: assigner?.displayName || 'Parent',
+          recurrenceSeriesId: assignment.recurrenceSeriesId,
+          seriesActive: !!assignment.recurrenceSeries?.active,
+          seriesPaused: !!assignment.recurrenceSeries?.pausedAt,
+          seriesPausedAt: assignment.recurrenceSeries?.pausedAt ?? null,
+          seriesAutoResumeSkipAt: assignment.recurrenceSeries?.autoResumeSkipAt ?? null,
+          currentStreak: assignment.recurrenceSeries?.currentStreak ?? 0,
+          streakEnabled: !!assignment.bounty?.streakEnabled,
+          isRecurring: !!assignment.bounty?.recurrenceEnabled,
+          nextOccurrenceAt: assignment.recurrenceSeries?.nextOccurrenceAt ?? null,
+          isCurrentOccurrence:
+            !!assignment.recurrenceSeries &&
+            assignment.recurrenceSeries.currentAssignmentId === assignment.id,
         };
       })
     );
@@ -368,9 +1077,135 @@ export const assignBounty = async (req: Request, res: Response) => {
     const childName = child.displayName || child.username || "Child";
     const emoji = bounty.emoji || "🧹";
     const title = bounty.title || "Task";
+    const family = await prisma.family.findUnique({
+      where: { id: familyId },
+      select: { timezone: true },
+    });
+
+    if (bounty.recurrenceEnabled && bounty.isFCFS) {
+      return res.status(400).json({ error: "RECURRING_NOT_ALLOWED_WITH_FCFS" });
+    }
+    if (bounty.recurrenceEnabled && bounty.deadlineHours) {
+      return res.status(400).json({ error: "RECURRING_NOT_ALLOWED_WITH_DEADLINE" });
+    }
+    if (bounty.recurrenceEnabled && !bounty.recurrenceCadence) {
+      return res.status(400).json({ error: "INVALID_RECURRING_CONFIGURATION" });
+    }
 
     // Assignment + history + notification as one atomic unit
-    const assignment = await prisma.$transaction(async (tx) => {
+    const assignmentResult = await prisma.$transaction(async (tx) => {
+      if (bounty.recurrenceEnabled) {
+        const existingSeries = await tx.bountyRecurrenceSeries.findUnique({
+          where: {
+            bountyId_userId: {
+              bountyId,
+              userId,
+            },
+          },
+          include: {
+            currentAssignment: {
+              include: {
+                bounty: true,
+                user: {
+                  select: { id: true, displayName: true, role: true },
+                },
+              },
+            },
+          },
+        });
+
+        if (
+          existingSeries &&
+          existingSeries.active &&
+          existingSeries.currentAssignmentId &&
+          existingSeries.currentAssignment
+        ) {
+          return { assignment: existingSeries.currentAssignment, createdNew: false };
+        }
+
+        const now = new Date();
+        const timezone = getEffectiveTimezone(family?.timezone);
+        const nextOccurrenceAt = computeInitialNextOccurrence(
+          timezone,
+          bountyRecurrenceConfig(bounty),
+          now
+        );
+
+        let seriesId: string;
+        if (!existingSeries) {
+          const createdSeries = await tx.bountyRecurrenceSeries.create({
+            data: {
+              familyId,
+              bountyId,
+              userId,
+              assignedBy: parent.id,
+              active: true,
+              pausedAt: null,
+              autoResumeSkipAt: null,
+              nextOccurrenceAt,
+            },
+          });
+          seriesId = createdSeries.id;
+        } else {
+          const reactivated = await tx.bountyRecurrenceSeries.update({
+            where: { id: existingSeries.id },
+            data: {
+              active: true,
+              pausedAt: null,
+              autoResumeSkipAt: null,
+              nextOccurrenceAt,
+            },
+          });
+          seriesId = reactivated.id;
+        }
+
+        const created = await createRecurringAssignment(tx, {
+          familyId,
+          bountyId,
+          userId,
+          assignedBy: parent.id,
+          seriesId,
+          occurrenceStartAt: now,
+        });
+
+        await tx.bountyRecurrenceSeries.update({
+          where: { id: seriesId },
+          data: {
+            currentAssignmentId: created.id,
+          },
+        });
+
+        await addHistoryEvent(
+          {
+            familyId,
+            userId: child.id,
+            userName: childName,
+            title,
+            emoji,
+            action: "TASK_ASSIGNED",
+            assignerName: parentName,
+            metadata: buildTaskLifecycleMetadata({
+              bountyAssignmentId: created.id,
+              bountyId: bounty.id,
+              rewardType: bounty.rewardType === "TICKETS" ? "TICKETS" : "CUSTOM",
+              rewardValue: bounty.rewardValue,
+              linkedAction: "TASK_ASSIGNED",
+            }),
+          },
+          tx
+        );
+
+        await addNotification(
+          {
+            userId: child.id,
+            message: `${parentName} assigned you a new task: ${title}`,
+          },
+          tx
+        );
+
+        return { assignment: created, createdNew: true };
+      }
+
       const created = await tx.bountyAssignment.create({
         data: {
           familyId,
@@ -394,7 +1229,7 @@ export const assignBounty = async (req: Request, res: Response) => {
           userName: childName,
           title,
           emoji,
-          action: "TASK_ASSIGNED", // keep your naming consistent across app
+          action: "TASK_ASSIGNED",
           assignerName: parentName,
           metadata: buildTaskLifecycleMetadata({
             bountyAssignmentId: created.id,
@@ -415,26 +1250,30 @@ export const assignBounty = async (req: Request, res: Response) => {
         tx
       );
 
-      return created;
+      return { assignment: created, createdNew: true };
     });
 
-    // Push (non-blocking safety)
-    try {
-      await sendPushToUser(child.id, {
-        title: "New task assigned 🧹",
-        body: `${parentName} assigned: ${title}`,
-        tag: "task-assigned",
-        type: "TASK_ASSIGNED",
-        familyId,
-        bountyId: bounty.id,
-        assignmentId: assignment.id,
+    const assignment = assignmentResult.assignment;
 
-        // Deep link for your App.tsx + WalletView parser
-        url: "/?view=wallet&walletTab=tasks",
-      });
-    } catch (pushErr) {
-      // Don't fail the request just because push failed
-      console.warn("assignBounty push failed:", pushErr);
+    // Push (non-blocking safety)
+    if (assignmentResult.createdNew) {
+      try {
+        await sendPushToUser(child.id, {
+          title: "New task assigned 🧹",
+          body: `${parentName} assigned: ${title}`,
+          tag: "task-assigned",
+          type: "TASK_ASSIGNED",
+          familyId,
+          bountyId: bounty.id,
+          assignmentId: assignment.id,
+
+          // Deep link for your App.tsx + WalletView parser
+          url: "/?view=wallet&walletTab=tasks",
+        });
+      } catch (pushErr) {
+        // Don't fail the request just because push failed
+        console.warn("assignBounty push failed:", pushErr);
+      }
     }
 
     const event: SseEvent = {
@@ -446,7 +1285,7 @@ export const assignBounty = async (req: Request, res: Response) => {
 
     broadcastToFamily(familyId, event);
 
-    return res.status(201).json(assignment);
+    return res.status(assignmentResult.createdNew ? 201 : 200).json(assignment);
   } catch (err: any) {
     if (err && typeof err === "object" && "status" in err) {
       return res.status(err.status).json({ error: err.error });
@@ -469,7 +1308,12 @@ export const acceptAssignedBounty = async (req: Request, res: Response) => {
   try {
     const assignment = await prisma.bountyAssignment.findUnique({
       where: { id },
-      include: { bounty: true },
+      include: {
+        bounty: true,
+        recurrenceSeries: {
+          select: { pausedAt: true },
+        },
+      },
     });
 
     if (!assignment) {
@@ -479,6 +1323,9 @@ export const acceptAssignedBounty = async (req: Request, res: Response) => {
     const bounty = assignment.bounty;
     if (!bounty) {
       return res.status(404).json({ error: "BOUNTY_NOT_FOUND" });
+    }
+    if (assignment.recurrenceSeries?.pausedAt) {
+      return res.status(409).json({ error: "SERIES_PAUSED" });
     }
 
     // Only the assigned child can accept
@@ -863,8 +1710,20 @@ export const verifyAssignedBounty = async (req: Request, res: Response) => {
     const existingAssignment = await prisma.bountyAssignment.findUnique({
       where: { id },
       include: {
-        bounty: true,
+        bounty: {
+          include: {
+            streakMilestones: {
+              orderBy: { threshold: "asc" },
+            },
+          },
+        },
         user: true,
+        recurrenceSeries: {
+          select: {
+            currentStreak: true,
+            streakGeneration: true,
+          },
+        },
       },
     });
 
@@ -913,7 +1772,7 @@ export const verifyAssignedBounty = async (req: Request, res: Response) => {
         return res.status(400).json({ error: "INVALID_TICKET_AMOUNT" });
       }
 
-      await prisma.$transaction(async (tx) => {
+      const streakRewards = await prisma.$transaction(async (tx) => {
         // Update child's ticket balance
         await tx.user.update({
           where: { id: child.id },
@@ -973,6 +1832,27 @@ export const verifyAssignedBounty = async (req: Request, res: Response) => {
           },
           tx
         );
+
+        return awardStreakMilestonesIfEligible(tx, {
+          assignment: {
+            id: existingAssignment.id,
+            familyId: existingAssignment.familyId,
+            userId: existingAssignment.userId,
+            bountyId: existingAssignment.bountyId,
+            recurrenceSeriesId: existingAssignment.recurrenceSeriesId,
+            streakCountAtClose: existingAssignment.streakCountAtClose,
+            streakGenerationAtClose: existingAssignment.streakGenerationAtClose,
+          },
+          bounty: {
+            title: bounty.title,
+            emoji: bounty.emoji || "🧹",
+            streakEnabled: bounty.streakEnabled,
+            streakMilestones: bounty.streakMilestones,
+          },
+          series: existingAssignment.recurrenceSeries,
+          parentName,
+          childName,
+        });
       });
 
       // Send push notification
@@ -1002,6 +1882,7 @@ export const verifyAssignedBounty = async (req: Request, res: Response) => {
       return res.json({
         assignment: updatedAssignment,
         ticketsAwarded: ticketAmount,
+        streakRewards,
       });
     }
 
@@ -1109,7 +1990,28 @@ export const verifyAssignedBounty = async (req: Request, res: Response) => {
         tx
       );
 
-      return prize;
+      const streakRewards = await awardStreakMilestonesIfEligible(tx, {
+        assignment: {
+          id: existingAssignment.id,
+          familyId: existingAssignment.familyId,
+          userId: existingAssignment.userId,
+          bountyId: existingAssignment.bountyId,
+          recurrenceSeriesId: existingAssignment.recurrenceSeriesId,
+          streakCountAtClose: existingAssignment.streakCountAtClose,
+          streakGenerationAtClose: existingAssignment.streakGenerationAtClose,
+        },
+        bounty: {
+          title: bounty.title,
+          emoji: bounty.emoji || "🧹",
+          streakEnabled: bounty.streakEnabled,
+          streakMilestones: bounty.streakMilestones,
+        },
+        series: existingAssignment.recurrenceSeries,
+        parentName,
+        childName,
+      });
+
+      return { prize, streakRewards };
     });
 
     // --- PUSH NOTIFICATION (fixed) ---
@@ -1140,7 +2042,8 @@ export const verifyAssignedBounty = async (req: Request, res: Response) => {
     // 4) Return updated assignment + created reward snapshot
     return res.json({
       assignment: updatedAssignment,
-      prize: createdPrize,
+      prize: createdPrize.prize,
+      streakRewards: createdPrize.streakRewards,
     });
   } catch (err) {
     console.error("verifyAssignedBounty error:", err);
@@ -1219,6 +2122,18 @@ export const denyAssignedBounty = async (req: Request, res: Response) => {
       await prisma.bountyAssignment.delete({
         where: { id },
       });
+      if (existingAssignment.recurrenceSeriesId) {
+        await prisma.bountyRecurrenceSeries.update({
+          where: { id: existingAssignment.recurrenceSeriesId },
+          data: {
+            pausedAt: null,
+            autoResumeSkipAt: null,
+            currentStreak: 0,
+            streakGeneration: { increment: 1 },
+            currentAssignmentId: null,
+          },
+        });
+      }
     }
 
     const parentName = parent.displayName || parent.username || "Parent";
@@ -1330,6 +2245,9 @@ export const cancelAssignedBounty = async (req: Request, res: Response) => {
       include: {
         bounty: true,
         user: true,
+        recurrenceSeries: {
+          select: { pausedAt: true },
+        },
       },
     });
 
@@ -1343,6 +2261,9 @@ export const cancelAssignedBounty = async (req: Request, res: Response) => {
 
     if (!bounty || !child) {
       return res.status(500).json({ error: "BOUNTY_OR_CHILD_MISSING" });
+    }
+    if (assignment.recurrenceSeries?.pausedAt) {
+      return res.status(409).json({ error: "SERIES_PAUSED" });
     }
 
     if (assignment.status === BountyStatus.VERIFIED) {
@@ -1365,6 +2286,20 @@ export const cancelAssignedBounty = async (req: Request, res: Response) => {
 
     await prisma.$transaction(async (tx) => {
       await tx.bountyAssignment.delete({ where: { id } });
+
+      if (assignment.recurrenceSeriesId) {
+        await tx.bountyRecurrenceSeries.update({
+          where: { id: assignment.recurrenceSeriesId },
+          data: {
+            pausedAt: null,
+            autoResumeSkipAt: null,
+            active: true,
+            currentStreak: 0,
+            streakGeneration: { increment: 1 },
+            currentAssignmentId: null,
+          },
+        });
+      }
 
       await addHistoryEvent(
         {
@@ -1465,6 +2400,346 @@ export const cancelAssignedBounty = async (req: Request, res: Response) => {
   }
 };
 
+// PUT /bounty-series/:seriesId/pause
+export const pauseBountySeries = async (req: Request, res: Response) => {
+  const seriesId = req.params.seriesId || req.params.id;
+  if (!seriesId) {
+    return res.status(400).json({ error: "MISSING_SERIES_ID" });
+  }
+
+  try {
+    const series = await prisma.bountyRecurrenceSeries.findUnique({
+      where: { id: seriesId },
+      include: {
+        bounty: true,
+        user: true,
+      },
+    });
+
+    if (!series) {
+      return res.status(404).json({ error: "NOT_FOUND" });
+    }
+
+    const parent = await assertFamilyMember(req, series.familyId);
+    assertParent(parent);
+
+    if (!series.active) {
+      return res.status(400).json({ error: "SERIES_INACTIVE" });
+    }
+
+    if (series.pausedAt) {
+      return res.json(series);
+    }
+
+    const autoResumeSkipNext = asBooleanWithDefault(
+      (req.body as Record<string, unknown> | undefined)?.autoResumeSkipNext,
+      true
+    );
+    const pausedAt = new Date();
+
+    const parentName = parent.displayName || parent.username || "Parent";
+    const childName = series.user.displayName || series.user.username || "Child";
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const pausedSeries = await tx.bountyRecurrenceSeries.update({
+        where: { id: seriesId },
+        data: {
+          pausedAt,
+          autoResumeSkipAt: autoResumeSkipNext ? series.nextOccurrenceAt : null,
+        },
+      });
+
+      if (series.currentAssignmentId) {
+        await addHistoryEvent(
+          {
+            familyId: series.familyId,
+            userId: series.userId,
+            userName: childName,
+            title: series.bounty.title,
+            emoji: series.bounty.emoji || "🧹",
+            action: "TASK_RECURRING_PAUSED",
+            assignerName: parentName,
+            metadata: buildTaskLifecycleMetadata({
+              bountyAssignmentId: series.currentAssignmentId,
+              bountyId: series.bountyId,
+              linkedAction: "TASK_RECURRING_PAUSED",
+            }),
+          },
+          tx
+        );
+      }
+
+      await addNotification(
+        {
+          userId: series.userId,
+          message: `${parentName} paused recurring task "${series.bounty.title}".`,
+        },
+        tx
+      );
+
+      return pausedSeries;
+    });
+
+    try {
+      await sendPushToUser(series.userId, {
+        title: "Recurring task paused",
+        body: `${parentName} paused: ${series.bounty.title}`,
+        tag: "task-recurring-paused",
+        type: "TASK_RECURRING_PAUSED",
+        familyId: series.familyId,
+        assignmentId: series.currentAssignmentId ?? undefined,
+        url: "/?view=wallet&walletTab=tasks",
+      });
+    } catch (pushErr) {
+      console.warn("pauseBountySeries push failed:", pushErr);
+    }
+
+    const event: SseEvent = {
+      type: "WALLET_UPDATE",
+      familyId: series.familyId,
+      reason: "TASK_RECURRING_PAUSED",
+      timestamp: Date.now(),
+    };
+    broadcastToFamily(series.familyId, event);
+
+    return res.json(updated);
+  } catch (err: any) {
+    if (err && typeof err === "object" && "status" in err) {
+      return res.status(err.status).json({ error: err.error });
+    }
+
+    console.error("pauseBountySeries error:", err);
+    return res.status(500).json({ error: "INTERNAL_SERVER_ERROR" });
+  }
+};
+
+// PUT /bounty-series/:seriesId/resume
+export const resumeBountySeries = async (req: Request, res: Response) => {
+  const seriesId = req.params.seriesId || req.params.id;
+  if (!seriesId) {
+    return res.status(400).json({ error: "MISSING_SERIES_ID" });
+  }
+
+  try {
+    const series = await prisma.bountyRecurrenceSeries.findUnique({
+      where: { id: seriesId },
+      include: {
+        bounty: true,
+        user: true,
+      },
+    });
+
+    if (!series) {
+      return res.status(404).json({ error: "NOT_FOUND" });
+    }
+
+    const parent = await assertFamilyMember(req, series.familyId);
+    assertParent(parent);
+
+    if (!series.active) {
+      return res.status(400).json({ error: "SERIES_INACTIVE" });
+    }
+
+    if (!series.pausedAt) {
+      return res.json(series);
+    }
+
+    const now = new Date();
+    const pauseDurationMs = now.getTime() - series.pausedAt.getTime();
+    const shiftedNextOccurrenceAt = new Date(
+      series.nextOccurrenceAt.getTime() + Math.max(0, pauseDurationMs)
+    );
+
+    const parentName = parent.displayName || parent.username || "Parent";
+    const childName = series.user.displayName || series.user.username || "Child";
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const resumedSeries = await tx.bountyRecurrenceSeries.update({
+        where: { id: seriesId },
+        data: {
+          pausedAt: null,
+          autoResumeSkipAt: null,
+          nextOccurrenceAt: shiftedNextOccurrenceAt,
+        },
+      });
+
+      if (series.currentAssignmentId) {
+        await addHistoryEvent(
+          {
+            familyId: series.familyId,
+            userId: series.userId,
+            userName: childName,
+            title: series.bounty.title,
+            emoji: series.bounty.emoji || "🧹",
+            action: "TASK_RECURRING_RESUMED",
+            assignerName: parentName,
+            metadata: buildTaskLifecycleMetadata({
+              bountyAssignmentId: series.currentAssignmentId,
+              bountyId: series.bountyId,
+              linkedAction: "TASK_RECURRING_RESUMED",
+            }),
+          },
+          tx
+        );
+      }
+
+      await addNotification(
+        {
+          userId: series.userId,
+          message: `${parentName} resumed recurring task "${series.bounty.title}".`,
+        },
+        tx
+      );
+
+      return resumedSeries;
+    });
+
+    try {
+      await sendPushToUser(series.userId, {
+        title: "Recurring task resumed",
+        body: `${parentName} resumed: ${series.bounty.title}`,
+        tag: "task-recurring-resumed",
+        type: "TASK_RECURRING_RESUMED",
+        familyId: series.familyId,
+        assignmentId: series.currentAssignmentId ?? undefined,
+        url: "/?view=wallet&walletTab=tasks",
+      });
+    } catch (pushErr) {
+      console.warn("resumeBountySeries push failed:", pushErr);
+    }
+
+    const event: SseEvent = {
+      type: "WALLET_UPDATE",
+      familyId: series.familyId,
+      reason: "TASK_RECURRING_RESUMED",
+      timestamp: Date.now(),
+    };
+    broadcastToFamily(series.familyId, event);
+
+    return res.json(updated);
+  } catch (err: any) {
+    if (err && typeof err === "object" && "status" in err) {
+      return res.status(err.status).json({ error: err.error });
+    }
+
+    console.error("resumeBountySeries error:", err);
+    return res.status(500).json({ error: "INTERNAL_SERVER_ERROR" });
+  }
+};
+
+// PUT /bounty-series/:seriesId/stop
+export const stopBountySeries = async (req: Request, res: Response) => {
+  const seriesId = req.params.seriesId || req.params.id;
+  if (!seriesId) {
+    return res.status(400).json({ error: "MISSING_SERIES_ID" });
+  }
+
+  try {
+    const series = await prisma.bountyRecurrenceSeries.findUnique({
+      where: { id: seriesId },
+      include: {
+        bounty: true,
+        user: true,
+      },
+    });
+
+    if (!series) {
+      return res.status(404).json({ error: "NOT_FOUND" });
+    }
+
+    const parent = await assertFamilyMember(req, series.familyId);
+    assertParent(parent);
+
+    if (!series.active) {
+      return res.status(400).json({ error: "SERIES_INACTIVE" });
+    }
+
+    const parentName = parent.displayName || parent.username || "Parent";
+    const childName = series.user.displayName || series.user.username || "Child";
+
+    const updated = await prisma.$transaction(async (tx) => {
+      if (series.currentAssignmentId) {
+        await tx.bountyAssignment.deleteMany({
+          where: { id: series.currentAssignmentId },
+        });
+      }
+
+      const stoppedSeries = await tx.bountyRecurrenceSeries.update({
+        where: { id: series.id },
+        data: {
+          active: false,
+          pausedAt: null,
+          autoResumeSkipAt: null,
+          currentStreak: 0,
+          streakGeneration: { increment: 1 },
+          currentAssignmentId: null,
+        },
+      });
+
+      if (series.currentAssignmentId) {
+        await addHistoryEvent(
+          {
+            familyId: series.familyId,
+            userId: series.userId,
+            userName: childName,
+            title: series.bounty.title,
+            emoji: series.bounty.emoji || "🧹",
+            action: "TASK_RECURRING_STOPPED",
+            assignerName: parentName,
+            metadata: buildTaskLifecycleMetadata({
+              bountyAssignmentId: series.currentAssignmentId,
+              bountyId: series.bountyId,
+              linkedAction: "TASK_RECURRING_STOPPED",
+            }),
+          },
+          tx
+        );
+      }
+
+      await addNotification(
+        {
+          userId: series.userId,
+          message: `${parentName} stopped recurring task "${series.bounty.title}".`,
+        },
+        tx
+      );
+
+      return stoppedSeries;
+    });
+
+    try {
+      await sendPushToUser(series.userId, {
+        title: "Recurring task stopped",
+        body: `${parentName} stopped: ${series.bounty.title}`,
+        tag: "task-recurring-stopped",
+        type: "TASK_RECURRING_STOPPED",
+        familyId: series.familyId,
+        assignmentId: series.currentAssignmentId ?? undefined,
+        url: "/?view=wallet&walletTab=tasks",
+      });
+    } catch (pushErr) {
+      console.warn("stopBountySeries push failed:", pushErr);
+    }
+
+    const event: SseEvent = {
+      type: "WALLET_UPDATE",
+      familyId: series.familyId,
+      reason: "TASK_RECURRING_STOPPED",
+      timestamp: Date.now(),
+    };
+    broadcastToFamily(series.familyId, event);
+
+    return res.json(updated);
+  } catch (err: any) {
+    if (err && typeof err === "object" && "status" in err) {
+      return res.status(err.status).json({ error: err.error });
+    }
+
+    console.error("stopBountySeries error:", err);
+    return res.status(500).json({ error: "INTERNAL_SERVER_ERROR" });
+  }
+};
+
 
 // DELETE /bounty-assignments/:id
 export const deleteAssignedBounty = async (req: Request, res: Response) => {
@@ -1495,6 +2770,19 @@ export const deleteAssignedBounty = async (req: Request, res: Response) => {
     // PARENTS: can always delete any assignment
     if (user.role === Role.PARENT) {
       await prisma.bountyAssignment.delete({ where: { id } });
+      if (assignment.recurrenceSeriesId) {
+        await prisma.bountyRecurrenceSeries.update({
+          where: { id: assignment.recurrenceSeriesId },
+          data: {
+            active: false,
+            pausedAt: null,
+            autoResumeSkipAt: null,
+            currentStreak: 0,
+            streakGeneration: { increment: 1 },
+            currentAssignmentId: null,
+          },
+        });
+      }
       return res.status(204).send();
     }
 
@@ -1508,6 +2796,19 @@ export const deleteAssignedBounty = async (req: Request, res: Response) => {
       const wasOffered = assignment.status === BountyStatus.OFFERED;
       
       await prisma.bountyAssignment.delete({ where: { id } });
+      if (assignment.recurrenceSeriesId) {
+        await prisma.bountyRecurrenceSeries.update({
+          where: { id: assignment.recurrenceSeriesId },
+          data: {
+            pausedAt: null,
+            autoResumeSkipAt: null,
+            active: true,
+            currentStreak: 0,
+            streakGeneration: { increment: 1 },
+            currentAssignmentId: null,
+          },
+        });
+      }
       
       // Notify parents when child rejects any task (OFFERED or DENIED)
       if ((wasDenied || wasOffered) && bounty && child) {

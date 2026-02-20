@@ -4,6 +4,7 @@ import { authMiddleware } from "../middleware/authMiddleware.js";
 import {
   markNotificationRead,
   markAllNotificationsRead,
+  pruneExpiredNotifications,
 } from "../services/notificationService.js";
 
 const router = Router();
@@ -33,6 +34,8 @@ router.get(
     }
 
     try {
+      await pruneExpiredNotifications(userId);
+
       const notifications = await prisma.notification.findMany({
         where: { userId, isRead: false },
         orderBy: { createdAt: "desc" },

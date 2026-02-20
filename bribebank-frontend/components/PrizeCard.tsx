@@ -22,6 +22,10 @@ interface PrizeCardProps {
   requiresPhoto?: boolean;
   assignedBy?: string;
   denialReason?: string; // Display denial reason on denied bounties
+  isRecurring?: boolean;
+  seriesPaused?: boolean;
+  currentStreak?: number;
+  streakEnabled?: boolean;
 }
 
 // Map pastel color classes to vibrant gradients
@@ -151,6 +155,10 @@ export const PrizeCard: React.FC<PrizeCardProps> = ({
   requiresPhoto,
   assignedBy,
   denialReason,
+  isRecurring,
+  seriesPaused,
+  currentStreak,
+  streakEnabled,
 }) => {
   const baseStyles = "relative flex flex-col p-4 rounded-2xl border-2 transition-all duration-200 shadow-sm overflow-hidden";
   const hoverStyles = !disabled && onClick ? "hover:scale-[1.02] hover:shadow-md active:scale-[0.98] cursor-pointer" : "";
@@ -165,6 +173,20 @@ export const PrizeCard: React.FC<PrizeCardProps> = ({
   const highlightStyles = highlight ? "ring-4 ring-offset-2 ring-indigo-300" : "";
 
   const isBounty = variant === 'bounty';
+  const badgePositionClass = (index: number) => {
+    if (index <= 0) return "-left-1 rounded-br-xl rounded-tl-xl";
+    if (index === 1) return "left-[85px] rounded-b-xl";
+    if (index === 2) return "left-[169px] rounded-b-xl";
+    return "left-[253px] rounded-b-xl";
+  };
+  const fcfsBadgeIndex = isFCFS ? 0 : -1;
+  const deadlineBadgeIndex = hasDeadline ? (isFCFS ? 1 : 0) : -1;
+  const photoBadgeIndex =
+    requiresPhoto ? (isFCFS ? (hasDeadline ? 2 : 1) : hasDeadline ? 1 : 0) : -1;
+  const recurringBadgeIndex =
+    isRecurring
+      ? (isFCFS ? 1 : 0) + (hasDeadline ? 1 : 0) + (requiresPhoto ? 1 : 0)
+      : -1;
 
   return (
     <div 
@@ -183,7 +205,7 @@ export const PrizeCard: React.FC<PrizeCardProps> = ({
 
       {/* FCFS Badge */}
       {isFCFS && (
-        <div className="absolute -top-1 -left-1 px-2 py-1 bg-orange-500 dark:bg-orange-600 text-white rounded-br-xl rounded-tl-xl flex items-center gap-1 font-bold text-[10px] shadow-sm border-b border-r border-white dark:border-gray-800 z-20">
+        <div className={`absolute -top-1 ${badgePositionClass(fcfsBadgeIndex)} px-2 py-1 bg-orange-500 dark:bg-orange-600 text-white flex items-center gap-1 font-bold text-[10px] shadow-sm border-b border-r border-white dark:border-gray-800 z-20`}>
             <Zap size={10} fill="currentColor" />
             <span>FAST GRAB</span>
         </div>
@@ -191,7 +213,7 @@ export const PrizeCard: React.FC<PrizeCardProps> = ({
 
       {/* DEADLINE Badge */}
       {hasDeadline && (
-        <div className={`absolute -top-1 ${isFCFS ? 'left-[85px] rounded-b-xl' : '-left-1 rounded-br-xl rounded-tl-xl'} px-2 py-1 bg-amber-500 dark:bg-amber-600 text-white flex items-center gap-1 font-bold text-[10px] shadow-sm border-b border-r border-white dark:border-gray-800 z-20`}>
+        <div className={`absolute -top-1 ${badgePositionClass(deadlineBadgeIndex)} px-2 py-1 bg-amber-500 dark:bg-amber-600 text-white flex items-center gap-1 font-bold text-[10px] shadow-sm border-b border-r border-white dark:border-gray-800 z-20`}>
             <Clock size={10} />
             <span>DEADLINE</span>
         </div>
@@ -199,9 +221,17 @@ export const PrizeCard: React.FC<PrizeCardProps> = ({
 
       {/* PHOTO Badge */}
       {requiresPhoto && (
-        <div className={`absolute -top-1 ${isFCFS && hasDeadline ? 'left-[169px] rounded-b-xl' : isFCFS || hasDeadline ? 'left-[85px] rounded-b-xl' : '-left-1 rounded-br-xl rounded-tl-xl'} px-2 py-1 bg-blue-500 dark:bg-blue-600 text-white flex items-center gap-1 font-bold text-[10px] shadow-sm border-b border-r border-white dark:border-gray-800 z-20`}>
+        <div className={`absolute -top-1 ${badgePositionClass(photoBadgeIndex)} px-2 py-1 bg-blue-500 dark:bg-blue-600 text-white flex items-center gap-1 font-bold text-[10px] shadow-sm border-b border-r border-white dark:border-gray-800 z-20`}>
             <Camera size={10} />
             <span>PHOTO</span>
+        </div>
+      )}
+
+      {/* RECURRING Badge */}
+      {isRecurring && (
+        <div className={`absolute -top-1 ${badgePositionClass(recurringBadgeIndex)} px-2 py-1 bg-indigo-500 dark:bg-indigo-600 text-white flex items-center gap-1 font-bold text-[10px] shadow-sm border-b border-r border-white dark:border-gray-800 z-20`}>
+            <Clock size={10} />
+            <span>RECURRING</span>
         </div>
       )}
 
@@ -228,6 +258,21 @@ export const PrizeCard: React.FC<PrizeCardProps> = ({
       
       <h3 className="text-lg font-bold leading-tight mb-1 z-10">{title}</h3>
       <p className={`text-sm leading-snug mb-4 flex-grow z-10 ${isBounty ? 'font-semibold opacity-90' : 'opacity-80'}`}>{description}</p>
+
+      {(streakEnabled || seriesPaused) && (
+        <div className="mb-3 flex flex-wrap gap-1.5 z-10">
+          {streakEnabled && (
+            <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-700">
+              Streak: {currentStreak || 0}
+            </span>
+          )}
+          {seriesPaused && (
+            <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-700">
+              Paused
+            </span>
+          )}
+        </div>
+      )}
       
       {/* Denial Reason Display */}
       {denialReason && status === BountyStatus.DENIED && (

@@ -11,6 +11,7 @@ import {
   AccountDeletionError,
   deleteFamilyCascade,
 } from "../services/accountDeletionService.js";
+import { isValidIanaTimezone } from "../lib/timezone.js";
 
 const AVATAR_COLORS = [
   "bg-indigo-500",
@@ -155,11 +156,12 @@ export const registerParent = async (req: Request, res: Response) => {
   console.log("req.body =", req.body);
 
   try {
-    const { username, password, displayName, familyName } = req.body as {
+    const { username, password, displayName, familyName, timezone } = req.body as {
       username?: string;
       password?: string;
       displayName?: string;
       familyName?: string;
+      timezone?: string;
     };
 
     if (!username || !password || !displayName || !familyName) {
@@ -181,6 +183,10 @@ export const registerParent = async (req: Request, res: Response) => {
           name: familyName,
           joinCode,
           joinCodeExpiry: new Date(Date.now() + 86400000),
+          timezone:
+            typeof timezone === "string" && isValidIanaTimezone(timezone)
+              ? timezone
+              : null,
         },
       });
 

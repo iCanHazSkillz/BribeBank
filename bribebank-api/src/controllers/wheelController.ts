@@ -6,6 +6,7 @@ import { SseEvent } from "../types/sseEvents.js";
 import { addHistoryEvent } from "../services/historyService.js";
 import { addNotification } from "../services/notificationService.js";
 import { PrizeStatus, PrizeType } from "@prisma/client";
+import { getEffectiveTimezone, isValidIanaTimezone } from "../lib/timezone.js";
 
 /**
  * GET /families/:familyId/wheel-segments
@@ -53,14 +54,20 @@ export const getWheelConfig = async (req: Request, res: Response) => {
 
     const family = await prisma.family.findUnique({
       where: { id: familyId },
-      select: { wheelSpinCost: true, ticketConversionRate: true },
+      select: { wheelSpinCost: true, ticketConversionRate: true, timezone: true },
     });
 
     if (!family) {
       return res.status(404).json({ error: "FAMILY_NOT_FOUND" });
     }
 
-    return res.json({ spinCost: family.wheelSpinCost, ticketConversionRate: family.ticketConversionRate });
+    const effectiveTimezone = getEffectiveTimezone(family.timezone);
+    return res.json({
+      spinCost: family.wheelSpinCost,
+      ticketConversionRate: family.ticketConversionRate,
+      timezone: effectiveTimezone,
+      timezoneSource: family.timezone ? "FAMILY" : "CONTAINER_DEFAULT",
+    });
   } catch (err: any) {
     if (err && typeof err === "object" && "status" in err) {
       return res.status(err.status).json({ error: err.error });
@@ -422,6 +429,58 @@ export const updateTicketConversionRate = async (req: Request, res: Response) =>
     }
 
     console.error("updateTicketConversionRate error:", err);
+    return res.status(500).json({ error: "INTERNAL_SERVER_ERROR" });
+  }
+};
+
+/**
+ * PUT /families/:familyId/timezone
+ * Update family timezone (parent only)
+ */
+export const updateFamilyTimezone = async (req: Request, res: Response) => {
+  const { familyId } = req.params;
+  const { timezone } = req.body as { timezone?: string };
+
+  if (!familyId) {
+    return res.status(400).json({ error: "MISSING_FAMILY_ID" });
+  }
+
+  if (!timezone || typeof timezone !== "string") {
+    return res.status(400).json({ error: "MISSING_TIMEZONE" });
+  }
+
+  if (!isValidIanaTimezone(timezone)) {
+    return res.status(400).json({ error: "INVALID_TIMEZONE" });
+  }
+
+  try {
+    const user = await assertFamilyMember(req, familyId);
+    assertParent(user);
+
+    const updated = await prisma.family.update({
+      where: { id: familyId },
+      data: { timezone },
+      select: { timezone: true },
+    });
+
+    const event: SseEvent = {
+      type: "WALLET_UPDATE",
+      familyId,
+      reason: "FAMILY_SETTINGS_UPDATED",
+      timestamp: Date.now(),
+    };
+    broadcastToFamily(familyId, event);
+
+    return res.json({
+      timezone: updated.timezone,
+      timezoneSource: "FAMILY",
+    });
+  } catch (err: any) {
+    if (err && typeof err === "object" && "status" in err) {
+      return res.status(err.status).json({ error: err.error });
+    }
+
+    console.error("updateFamilyTimezone error:", err);
     return res.status(500).json({ error: "INTERNAL_SERVER_ERROR" });
   }
 };

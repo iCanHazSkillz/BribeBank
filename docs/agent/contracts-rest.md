@@ -49,7 +49,17 @@ Source of truth: route modules in `bribebank-api/src/routes/*` and wiring in `br
 - `POST /bounty-assignments/:id/verify` (auth)
 - `POST /bounty-assignments/:id/deny` (auth)
 - `POST /bounty-assignments/:id/cancel` (auth; parent any unverified assignment, child own unverified assignment)
+- `PUT /bounty-series/:seriesId/pause` (auth; parent-only)
+- `PUT /bounty-series/:seriesId/resume` (auth; parent-only)
 - `DELETE /bounty-assignments/:id` (auth)
+- Recurrence/streak fields are supported on bounty template create/update payloads:
+  - `recurrenceEnabled`, `recurrenceCadence`, `recurrencePattern`
+  - `recurrenceDayOfWeek`, `recurrenceDayOfMonth`, `recurrenceWeekOfMonth`, `recurrenceMonthOfYear`
+  - `streakEnabled`, `streakMilestones[]`
+- Bounty assignment responses include recurring snapshot fields:
+  - `recurrenceSeriesId`, `seriesPaused`, `seriesPausedAt`
+  - `currentStreak`, `streakEnabled`, `isRecurring`
+  - `nextOccurrenceAt`, `isCurrentOccurrence`
 
 ### Users
 - `GET /families/:familyId/users` (auth)
@@ -91,6 +101,10 @@ Source of truth: route modules in `bribebank-api/src/routes/*` and wiring in `br
 - `POST /families/:familyId/wheel-segments/reset` (auth)
 - `POST /families/:familyId/wheel-segments/spin` (auth)
 - `PUT /families/:familyId/ticket-conversion-rate` (auth)
+- `PUT /families/:familyId/timezone` (auth; parent-only)
+- Wheel config response now includes:
+  - `timezone`
+  - `timezoneSource` (`FAMILY` or `CONTAINER_DEFAULT`)
 
 ### Templates
 - `GET /templates/export` (auth)

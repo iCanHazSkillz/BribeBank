@@ -7,7 +7,15 @@ const SW_BUILD_ID = "{{BUILD_TIMESTAMP}}";
 
 // Which files (at minimum) to cache on install.
 // You can expand this (CSS, fonts, etc.) later or let Workbox handle it.
-const URLS_TO_CACHE = ["/", "/index.html", "/icons/bribebank-192.png", "/icons/bribebank-512.png"];
+const URLS_TO_CACHE = [
+  "/",
+  "/index.html",
+  "/icons/bribebank-192.png",
+  "/icons/bribebank-512.png",
+  "/icons/apple-touch-icon.png",
+  "/icons/bribebank-notification.png",
+  "/icons/bribebank-status-badge.png",
+];
 
 // Install: pre-cache basic shell
 self.addEventListener("install", (event) => {
@@ -147,8 +155,8 @@ self.addEventListener("push", (event) => {
 
   const title = data.title || "BribeBank";
   const body = data.body || "You have a new notification";
-  const icon = "/icons/bribebank-192.png";
-  const badge = "/icons/bribebank-192.png";
+  const icon = "/icons/bribebank-notification.png";
+  const badge = "/icons/bribebank-status-badge.png";
 
   const options = {
     body,

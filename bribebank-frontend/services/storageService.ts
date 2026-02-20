@@ -15,9 +15,20 @@ import {
   WheelSegment
 } from '../types';
 import { API_BASE, apiUrl } from "../config";
+import { startAuthentication, startRegistration } from "@simplewebauthn/browser";
 
 const DB_KEY = 'famrewards_production_db_v6'; // Bumped version
 const SESSION_KEY = 'famrewards_session_v1';
+const LAST_LOGIN_METHOD_KEY = "bb_last_login_method_v1";
+const PREFERRED_LOGIN_METHOD_KEY = "bb_preferred_login_method_v1";
+const LAST_USERNAME_KEY = "bb_last_username_v1";
+const QUICK_LOGIN_CAPABILITIES_KEY = "bb_quick_login_capabilities_v1";
+const PIN_BUNDLE_KEY = "bb_pin_bundle_v1";
+const PIN_LOCK_KEY = "bb_pin_lock_v1";
+const DEVICE_KEY_ID_KEY = "bb_device_key_id_v1";
+const PIN_KDF_ITERATIONS = 150000;
+const PIN_MAX_FAILED_ATTEMPTS = 5;
+const NOTIFICATION_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 interface DatabaseSchema {
   families: Family[];
@@ -61,6 +72,297 @@ const writeDB = (data: DatabaseSchema) => {
 const getAuthToken = (): string | null => {
   return localStorage.getItem("bribebank_token");
 };
+
+type QuickLoginMethod = "password" | "passkey" | "pin" | "session";
+type PreferredLoginMethod = Exclude<QuickLoginMethod, "session">;
+
+type PinBundle = {
+  deviceKeyId: string;
+  usernameKey: string;
+  encryptedTokenB64: string;
+  ivB64: string;
+  saltB64: string;
+  iterations: number;
+  createdAt: number;
+  needsRelink?: boolean;
+  lastInvalidTokenAt?: number;
+};
+
+type PinLockState = {
+  failedAttempts: number;
+  lockedUntilFullLogin: boolean;
+};
+
+type QuickLoginCapabilities = {
+  hasPasskey: boolean;
+  hasDeviceTokenMethod: boolean;
+  updatedAt: number;
+};
+
+type QuickLoginStatusResponse = {
+  hasPasskey: boolean;
+  hasDeviceTokenMethod: boolean;
+  setupPromptSeen: boolean;
+  needsInitialSetupPrompt: boolean;
+};
+
+function normalizeUsername(username: string): string {
+  return username.trim().toLowerCase();
+}
+
+function setLastLoginMethod(method: QuickLoginMethod) {
+  sessionStorage.setItem(LAST_LOGIN_METHOD_KEY, method);
+  if (method === "password" || method === "passkey" || method === "pin") {
+    localStorage.setItem(PREFERRED_LOGIN_METHOD_KEY, method);
+  }
+}
+
+function setCachedLoginUsername(username: string) {
+  const normalized = normalizeUsername(username);
+  if (!normalized) return;
+  localStorage.setItem(LAST_USERNAME_KEY, normalized);
+}
+
+function getCachedLoginUsername(): string | null {
+  const cached = localStorage.getItem(LAST_USERNAME_KEY);
+  if (!cached) return null;
+  const normalized = normalizeUsername(cached);
+  return normalized || null;
+}
+
+function base64FromBytes(bytes: Uint8Array): string {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 1) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+function bytesFromBase64(value: string): Uint8Array {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function readPinBundles(): Record<string, PinBundle> {
+  const raw = localStorage.getItem(PIN_BUNDLE_KEY);
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+function writePinBundles(value: Record<string, PinBundle>) {
+  localStorage.setItem(PIN_BUNDLE_KEY, JSON.stringify(value));
+}
+
+function readPinLocks(): Record<string, PinLockState> {
+  const raw = localStorage.getItem(PIN_LOCK_KEY);
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+function writePinLocks(value: Record<string, PinLockState>) {
+  localStorage.setItem(PIN_LOCK_KEY, JSON.stringify(value));
+}
+
+function readQuickLoginCapabilitiesByUsername(): Record<string, QuickLoginCapabilities> {
+  const raw = localStorage.getItem(QUICK_LOGIN_CAPABILITIES_KEY);
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+function writeQuickLoginCapabilitiesByUsername(value: Record<string, QuickLoginCapabilities>) {
+  localStorage.setItem(QUICK_LOGIN_CAPABILITIES_KEY, JSON.stringify(value));
+}
+
+function setQuickLoginCapabilitiesForUsername(
+  username: string,
+  capabilities: Pick<QuickLoginCapabilities, "hasPasskey" | "hasDeviceTokenMethod">
+) {
+  const normalized = normalizeUsername(username);
+  if (!normalized) return;
+  const all = readQuickLoginCapabilitiesByUsername();
+  all[normalized] = {
+    hasPasskey: !!capabilities.hasPasskey,
+    hasDeviceTokenMethod: !!capabilities.hasDeviceTokenMethod,
+    updatedAt: Date.now(),
+  };
+  writeQuickLoginCapabilitiesByUsername(all);
+}
+
+function getSessionUsername(): string | null {
+  const raw = localStorage.getItem(SESSION_KEY);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (typeof parsed?.username === "string") {
+      return normalizeUsername(parsed.username);
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function getOrCreateDeviceKeyId(): string {
+  const existing = localStorage.getItem(DEVICE_KEY_ID_KEY);
+  if (existing) return existing;
+
+  const generated =
+    typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  localStorage.setItem(DEVICE_KEY_ID_KEY, generated);
+  return generated;
+}
+
+function ensureWebCrypto(): SubtleCrypto {
+  if (!window.crypto?.subtle) {
+    throw new Error("CRYPTO_UNAVAILABLE");
+  }
+  return window.crypto.subtle;
+}
+
+async function usernameKey(username: string): Promise<string> {
+  const subtle = ensureWebCrypto();
+  const digest = await subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(normalizeUsername(username))
+  );
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function validatePin(pin: string) {
+  if (!/^\d{4}$/.test(pin)) {
+    throw new Error("PIN_MUST_BE_4_DIGITS");
+  }
+}
+
+async function derivePinKey(pin: string, salt: Uint8Array, iterations: number) {
+  const subtle = ensureWebCrypto();
+  const keyMaterial = await subtle.importKey(
+    "raw",
+    new TextEncoder().encode(pin),
+    { name: "PBKDF2" },
+    false,
+    ["deriveKey"]
+  );
+
+  return subtle.deriveKey(
+    {
+      name: "PBKDF2",
+      salt,
+      iterations,
+      hash: "SHA-256",
+    },
+    keyMaterial,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+
+async function encryptTokenWithPin(pin: string, token: string) {
+  validatePin(pin);
+  const subtle = ensureWebCrypto();
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await derivePinKey(pin, salt, PIN_KDF_ITERATIONS);
+  const encrypted = await subtle.encrypt(
+    { name: "AES-GCM", iv },
+    key,
+    new TextEncoder().encode(token)
+  );
+
+  return {
+    encryptedTokenB64: base64FromBytes(new Uint8Array(encrypted)),
+    ivB64: base64FromBytes(iv),
+    saltB64: base64FromBytes(salt),
+    iterations: PIN_KDF_ITERATIONS,
+  };
+}
+
+async function decryptTokenWithPin(pin: string, bundle: PinBundle): Promise<string> {
+  validatePin(pin);
+  const subtle = ensureWebCrypto();
+  const iv = bytesFromBase64(bundle.ivB64);
+  const salt = bytesFromBase64(bundle.saltB64);
+  const encrypted = bytesFromBase64(bundle.encryptedTokenB64);
+  const key = await derivePinKey(pin, salt, bundle.iterations);
+
+  const decrypted = await subtle.decrypt(
+    { name: "AES-GCM", iv },
+    key,
+    encrypted
+  );
+
+  return new TextDecoder().decode(decrypted);
+}
+
+function mapBackendUserToSessionUser(backendUser: any): User {
+  return {
+    id: backendUser.id,
+    familyId: backendUser.familyId ?? backendUser.family?.id,
+    username: backendUser.username,
+    name: backendUser.displayName,
+    role: backendUser.role === "PARENT" ? UserRole.ADMIN : UserRole.USER,
+    avatarColor: backendUser.avatarColor || "bg-blue-500",
+    avatarUrl: backendUser.avatarUrl || undefined,
+    ticketBalance: backendUser.ticketBalance || 0,
+  };
+}
+
+async function fetchSessionUserWithToken(token: string): Promise<User> {
+  const meRes = await fetch(apiUrl("/auth/me"), {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!meRes.ok) {
+    throw new Error("Failed to fetch user profile");
+  }
+
+  const backendUser = await meRes.json();
+  const sessionUser = mapBackendUserToSessionUser(backendUser);
+  localStorage.setItem(SESSION_KEY, JSON.stringify(sessionUser));
+  return sessionUser;
+}
+
+async function clearPinLockForUsername(username: string): Promise<void> {
+  let key: string;
+  try {
+    key = await usernameKey(username);
+  } catch (err: any) {
+    // On non-secure HTTP origins (e.g. LAN IP), SubtleCrypto is unavailable.
+    // Do not block normal password/passkey login when PIN local crypto cannot run.
+    if (err?.message === "CRYPTO_UNAVAILABLE") {
+      return;
+    }
+    throw err;
+  }
+  const locks = readPinLocks();
+  if (!locks[key]) return;
+  locks[key] = {
+    failedAttempts: 0,
+    lockedUntilFullLogin: false,
+  };
+  writePinLocks(locks);
+}
 
 type PushSubscriptionKeys = {
   p256dh: string;
@@ -163,6 +465,7 @@ export const storageService = {
         username,
         password,
         displayName: adminName,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
       }),
     });
 
@@ -179,35 +482,11 @@ export const storageService = {
     // 2. Store token
     localStorage.setItem("bribebank_token", token);
 
-    // 3. Fetch canonical user profile
-    const meRes = await fetch(apiUrl("/auth/me"), {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-
-    if (!meRes.ok) {
-      throw new Error("Failed to fetch user profile");
-    }
-
-    const backendUser = await meRes.json();
-
-    // 4. Map backend user -> frontend User
-    const sessionUser: User = {
-      id: backendUser.id,
-      familyId: backendUser.familyId ?? backendUser.family?.id,
-      username: backendUser.username,
-      name: backendUser.displayName,
-      //displayName: backendUser.displayName,
-      role:
-        backendUser.role === "PARENT"
-          ? UserRole.ADMIN
-          : UserRole.USER,
-      avatarColor: backendUser.avatarColor || "bg-blue-500",
-      ticketBalance: backendUser.ticketBalance || 0,
-    };
-
-    // 5. Save session locally
-    localStorage.setItem(SESSION_KEY, JSON.stringify(sessionUser));
-
+    const sessionUser = await fetchSessionUserWithToken(token);
+    setLastLoginMethod("password");
+    setCachedLoginUsername(sessionUser.username);
+    await clearPinLockForUsername(sessionUser.username);
+    void storageService.syncQuickLoginCapabilitiesForCurrentUser().catch(() => {});
     return sessionUser;
   },
 
@@ -228,34 +507,11 @@ export const storageService = {
     }
 
     localStorage.setItem("bribebank_token", token);
-
-    const meRes = await fetch(apiUrl("/auth/me"), {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-
-    if (!meRes.ok) {
-      throw new Error("Failed to fetch user profile");
-    }
-
-    const backendUser = await meRes.json();
-
-    const sessionUser: User = {
-      id: backendUser.id,
-      familyId: backendUser.familyId ?? backendUser.family?.id,
-      username: backendUser.username,
-      name: backendUser.displayName,
-      //displayName: backendUser.displayName,
-      role:
-        backendUser.role === "PARENT"
-          ? UserRole.ADMIN
-          : UserRole.USER,
-      avatarColor: backendUser.avatarColor || "bg-blue-500",
-      avatarUrl: backendUser.avatarUrl || undefined,
-      ticketBalance: backendUser.ticketBalance || 0,
-    };
-
-    localStorage.setItem(SESSION_KEY, JSON.stringify(sessionUser));
-
+    const sessionUser = await fetchSessionUserWithToken(token);
+    setLastLoginMethod("password");
+    setCachedLoginUsername(sessionUser.username);
+    await clearPinLockForUsername(sessionUser.username);
+    void storageService.syncQuickLoginCapabilitiesForCurrentUser().catch(() => {});
     return sessionUser;
   },
 
@@ -264,6 +520,7 @@ export const storageService = {
     localStorage.removeItem("bribebank_token");
     localStorage.removeItem(SESSION_KEY);
     localStorage.removeItem(DB_KEY);
+    sessionStorage.removeItem(LAST_LOGIN_METHOD_KEY);
   },
   
   getCurrentUser: (): User | null => {
@@ -293,23 +550,9 @@ export const storageService = {
     }
 
     const backendUser = await res.json();
-
-    const sessionUser: User = {
-      id: backendUser.id,
-      familyId: backendUser.familyId ?? backendUser.family?.id,
-      username: backendUser.username,
-      name: backendUser.displayName,
-      //displayName: backendUser.displayName,
-      role:
-        backendUser.role === "PARENT"
-          ? UserRole.ADMIN
-          : UserRole.USER,
-      avatarColor: backendUser.avatarColor ?? "bg-blue-500",
-      avatarUrl: backendUser.avatarUrl || undefined,
-      ticketBalance: backendUser.ticketBalance || 0,
-    };
-
+    const sessionUser = mapBackendUserToSessionUser(backendUser);
     localStorage.setItem(SESSION_KEY, JSON.stringify(sessionUser));
+    setLastLoginMethod("session");
     return sessionUser;
   },
 
@@ -370,6 +613,565 @@ export const storageService = {
       newRecoveryKey: body.newRecoveryKey,
       rotatedAt: body.rotatedAt,
     };
+  },
+
+  consumeLastLoginMethod: (): QuickLoginMethod | null => {
+    const raw = sessionStorage.getItem(LAST_LOGIN_METHOD_KEY);
+    sessionStorage.removeItem(LAST_LOGIN_METHOD_KEY);
+    if (
+      raw === "password" ||
+      raw === "passkey" ||
+      raw === "pin" ||
+      raw === "session"
+    ) {
+      return raw;
+    }
+    return null;
+  },
+
+  getPreferredLoginMethod: (): PreferredLoginMethod | null => {
+    const raw = localStorage.getItem(PREFERRED_LOGIN_METHOD_KEY);
+    if (raw === "password" || raw === "passkey" || raw === "pin") {
+      return raw;
+    }
+    return null;
+  },
+
+  getCachedLoginUsername: (): string | null => {
+    return getCachedLoginUsername();
+  },
+
+  setCachedLoginUsername: (username: string): void => {
+    setCachedLoginUsername(username);
+  },
+
+  getCachedQuickLoginCapabilities: (
+    username: string
+  ): { hasPasskey: boolean; hasDeviceTokenMethod: boolean } | null => {
+    const normalized = normalizeUsername(username);
+    if (!normalized) return null;
+    const all = readQuickLoginCapabilitiesByUsername();
+    const cached = all[normalized];
+    if (!cached) return null;
+    return {
+      hasPasskey: !!cached.hasPasskey,
+      hasDeviceTokenMethod: !!cached.hasDeviceTokenMethod,
+    };
+  },
+
+  syncQuickLoginCapabilitiesForCurrentUser: async (): Promise<void> => {
+    await storageService.getQuickLoginStatus();
+  },
+
+  isPasskeySupported: (): boolean => {
+    return !!window.PublicKeyCredential && window.isSecureContext;
+  },
+
+  getQuickLoginStatus: async (): Promise<QuickLoginStatusResponse> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const res = await fetch(apiUrl("/auth/quick-login/status"), {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.error || "Failed to load quick login status");
+    }
+
+    const status = (await res.json()) as QuickLoginStatusResponse;
+    const sessionUsername = getSessionUsername();
+    if (sessionUsername) {
+      setQuickLoginCapabilitiesForUsername(sessionUsername, {
+        hasPasskey: status.hasPasskey,
+        hasDeviceTokenMethod: status.hasDeviceTokenMethod,
+      });
+    }
+    return status;
+  },
+
+  markQuickLoginPromptSeen: async (): Promise<void> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const res = await fetch(apiUrl("/auth/quick-login/prompt-seen"), {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.error || "Failed to mark prompt");
+    }
+  },
+
+  getPasskeyRegisterOptions: async (): Promise<{
+    challengeId: string;
+    options: any;
+  }> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const res = await fetch(apiUrl("/auth/passkeys/register/options"), {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.error || "Failed to get passkey options");
+    }
+
+    return await res.json();
+  },
+
+  verifyPasskeyRegistration: async (challengeId: string, response: any): Promise<void> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const res = await fetch(apiUrl("/auth/passkeys/register/verify"), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ challengeId, response }),
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.error || "Failed to verify passkey");
+    }
+  },
+
+  getPasskeyAuthOptions: async (): Promise<{
+    challengeId: string;
+    options: any;
+  }> => {
+    const res = await fetch(apiUrl("/auth/passkeys/authenticate/options"), {
+      method: "POST",
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.error || "Failed to get passkey auth options");
+    }
+    return await res.json();
+  },
+
+  verifyPasskeyAuthentication: async (
+    challengeId: string,
+    response: any
+  ): Promise<{ token: string }> => {
+    const res = await fetch(apiUrl("/auth/passkeys/authenticate/verify"), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ challengeId, response }),
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.error || "Passkey login failed");
+    }
+
+    return await res.json();
+  },
+
+  loginWithPasskey: async (): Promise<User> => {
+    if (!storageService.isPasskeySupported()) {
+      throw new Error("PASSKEY_UNAVAILABLE");
+    }
+
+    const { challengeId, options } = await storageService.getPasskeyAuthOptions();
+    const assertion = await startAuthentication(options);
+    const { token } = await storageService.verifyPasskeyAuthentication(challengeId, assertion);
+    if (!token) {
+      throw new Error("PASSKEY_LOGIN_FAILED");
+    }
+
+    localStorage.setItem("bribebank_token", token);
+    const sessionUser = await fetchSessionUserWithToken(token);
+    setLastLoginMethod("passkey");
+    setCachedLoginUsername(sessionUser.username);
+    await clearPinLockForUsername(sessionUser.username);
+    void storageService.syncQuickLoginCapabilitiesForCurrentUser().catch(() => {});
+    return sessionUser;
+  },
+
+  registerPasskey: async (): Promise<void> => {
+    if (!storageService.isPasskeySupported()) {
+      throw new Error("PASSKEY_UNAVAILABLE");
+    }
+
+    const { challengeId, options } = await storageService.getPasskeyRegisterOptions();
+    const attestation = await startRegistration(options);
+    await storageService.verifyPasskeyRegistration(challengeId, attestation);
+  },
+
+  listPasskeys: async (): Promise<Array<{ id: string; createdAt: string; lastUsedAt?: string | null; transports: string[] }>> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const res = await fetch(apiUrl("/auth/passkeys"), {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.error || "Failed to load passkeys");
+    }
+
+    return await res.json();
+  },
+
+  removePasskey: async (passkeyId: string): Promise<void> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const res = await fetch(apiUrl(`/auth/passkeys/${passkeyId}`), {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.error || "Failed to remove passkey");
+    }
+  },
+
+  createDeviceToken: async (): Promise<{ token: string; deviceKeyId: string }> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+    const deviceKeyId = getOrCreateDeviceKeyId();
+
+    const res = await fetch(apiUrl("/auth/device-token/create"), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ deviceKeyId }),
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.error || "Failed to create device token");
+    }
+
+    return await res.json();
+  },
+
+  loginWithDeviceToken: async (rawDeviceToken: string): Promise<{ token: string }> => {
+    const res = await fetch(apiUrl("/auth/device-token/login"), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ token: rawDeviceToken }),
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.error || "Device token login failed");
+    }
+
+    return await res.json();
+  },
+
+  getCurrentDeviceTokenStatus: async (
+    deviceKeyIdOverride?: string
+  ): Promise<{ hasActiveToken: boolean }> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+    const deviceKeyId = deviceKeyIdOverride?.trim() || getOrCreateDeviceKeyId();
+
+    const res = await fetch(apiUrl("/auth/device-token/current/status"), {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "x-device-key-id": deviceKeyId,
+      },
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.error || "Failed to get device token status");
+    }
+
+    return await res.json();
+  },
+
+  revokeCurrentDeviceToken: async (): Promise<void> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+    const deviceKeyId = getOrCreateDeviceKeyId();
+
+    const res = await fetch(apiUrl("/auth/device-token/current"), {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "x-device-key-id": deviceKeyId,
+      },
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.error || "Failed to revoke device token");
+    }
+  },
+
+  getPinQuickLoginInfo: async (
+    username: string
+  ): Promise<{ available: boolean; locked: boolean; failedAttempts: number }> => {
+    const key = await usernameKey(username);
+    const bundles = readPinBundles();
+    const locks = readPinLocks();
+    const lock = locks[key] || {
+      failedAttempts: 0,
+      lockedUntilFullLogin: false,
+    };
+
+    return {
+      available: !!bundles[key],
+      locked: !!lock.lockedUntilFullLogin,
+      failedAttempts: lock.failedAttempts,
+    };
+  },
+
+  getPinQuickLoginHealth: async (
+    username: string
+  ): Promise<{
+    localConfigured: boolean;
+    locked: boolean;
+    failedAttempts: number;
+    serverLinked: boolean | null;
+    needsRelink: boolean;
+  }> => {
+    const key = await usernameKey(username);
+    const bundles = readPinBundles();
+    const locks = readPinLocks();
+    const bundle = bundles[key];
+    const lock = locks[key] || {
+      failedAttempts: 0,
+      lockedUntilFullLogin: false,
+    };
+
+    if (!bundle) {
+      return {
+        localConfigured: false,
+        locked: !!lock.lockedUntilFullLogin,
+        failedAttempts: lock.failedAttempts,
+        serverLinked: null,
+        needsRelink: false,
+      };
+    }
+
+    const token = getAuthToken();
+    if (!token) {
+      return {
+        localConfigured: true,
+        locked: !!lock.lockedUntilFullLogin,
+        failedAttempts: lock.failedAttempts,
+        serverLinked: null,
+        needsRelink: !!bundle.needsRelink,
+      };
+    }
+
+    let serverLinked: boolean | null = null;
+    try {
+      const status = await storageService.getCurrentDeviceTokenStatus(bundle.deviceKeyId);
+      serverLinked = !!status.hasActiveToken;
+    } catch {
+      serverLinked = null;
+    }
+
+    return {
+      localConfigured: true,
+      locked: !!lock.lockedUntilFullLogin,
+      failedAttempts: lock.failedAttempts,
+      serverLinked,
+      needsRelink: !!bundle.needsRelink || serverLinked === false,
+    };
+  },
+
+  enablePinQuickLogin: async (pin: string): Promise<void> => {
+    validatePin(pin);
+    const sessionUser = storageService.getCurrentUser();
+    if (!sessionUser) throw new Error("Not authenticated");
+
+    const { token: rawDeviceToken, deviceKeyId } = await storageService.createDeviceToken();
+    const encrypted = await encryptTokenWithPin(pin, rawDeviceToken);
+    const key = await usernameKey(sessionUser.username);
+
+    const bundles = readPinBundles();
+    bundles[key] = {
+      deviceKeyId,
+      usernameKey: key,
+      encryptedTokenB64: encrypted.encryptedTokenB64,
+      ivB64: encrypted.ivB64,
+      saltB64: encrypted.saltB64,
+      iterations: encrypted.iterations,
+      createdAt: Date.now(),
+      needsRelink: false,
+    };
+    writePinBundles(bundles);
+
+    const locks = readPinLocks();
+    locks[key] = {
+      failedAttempts: 0,
+      lockedUntilFullLogin: false,
+    };
+    writePinLocks(locks);
+    void storageService.syncQuickLoginCapabilitiesForCurrentUser().catch(() => {});
+  },
+
+  disablePinQuickLogin: async (): Promise<void> => {
+    const sessionUser = storageService.getCurrentUser();
+    if (!sessionUser) throw new Error("Not authenticated");
+    const key = await usernameKey(sessionUser.username);
+
+    const bundles = readPinBundles();
+    if (bundles[key]) {
+      delete bundles[key];
+      writePinBundles(bundles);
+    }
+
+    const locks = readPinLocks();
+    if (locks[key]) {
+      delete locks[key];
+      writePinLocks(locks);
+    }
+
+    await storageService.revokeCurrentDeviceToken();
+    void storageService.syncQuickLoginCapabilitiesForCurrentUser().catch(() => {});
+  },
+
+  repairPinQuickLogin: async (pin: string): Promise<void> => {
+    validatePin(pin);
+    const sessionUser = storageService.getCurrentUser();
+    if (!sessionUser) throw new Error("Not authenticated");
+    const key = await usernameKey(sessionUser.username);
+    const bundles = readPinBundles();
+    const bundle = bundles[key];
+    if (!bundle) {
+      throw new Error("PIN_NOT_CONFIGURED");
+    }
+
+    try {
+      await decryptTokenWithPin(pin, bundle);
+    } catch {
+      throw new Error("INVALID_PIN");
+    }
+
+    const { token: rawDeviceToken, deviceKeyId } = await storageService.createDeviceToken();
+    const encrypted = await encryptTokenWithPin(pin, rawDeviceToken);
+
+    bundles[key] = {
+      ...bundle,
+      deviceKeyId,
+      encryptedTokenB64: encrypted.encryptedTokenB64,
+      ivB64: encrypted.ivB64,
+      saltB64: encrypted.saltB64,
+      iterations: encrypted.iterations,
+      needsRelink: false,
+    };
+    delete bundles[key].lastInvalidTokenAt;
+    writePinBundles(bundles);
+
+    const locks = readPinLocks();
+    locks[key] = {
+      failedAttempts: 0,
+      lockedUntilFullLogin: false,
+    };
+    writePinLocks(locks);
+
+    void storageService.syncQuickLoginCapabilitiesForCurrentUser().catch(() => {});
+  },
+
+  loginWithPin: async (username: string, pin: string): Promise<User> => {
+    validatePin(pin);
+    const normalized = normalizeUsername(username);
+    const key = await usernameKey(normalized);
+    const bundles = readPinBundles();
+    const bundle = bundles[key];
+    if (!bundle) {
+      throw new Error("PIN_NOT_CONFIGURED");
+    }
+
+    const locks = readPinLocks();
+    const lock = locks[key] || {
+      failedAttempts: 0,
+      lockedUntilFullLogin: false,
+    };
+
+    if (lock.lockedUntilFullLogin) {
+      throw new Error("PIN_LOCKED_REQUIRES_FULL_LOGIN");
+    }
+
+    let rawToken: string;
+    try {
+      rawToken = await decryptTokenWithPin(pin, bundle);
+    } catch {
+      const failed = (lock.failedAttempts || 0) + 1;
+      const locked = failed >= PIN_MAX_FAILED_ATTEMPTS;
+      locks[key] = {
+        failedAttempts: failed,
+        lockedUntilFullLogin: locked,
+      };
+      writePinLocks(locks);
+      if (locked) {
+        throw new Error("PIN_LOCKED_REQUIRES_FULL_LOGIN");
+      }
+      throw new Error("INVALID_PIN");
+    }
+
+    try {
+      const { token } = await storageService.loginWithDeviceToken(rawToken);
+      localStorage.setItem("bribebank_token", token);
+      const sessionUser = await fetchSessionUserWithToken(token);
+      setLastLoginMethod("pin");
+      setCachedLoginUsername(sessionUser.username);
+
+      if (bundle.needsRelink) {
+        bundles[key] = {
+          ...bundle,
+          needsRelink: false,
+        };
+        delete bundles[key].lastInvalidTokenAt;
+        writePinBundles(bundles);
+      }
+      locks[key] = {
+        failedAttempts: 0,
+        lockedUntilFullLogin: false,
+      };
+      writePinLocks(locks);
+
+      void storageService.syncQuickLoginCapabilitiesForCurrentUser().catch(() => {});
+      return sessionUser;
+    } catch (err: any) {
+      const backendCode = err?.message;
+      if (backendCode === "INVALID_DEVICE_TOKEN") {
+        bundles[key] = {
+          ...bundle,
+          needsRelink: true,
+          lastInvalidTokenAt: Date.now(),
+        };
+        writePinBundles(bundles);
+        throw new Error("PIN_RELINK_REQUIRED");
+      }
+      throw new Error("PIN_LOGIN_FAILED");
+    }
   },
 
 
@@ -905,6 +1707,22 @@ export const storageService = {
         requiresPhoto: !!b.requiresPhoto,
         themeColor: b.themeColor ?? null,
         deadlineHours: b.deadlineHours ?? undefined,
+        recurrenceEnabled: !!b.recurrenceEnabled,
+        recurrenceCadence: b.recurrenceCadence ?? null,
+        recurrencePattern: b.recurrencePattern ?? null,
+        recurrenceDayOfWeek: b.recurrenceDayOfWeek ?? null,
+        recurrenceDayOfMonth: b.recurrenceDayOfMonth ?? null,
+        recurrenceWeekOfMonth: b.recurrenceWeekOfMonth ?? null,
+        recurrenceMonthOfYear: b.recurrenceMonthOfYear ?? null,
+        streakEnabled: !!b.streakEnabled,
+        streakMilestones: Array.isArray(b.streakMilestones)
+          ? b.streakMilestones.map((m: any) => ({
+              id: m.id,
+              threshold: m.threshold,
+              rewardType: m.rewardType,
+              rewardValue: m.rewardValue,
+            }))
+          : [],
       })
     );
   },
@@ -924,6 +1742,15 @@ export const storageService = {
       requiresPhoto: !!template.requiresPhoto,
       themeColor: template.themeColor ?? null,
       deadlineHours: template.deadlineHours ?? null,
+      recurrenceEnabled: !!template.recurrenceEnabled,
+      recurrenceCadence: template.recurrenceCadence ?? null,
+      recurrencePattern: template.recurrencePattern ?? null,
+      recurrenceDayOfWeek: template.recurrenceDayOfWeek ?? null,
+      recurrenceDayOfMonth: template.recurrenceDayOfMonth ?? null,
+      recurrenceWeekOfMonth: template.recurrenceWeekOfMonth ?? null,
+      recurrenceMonthOfYear: template.recurrenceMonthOfYear ?? null,
+      streakEnabled: !!template.streakEnabled,
+      streakMilestones: template.streakMilestones ?? [],
       // rewardTemplateId: template.rewardTemplateId ?? null, // only if you wire this in UI
     };
 
@@ -1053,6 +1880,16 @@ export const storageService = {
         deadlineStartedAt: a.deadlineStartedAt ? new Date(a.deadlineStartedAt).getTime() : undefined,
         deadlineExpiresAt: a.deadlineExpiresAt ? new Date(a.deadlineExpiresAt).getTime() : undefined,
         photoUrl: a.photoUrl || null,
+        recurrenceSeriesId: a.recurrenceSeriesId ?? null,
+        seriesActive: !!a.seriesActive,
+        seriesPaused: !!a.seriesPaused,
+        seriesPausedAt: a.seriesPausedAt ? new Date(a.seriesPausedAt).getTime() : null,
+        seriesAutoResumeSkipAt: a.seriesAutoResumeSkipAt ? new Date(a.seriesAutoResumeSkipAt).getTime() : null,
+        currentStreak: typeof a.currentStreak === "number" ? a.currentStreak : 0,
+        streakEnabled: !!a.streakEnabled,
+        isRecurring: !!a.isRecurring,
+        nextOccurrenceAt: a.nextOccurrenceAt ? new Date(a.nextOccurrenceAt).getTime() : null,
+        isCurrentOccurrence: !!a.isCurrentOccurrence,
         // if your UI needs bounty/user nested data, you can also keep a.bounty / a.user
       })
     );
@@ -1222,6 +2059,70 @@ export const storageService = {
       const body = await res.json().catch(() => null);
       console.error("deleteBountyAssignment error:", res.status, body);
       throw new Error(body?.error || "Failed to delete bounty assignment");
+    }
+  },
+
+  pauseBountySeries: async (
+    seriesId: string,
+    options?: { autoResumeSkipNext?: boolean }
+  ): Promise<void> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const res = await fetch(apiUrl(`/bounty-series/${seriesId}/pause`), {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        autoResumeSkipNext:
+          typeof options?.autoResumeSkipNext === "boolean"
+            ? options.autoResumeSkipNext
+            : true,
+      }),
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      console.error("pauseBountySeries error:", res.status, body);
+      throw new Error(body?.error || "Failed to pause recurring series");
+    }
+  },
+
+  resumeBountySeries: async (seriesId: string): Promise<void> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const res = await fetch(apiUrl(`/bounty-series/${seriesId}/resume`), {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      console.error("resumeBountySeries error:", res.status, body);
+      throw new Error(body?.error || "Failed to resume recurring series");
+    }
+  },
+
+  stopBountySeries: async (seriesId: string): Promise<void> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const res = await fetch(apiUrl(`/bounty-series/${seriesId}/stop`), {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      console.error("stopBountySeries error:", res.status, body);
+      throw new Error(body?.error || "Failed to stop recurring series");
     }
   },
 
@@ -1458,6 +2359,7 @@ export const storageService = {
     }
 
     const backendNotifications = await res.json();
+    const cutoff = Date.now() - NOTIFICATION_RETENTION_MS;
 
     return backendNotifications
       .map((n: any): AppNotification => ({
@@ -1473,6 +2375,7 @@ export const storageService = {
             ? new Date(n.createdAt).getTime()
             : Date.now(),
       }))
+      .filter((n) => n.timestamp >= cutoff)
       .sort((a, b) => b.timestamp - a.timestamp);
   },
 
@@ -1667,7 +2570,7 @@ export const storageService = {
     return await res.json();
   },
 
-  getWheelConfig: async (familyId: string): Promise<{ spinCost: number }> => {
+  getWheelConfig: async (familyId: string): Promise<{ spinCost: number; ticketConversionRate?: number; timezone?: string; timezoneSource?: 'FAMILY' | 'CONTAINER_DEFAULT' }> => {
     const token = getAuthToken();
     if (!token) throw new Error("Not authenticated");
 
@@ -1830,6 +2733,31 @@ export const storageService = {
       const body = await res.json().catch(() => null);
       console.error("Failed to update conversion rate", res.status, body);
       throw new Error(body?.error || "Failed to update conversion rate");
+    }
+
+    return await res.json();
+  },
+
+  updateFamilyTimezone: async (
+    familyId: string,
+    timezone: string
+  ): Promise<{ timezone: string; timezoneSource: 'FAMILY' }> => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const res = await fetch(apiUrl(`/families/${familyId}/timezone`), {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ timezone }),
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      console.error("Failed to update family timezone", res.status, body);
+      throw new Error(body?.error || "Failed to update family timezone");
     }
 
     return await res.json();

@@ -1,22 +1,47 @@
 {
   "latest": {
-      "title": "Better Account Control; Lifecycle for Rewards",
-      "date": "2026-02-15",
+    "title": "New Recurring Tasks, Streaks Can Earn You Extra Rewards, And More!",
+    "date": "2026-02-20",
+    "features": [
+      "New Recurring task series can now be enabled per task template.",
+      "New Quick login via Passkey or PIN is now supported for faster family access."
+    ],
+    "improvements": [
+      "Renamed the Family Tab to Settings for more intuitive navigation and clarity.",
+      "Added family timezone configuration in Settings tab with smart defaults for better scheduling and consistency across timezones.",
+      "Redesigned app icons and splash screens for a fresh new look.",
+      "Better caching of credentials for easier login experiences, especially on mobile.",
+      "Added date and time to notifications for better context on recent activity.",
+      "Moved Ticket Conversion Rate to Settings tab",
+      "Added account security options to Settings tab for passkey and PIN login management."
+    ],
+    "fixes": [
+      "Fixed activity feed wording on sender and receiver when sending tickets to a child."
+    ]
+  },
+  "releases": {
+    "0.3.0": {
+      "title": "New Recurring Tasks, Streaks Can Earn You Extra Rewards, And More!",
+      "date": "2026-02-20",
       "features": [
-        "Parents and children can now delete their own account in-app with typed DELETE confirmation.",
-        "Self-hosters can now list and delete users/families through host management CLI tools."
+        "Recurring task series can now be enabled per task template with daily, weekly, monthly, or yearly cadence options.",
+        "Recurring task streaks with milestone rewards (ticket or custom) are now supported.",
+        "Parents can now pause or resume recurring series directly from the Manage activity feed.",
+        "Family timezone can now be explicitly configured, with container timezone fallback when unset."
       ],
       "improvements": [
-        "Family-member deletion rules are now centralized so app and CLI paths enforce identical safety logic.",
-        "Family teardown now occurs automatically when deletion would leave no remaining parent account.",
-        "Activity feed now groups reward actions into lifecycle cards, including store purchase request/approval/rejection flow."
+        "Renamed the Family Tab to Settings for more intuitive navigation and clarity.",
+        "Added family timezone configuration in Settings tab with smart defaults for better scheduling and consistency across timezones.",
+        "Redesigned app icons and splash screens for a fresh new look.",
+        "Better caching of credentials for easier login experiences, especially on mobile.",
+        "Added date and time to notifications for better context on recent activity.",
+        "Moved Ticket Conversion Rate to Settings tab",
+        "Added account security options to Settings tab for passkey and PIN login management."
       ],
       "fixes": [
-        "Resolved deletion failures caused by leftover push subscription rows tied to deleted users.",
-        "Member updates now broadcast a dedicated family-members wallet update reason to refresh active clients."
+        "Fixed activity feed wording on sender and receiver when sending tickets to a child."
       ]
     },
-  "releases": {
     "0.2.1": {
       "title": "Better Account Control; Lifecycle for Rewards",
       "date": "2026-02-15",
@@ -25,9 +50,8 @@
         "Self-hosters can now list and delete users/families through host management CLI tools."
       ],
       "improvements": [
-        "Family-member deletion rules are now centralized so app and CLI paths enforce identical safety logic.",
-        "Family teardown now occurs automatically when deletion would leave no remaining parent account.",
-        "Activity feed now groups reward actions into lifecycle cards, including store purchase request/approval/rejection flow."
+        "Activity feed now groups reward actions into lifecycle cards, including store purchase request/approval/rejection flow.",
+        "Deletion rules are centralized so app and CLI flows enforce consistent family teardown behavior."
       ],
       "fixes": [
         "Resolved deletion failures caused by leftover push subscription rows tied to deleted users.",
@@ -39,20 +63,20 @@
       "date": "2026-02-13",
       "features": [
         "Admin Approvals has been refactored into a Manage tab with unified task/reward management.",
-        "Parents and children can now cancel unverified tasks to close stale assignments cleanly."
+        "Parents and children can now cancel unverified tasks to close stale assignments cleanly.",
+        "Added one-time in-app release highlights modal after updates.",
+        "Added self-hoster emergency CLI parent password recovery path."
       ],
       "improvements": [
         "Parents are now prompted to set up a family recovery key to avoid account lockouts.",
-        "Added a one-time 'BribeBank was updated' modal with categorized release highlights."
+        "Admin and wallet history now use one newest-first activity feed instead of split lifecycle/legacy sections."
       ],
       "fixes": [
         "Password changes now immediately invalidate stale sessions so old tokens can no longer be used.",
         "Users are now automatically returned to login as soon as a stale session is detected.",
         "Fixed mobile update modal clipping by making update dialogs viewport-safe and scrollable.",
         "FCFS tasks now close lifecycle history for users who missed the claim, including who claimed first.",
-        "Admin and wallet history now use one newest-first activity feed instead of split lifecycle/legacy sections.",
         "Corrected task lifecycle status handling for denied-without-resubmit outcomes in wallet history.",
-        "Added a self-hoster emergency CLI recovery path when no family recovery key is available.",
         "Stabilized update delivery by replacing manual update confirmation with immediate automatic refresh."
       ]
     }

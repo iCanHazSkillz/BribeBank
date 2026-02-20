@@ -12,6 +12,9 @@ import {
   verifyAssignedBounty,
   denyAssignedBounty,
   cancelAssignedBounty,
+  pauseBountySeries,
+  resumeBountySeries,
+  stopBountySeries,
   deleteAssignedBounty,
 } from "../controllers/bountyController.js";
 
@@ -31,6 +34,9 @@ router.post("/bounty-assignments/:id/complete", authMiddleware, completeAssigned
 router.post("/bounty-assignments/:id/verify", authMiddleware, verifyAssignedBounty);
 router.post("/bounty-assignments/:id/deny", authMiddleware, denyAssignedBounty);
 router.post("/bounty-assignments/:id/cancel", authMiddleware, cancelAssignedBounty);
+router.put("/bounty-series/:seriesId/pause", authMiddleware, pauseBountySeries);
+router.put("/bounty-series/:seriesId/resume", authMiddleware, resumeBountySeries);
+router.put("/bounty-series/:seriesId/stop", authMiddleware, stopBountySeries);
 router.delete("/bounty-assignments/:id", authMiddleware, deleteAssignedBounty);
 
 export default router;

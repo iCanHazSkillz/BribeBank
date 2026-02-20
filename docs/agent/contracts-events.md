@@ -43,10 +43,11 @@ Frontend mirror: `bribebank-frontend/types/sseEvents.ts`
   - `timestamp`
 - Current reasons include task and lifecycle reasons such as:
   - `TASK_ASSIGNED`, `TASK_ACCEPTED`, `TASK_VERIFIED`, `TASK_DENIED`, `TASK_REJECTED`, `TASK_CANCELLED`
+  - `TASK_RECURRING_PAUSED`, `TASK_RECURRING_RESUMED`
   - `EARNED_TICKETS`, `RECEIVED_TICKETS`
   - `WHEEL_UPDATED`, `WHEEL_RESET`, `WHEEL_SPIN`
   - `CONVERSION_RATE_UPDATED`
-  - `FAMILY_MEMBERS_UPDATED`
+  - `FAMILY_MEMBERS_UPDATED`, `FAMILY_SETTINGS_UPDATED`
 
 ### `TICKETS_GIVEN`
 - Trigger: parent grants tickets.

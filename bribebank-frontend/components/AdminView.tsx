@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { AssignedPrize, PrizeStatus, PrizeTemplate, User, PrizeType, UserRole, HistoryEvent, BountyTemplate, AssignedBounty, BountyStatus, AppNotification, StoreItem, WheelSegment, Family } from '../types';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { AssignedPrize, PrizeStatus, PrizeTemplate, User, PrizeType, UserRole, HistoryEvent, BountyTemplate, AssignedBounty, BountyStatus, AppNotification, StoreItem, WheelSegment, Family, RecurrenceCadence, RecurrencePattern, BountyStreakMilestone } from '../types';
 import { storageService } from '../services/storageService';
 import { API_BASE } from "../config";
 import { PrizeCard } from './PrizeCard';
 import { DeadlineDisplay } from './DeadlineDisplay';
-import { Trash2, Check, X, Gift, Edit2, CheckCircle, AlertCircle, UserPlus, Shield, User as UserIcon, KeyRound, History, Plus, ListTodo, CircleDollarSign, Search, Zap, Bell, Settings, ShoppingBag, Link as Linkicon, Image as ImageIcon, Ticket, RotateCcw, Send, ArrowUp, Sun, Moon, ChevronDown, Download, Upload, HeartHandshake } from 'lucide-react';
+import { Trash2, Check, X, Gift, Edit2, CheckCircle, AlertCircle, UserPlus, Shield, User as UserIcon, KeyRound, History, Plus, ListTodo, CircleDollarSign, Search, Zap, Bell, Settings, ShoppingBag, Link as Linkicon, Image as ImageIcon, Ticket, RotateCcw, Send, ArrowUp, Sun, Moon, ChevronDown, Download, Upload, HeartHandshake, Clock } from 'lucide-react';
 import { SseEvent } from "../types/sseEvents";
 import { useTheme } from '../contexts/ThemeContext';
 import EmojiPicker from "emoji-picker-react";
@@ -97,10 +97,16 @@ const TASK_ACTION_LABELS: Record<string, string> = {
   DENIED_TASK: "Task denied",
   TASK_CANCELLED: "Task cancelled",
   TASK_MISSED_FCFS: "Missed (claimed by another child)",
+  TASK_EXPIRED_RECURRING: "Missed recurring occurrence",
+  TASK_RECURRING_PAUSED: "Recurring series paused",
+  TASK_RECURRING_RESUMED: "Recurring series resumed",
+  TASK_RECURRING_STOPPED: "Recurring series stopped",
   TASK_REFUSED: "Task refused",
   TASK_REJECTED_AFTER_DENIAL: "Denied task rejected",
   EARNED_TICKETS: "Tickets awarded",
   TASK_REWARD_GRANTED: "Reward granted",
+  EARNED_STREAK_TICKETS: "Streak tickets granted",
+  STREAK_REWARD_GRANTED: "Streak reward granted",
 };
 
 const REWARD_ACTION_LABELS: Record<string, string> = {
@@ -118,6 +124,13 @@ const ACTION_LABELS: Record<string, string> = {
   ...REWARD_ACTION_LABELS,
 };
 
+const getFeedActionLabel = (action: string): string => {
+  if (action === "RECEIVED_TICKETS") {
+    return "Tickets sent";
+  }
+  return ACTION_LABELS[action] || action.replaceAll("_", " ");
+};
+
 const getTaskLifecycleStatus = (
   action: string,
   metadata?: ParsedTaskLifecycleMetadata
@@ -132,11 +145,21 @@ const getTaskLifecycleStatus = (
     case "TASK_CANCELLED":
       return "Cancelled";
     case "TASK_MISSED_FCFS":
+    case "TASK_EXPIRED_RECURRING":
       return "Missed";
+    case "TASK_RECURRING_PAUSED":
+      return "Paused";
+    case "TASK_RECURRING_RESUMED":
+      return "Assigned";
+    case "TASK_RECURRING_STOPPED":
+      return "Stopped";
     case "TASK_COMPLETED":
       return "Awaiting review";
     case "TASK_ACCEPTED":
       return "In progress";
+    case "EARNED_STREAK_TICKETS":
+    case "STREAK_REWARD_GRANTED":
+      return "Verified";
     case "TASK_REFUSED":
     case "TASK_REJECTED_AFTER_DENIAL":
       return "Cancelled";
@@ -182,6 +205,49 @@ const PASTEL_COLORS = [
     'bg-purple-100 text-purple-800 border-purple-200',
     'bg-pink-100 text-pink-800 border-pink-200',
 ];
+const WEEKDAY_OPTIONS = [
+  { value: 0, label: "Sunday" },
+  { value: 1, label: "Monday" },
+  { value: 2, label: "Tuesday" },
+  { value: 3, label: "Wednesday" },
+  { value: 4, label: "Thursday" },
+  { value: 5, label: "Friday" },
+  { value: 6, label: "Saturday" },
+];
+const WEEK_OF_MONTH_OPTIONS = [
+  { value: 1, label: "First" },
+  { value: 2, label: "Second" },
+  { value: 3, label: "Third" },
+  { value: 4, label: "Fourth" },
+  { value: 5, label: "Last (or fifth)" },
+];
+const MONTH_OPTIONS = [
+  { value: 1, label: "January" },
+  { value: 2, label: "February" },
+  { value: 3, label: "March" },
+  { value: 4, label: "April" },
+  { value: 5, label: "May" },
+  { value: 6, label: "June" },
+  { value: 7, label: "July" },
+  { value: 8, label: "August" },
+  { value: 9, label: "September" },
+  { value: 10, label: "October" },
+  { value: 11, label: "November" },
+  { value: 12, label: "December" },
+];
+const FALLBACK_TIMEZONE_OPTIONS = [
+  "UTC",
+  "America/New_York",
+  "America/Chicago",
+  "America/Denver",
+  "America/Los_Angeles",
+  "America/Anchorage",
+  "Pacific/Honolulu",
+  "Europe/London",
+  "Europe/Paris",
+  "Asia/Tokyo",
+  "Australia/Sydney",
+];
 
 export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, onUserUpdate, onCurrentUserDeleted, desktopShowNotifications, onDesktopNotificationsToggle }) => {
   const [tab, setTab] = useState<'assign' | 'manage' | 'create' | 'users' | 'store'>('assign');
@@ -199,6 +265,29 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, o
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [currentFamily, setCurrentFamily] = useState<Family | null>(null);
   const [tempConversionRate, setTempConversionRate] = useState<string>('10');
+  const [tempTimezone, setTempTimezone] = useState<string>("");
+  const [isSavingTimezone, setIsSavingTimezone] = useState(false);
+  const [securityStatus, setSecurityStatus] = useState<{
+    hasPasskey: boolean;
+    hasDeviceTokenMethod: boolean;
+    setupPromptSeen: boolean;
+    needsInitialSetupPrompt: boolean;
+  } | null>(null);
+  const [passkeyList, setPasskeyList] = useState<Array<{ id: string; createdAt: string; lastUsedAt?: string | null; transports: string[] }>>([]);
+  const [devicePinEnabled, setDevicePinEnabled] = useState(false);
+  const [pinHealth, setPinHealth] = useState<{
+    localConfigured: boolean;
+    locked: boolean;
+    failedAttempts: number;
+    serverLinked: boolean | null;
+    needsRelink: boolean;
+  } | null>(null);
+  const [securityPin, setSecurityPin] = useState('');
+  const [securityPinConfirm, setSecurityPinConfirm] = useState('');
+  const [securityRelinkPin, setSecurityRelinkPin] = useState('');
+  const [securityError, setSecurityError] = useState('');
+  const [isSecurityLoading, setIsSecurityLoading] = useState(false);
+  const [isSecuritySaving, setIsSecuritySaving] = useState(false);
   const [recoveryKeyConfigured, setRecoveryKeyConfigured] = useState(false);
   const [recoveryKeyUpdatedAt, setRecoveryKeyUpdatedAt] = useState<string | null>(null);
   const [latestRecoveryKey, setLatestRecoveryKey] = useState<string | null>(null);
@@ -253,6 +342,20 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, o
   const [bountyDeadlineEnabled, setBountyDeadlineEnabled] = useState(false);
   const [bountyDeadlineDays, setBountyDeadlineDays] = useState('');
   const [bountyDeadlineHours, setBountyDeadlineHours] = useState('');
+  const [bountyRecurrenceEnabled, setBountyRecurrenceEnabled] = useState(false);
+  const [bountyRecurrenceCadence, setBountyRecurrenceCadence] = useState<RecurrenceCadence>(RecurrenceCadence.DAILY);
+  const [bountyRecurrencePattern, setBountyRecurrencePattern] = useState<RecurrencePattern>(RecurrencePattern.DAY_OF_WEEK);
+  const [bountyRecurrenceDayOfWeek, setBountyRecurrenceDayOfWeek] = useState<string>("1");
+  const [bountyRecurrenceDayOfMonth, setBountyRecurrenceDayOfMonth] = useState<string>("1");
+  const [bountyRecurrenceWeekOfMonth, setBountyRecurrenceWeekOfMonth] = useState<string>("1");
+  const [bountyRecurrenceMonthOfYear, setBountyRecurrenceMonthOfYear] = useState<string>("1");
+  const [bountyStreakEnabled, setBountyStreakEnabled] = useState(false);
+  const [bountyStreakMilestones, setBountyStreakMilestones] = useState<BountyStreakMilestone[]>([]);
+  const [seriesActionLoadingId, setSeriesActionLoadingId] = useState<string | null>(null);
+  const [pauseSeriesModal, setPauseSeriesModal] = useState<{
+    seriesId: string;
+    autoResumeSkipNext: boolean;
+  } | null>(null);
   const [emojiPickerTarget, setEmojiPickerTarget] =
     useState<"prize" | "bounty" | null>(null);
   const [showPrizeEmojiPicker, setShowPrizeEmojiPicker] = useState(false);
@@ -292,6 +395,19 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, o
   const [showScrollTop, setShowScrollTop] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const { theme, toggleTheme } = useTheme();
+  const passkeySupported = storageService.isPasskeySupported();
+  const timezoneOptions = useMemo(() => {
+    const supportedValuesOf = (Intl as any).supportedValuesOf;
+    const raw: string[] =
+      typeof supportedValuesOf === "function"
+        ? supportedValuesOf.call(Intl, "timeZone")
+        : FALLBACK_TIMEZONE_OPTIONS;
+    const merged = new Set<string>(["UTC", ...raw]);
+    if (tempTimezone) {
+      merged.add(tempTimezone);
+    }
+    return Array.from(merged).sort((a, b) => a.localeCompare(b));
+  }, [tempTimezone]);
 
   type ConfirmOptions = {
     title: string;
@@ -395,8 +511,11 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, o
         createdAt: Date.now(),
         wheelSpinCost: wheelConfigFromApi.spinCost,
         ticketConversionRate: wheelConfigFromApi.ticketConversionRate || 10,
+        timezone: wheelConfigFromApi.timezone,
+        timezoneSource: wheelConfigFromApi.timezoneSource,
       });
       setTempConversionRate(String(wheelConfigFromApi.ticketConversionRate || 10));
+      setTempTimezone(wheelConfigFromApi.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
       setRecoveryKeyConfigured(!!recoveryKeyStatus.configured);
       setRecoveryKeyUpdatedAt(recoveryKeyStatus.updatedAt ?? null);
       
@@ -438,6 +557,12 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, o
         return () => clearTimeout(timer);
     }
   }, [toast]);
+
+  useEffect(() => {
+    if (tab === "users" && !userFormView) {
+      void loadSecuritySettings();
+    }
+  }, [tab, userFormView, currentUser.id]);
 
   useEffect(() => {
     const token = storageService.getAuthToken();
@@ -539,6 +664,10 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, o
   };
 
   const toggleBountyDeadline = () => {
+    if (!bountyDeadlineEnabled && bountyRecurrenceEnabled) {
+      showToast("Deadline cannot be used with recurring tasks.", "error");
+      return;
+    }
     const nextEnabled = !bountyDeadlineEnabled;
     setBountyDeadlineEnabled(nextEnabled);
 
@@ -551,9 +680,159 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, o
     }
   };
 
+  const addStreakMilestone = () => {
+    const nextThreshold =
+      bountyStreakMilestones.length > 0
+        ? Math.max(...bountyStreakMilestones.map((item) => item.threshold || 0)) + 1
+        : 1;
+    setBountyStreakMilestones((prev) => [
+      ...prev,
+      { threshold: nextThreshold, rewardType: "TICKETS", rewardValue: "10" },
+    ]);
+  };
+
+  const updateStreakMilestone = (
+    index: number,
+    patch: Partial<BountyStreakMilestone>
+  ) => {
+    setBountyStreakMilestones((prev) =>
+      prev.map((item, i) => (i === index ? { ...item, ...patch } : item))
+    );
+  };
+
+  const removeStreakMilestone = (index: number) => {
+    setBountyStreakMilestones((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const buildRecurrencePayload = () => {
+    if (!bountyRecurrenceEnabled) {
+      return {
+        recurrenceEnabled: false,
+        recurrenceCadence: null,
+        recurrencePattern: null,
+        recurrenceDayOfWeek: null,
+        recurrenceDayOfMonth: null,
+        recurrenceWeekOfMonth: null,
+        recurrenceMonthOfYear: null,
+        streakEnabled: false,
+        streakMilestones: [],
+      };
+    }
+
+    if (bountyFCFS) {
+      throw new Error("Recurring tasks cannot be first-come-first-served.");
+    }
+    if (bountyDeadlineEnabled) {
+      throw new Error("Recurring tasks cannot also use deadline.");
+    }
+
+    let recurrencePattern: RecurrencePattern | null = null;
+    let recurrenceDayOfWeek: number | null = null;
+    let recurrenceDayOfMonth: number | null = null;
+    let recurrenceWeekOfMonth: number | null = null;
+    let recurrenceMonthOfYear: number | null = null;
+
+    if (bountyRecurrenceCadence === RecurrenceCadence.WEEKLY) {
+      recurrencePattern = RecurrencePattern.DAY_OF_WEEK;
+      const dayOfWeek = Number(bountyRecurrenceDayOfWeek);
+      if (!Number.isInteger(dayOfWeek) || dayOfWeek < 0 || dayOfWeek > 6) {
+        throw new Error("Choose a valid weekday for weekly recurrence.");
+      }
+      recurrenceDayOfWeek = dayOfWeek;
+    }
+
+    if (bountyRecurrenceCadence === RecurrenceCadence.MONTHLY) {
+      recurrencePattern = bountyRecurrencePattern;
+      if (bountyRecurrencePattern === RecurrencePattern.DAY_OF_MONTH) {
+        const dayOfMonth = Number(bountyRecurrenceDayOfMonth);
+        if (!Number.isInteger(dayOfMonth) || dayOfMonth < 1 || dayOfMonth > 31) {
+          throw new Error("Choose a valid day of the month (1-31).");
+        }
+        recurrenceDayOfMonth = dayOfMonth;
+      } else {
+        const weekOfMonth = Number(bountyRecurrenceWeekOfMonth);
+        const dayOfWeek = Number(bountyRecurrenceDayOfWeek);
+        if (!Number.isInteger(weekOfMonth) || weekOfMonth < 1 || weekOfMonth > 5) {
+          throw new Error("Choose a valid week of month (1-5).");
+        }
+        if (!Number.isInteger(dayOfWeek) || dayOfWeek < 0 || dayOfWeek > 6) {
+          throw new Error("Choose a valid weekday for monthly recurrence.");
+        }
+        recurrenceWeekOfMonth = weekOfMonth;
+        recurrenceDayOfWeek = dayOfWeek;
+      }
+    }
+
+    if (bountyRecurrenceCadence === RecurrenceCadence.YEARLY) {
+      recurrencePattern = bountyRecurrencePattern;
+      const monthOfYear = Number(bountyRecurrenceMonthOfYear);
+      if (!Number.isInteger(monthOfYear) || monthOfYear < 1 || monthOfYear > 12) {
+        throw new Error("Choose a valid month for yearly recurrence.");
+      }
+      recurrenceMonthOfYear = monthOfYear;
+
+      if (bountyRecurrencePattern === RecurrencePattern.DAY_OF_MONTH) {
+        const dayOfMonth = Number(bountyRecurrenceDayOfMonth);
+        if (!Number.isInteger(dayOfMonth) || dayOfMonth < 1 || dayOfMonth > 31) {
+          throw new Error("Choose a valid day of the month (1-31).");
+        }
+        recurrenceDayOfMonth = dayOfMonth;
+      } else {
+        const weekOfMonth = Number(bountyRecurrenceWeekOfMonth);
+        const dayOfWeek = Number(bountyRecurrenceDayOfWeek);
+        if (!Number.isInteger(weekOfMonth) || weekOfMonth < 1 || weekOfMonth > 5) {
+          throw new Error("Choose a valid week of month (1-5).");
+        }
+        if (!Number.isInteger(dayOfWeek) || dayOfWeek < 0 || dayOfWeek > 6) {
+          throw new Error("Choose a valid weekday for yearly recurrence.");
+        }
+        recurrenceWeekOfMonth = weekOfMonth;
+        recurrenceDayOfWeek = dayOfWeek;
+      }
+    }
+
+    const normalizedMilestones = bountyStreakMilestones
+      .map((item) => ({
+        threshold: Number(item.threshold),
+        rewardType: item.rewardType,
+        rewardValue: `${item.rewardValue ?? ""}`.trim(),
+      }))
+      .filter((item) => item.threshold >= 1 && item.rewardValue.length > 0);
+
+    const seenThresholds = new Set<number>();
+    for (const milestone of normalizedMilestones) {
+      if (!Number.isInteger(milestone.threshold)) {
+        throw new Error("Streak milestone thresholds must be whole numbers.");
+      }
+      if (seenThresholds.has(milestone.threshold)) {
+        throw new Error("Streak milestone thresholds must be unique.");
+      }
+      seenThresholds.add(milestone.threshold);
+      if (milestone.rewardType === "TICKETS") {
+        const ticketAmount = Number(milestone.rewardValue);
+        if (!Number.isInteger(ticketAmount) || ticketAmount < 1) {
+          throw new Error("Ticket streak rewards must be a positive whole number.");
+        }
+      }
+    }
+
+    return {
+      recurrenceEnabled: true,
+      recurrenceCadence: bountyRecurrenceCadence,
+      recurrencePattern,
+      recurrenceDayOfWeek,
+      recurrenceDayOfMonth,
+      recurrenceWeekOfMonth,
+      recurrenceMonthOfYear,
+      streakEnabled: bountyStreakEnabled,
+      streakMilestones: bountyStreakEnabled ? normalizedMilestones : [],
+    };
+  };
+
   const resetForms = () => {
     setPrizeTitle(''); setPrizeDesc(''); setPrizeEmoji('🎁'); setPrizeColor(PASTEL_COLORS[6]);
     setBountyTitle(''); setBountyRewardType('TICKETS'); setBountyRewardValue(''); setBountyEmoji('🧹'); setBountyFCFS(false); setBountyRequiresPhoto(false); setBountyColor(PASTEL_COLORS[6]); setBountyDeadlineEnabled(false); setBountyDeadlineDays(''); setBountyDeadlineHours('');
+    setBountyRecurrenceEnabled(false); setBountyRecurrenceCadence(RecurrenceCadence.DAILY); setBountyRecurrencePattern(RecurrencePattern.DAY_OF_WEEK); setBountyRecurrenceDayOfWeek('1'); setBountyRecurrenceDayOfMonth('1'); setBountyRecurrenceWeekOfMonth('1'); setBountyRecurrenceMonthOfYear('1'); setBountyStreakEnabled(false); setBountyStreakMilestones([]);
     setStoreItemTitle(''); setStoreItemCost(''); setStoreItemImage(''); setStoreItemLink(''); setStoreItemDescription('');
     setStoreItemNotifyUserIds([]);
     setEditingId(null);
@@ -594,6 +873,130 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser, initialTab, o
       setTimeout(() => setRecoveryKeyCopied(false), 2000);
     } catch {
       showToast("Failed to copy recovery key", "error");
+    }
+  };
+
+  const loadSecuritySettings = async () => {
+    try {
+      setIsSecurityLoading(true);
+      setSecurityError("");
+      const [status, passkeys, pinStatus] = await Promise.all([
+        storageService.getQuickLoginStatus(),
+        storageService.listPasskeys(),
+        storageService.getPinQuickLoginHealth(currentUser.username),
+      ]);
+      setSecurityStatus(status);
+      setPasskeyList(passkeys);
+      setPinHealth(pinStatus);
+      setDevicePinEnabled(!!pinStatus.localConfigured);
+    } catch (err: any) {
+      setSecurityError(err?.message || "Failed to load security settings.");
+    } finally {
+      setIsSecurityLoading(false);
+    }
+  };
+
+  const handleAddPasskey = async () => {
+    try {
+      setIsSecuritySaving(true);
+      setSecurityError("");
+      await storageService.registerPasskey();
+      await loadSecuritySettings();
+      showToast("Passkey added.", "success");
+    } catch (err: any) {
+      setSecurityError(err?.message || "Failed to add passkey.");
+    } finally {
+      setIsSecuritySaving(false);
+    }
+  };
+
+  const handleRemovePasskey = async (passkeyId: string) => {
+    const ok = await confirm({
+      title: "Remove passkey?",
+      message: "You will no longer be able to use this passkey for login.",
+      confirmLabel: "Remove",
+      cancelLabel: "Keep",
+      destructive: true,
+    });
+    if (!ok) return;
+
+    try {
+      setIsSecuritySaving(true);
+      setSecurityError("");
+      await storageService.removePasskey(passkeyId);
+      await loadSecuritySettings();
+      showToast("Passkey removed.", "success");
+    } catch (err: any) {
+      setSecurityError(err?.message || "Failed to remove passkey.");
+    } finally {
+      setIsSecuritySaving(false);
+    }
+  };
+
+  const handleSavePinQuickLogin = async () => {
+    if (!/^\d{4}$/.test(securityPin)) {
+      setSecurityError("PIN must be exactly 4 digits.");
+      return;
+    }
+    if (securityPin !== securityPinConfirm) {
+      setSecurityError("PIN confirmation does not match.");
+      return;
+    }
+
+    try {
+      setIsSecuritySaving(true);
+      setSecurityError("");
+      await storageService.enablePinQuickLogin(securityPin);
+      setSecurityPin("");
+      setSecurityPinConfirm("");
+      setSecurityRelinkPin("");
+      await loadSecuritySettings();
+      showToast(devicePinEnabled ? "PIN updated." : "PIN enabled.", "success");
+    } catch (err: any) {
+      setSecurityError(err?.message || "Failed to save PIN.");
+    } finally {
+      setIsSecuritySaving(false);
+    }
+  };
+
+  const handleDisablePinQuickLogin = async () => {
+    try {
+      setIsSecuritySaving(true);
+      setSecurityError("");
+      await storageService.disablePinQuickLogin();
+      setSecurityPin("");
+      setSecurityPinConfirm("");
+      setSecurityRelinkPin("");
+      await loadSecuritySettings();
+      showToast("PIN disabled.", "success");
+    } catch (err: any) {
+      setSecurityError(err?.message || "Failed to disable PIN.");
+    } finally {
+      setIsSecuritySaving(false);
+    }
+  };
+
+  const handleRelinkPinQuickLogin = async () => {
+    if (!/^\d{4}$/.test(securityRelinkPin)) {
+      setSecurityError("PIN must be exactly 4 digits.");
+      return;
+    }
+
+    try {
+      setIsSecuritySaving(true);
+      setSecurityError("");
+      await storageService.repairPinQuickLogin(securityRelinkPin);
+      setSecurityRelinkPin("");
+      await loadSecuritySettings();
+      showToast("PIN relinked.", "success");
+    } catch (err: any) {
+      if (err?.message === "INVALID_PIN") {
+        setSecurityError("Invalid PIN.");
+      } else {
+        setSecurityError(err?.message || "Failed to relink PIN.");
+      }
+    } finally {
+      setIsSecuritySaving(false);
     }
   };
 
@@ -736,6 +1139,8 @@ const handleBulkAssign = async () => {
           }
         }
 
+        const recurrencePayload = buildRecurrencePayload();
+
         // Validate and calculate deadline (days + hours)
         let deadlineHoursValue: number | null = null;
 
@@ -778,6 +1183,15 @@ const handleBulkAssign = async () => {
           requiresPhoto: bountyRequiresPhoto,
           themeColor: bountyColor,
           deadlineHours: deadlineHoursValue,
+          recurrenceEnabled: recurrencePayload.recurrenceEnabled,
+          recurrenceCadence: recurrencePayload.recurrenceCadence,
+          recurrencePattern: recurrencePayload.recurrencePattern,
+          recurrenceDayOfWeek: recurrencePayload.recurrenceDayOfWeek,
+          recurrenceDayOfMonth: recurrencePayload.recurrenceDayOfMonth,
+          recurrenceWeekOfMonth: recurrencePayload.recurrenceWeekOfMonth,
+          recurrenceMonthOfYear: recurrencePayload.recurrenceMonthOfYear,
+          streakEnabled: recurrencePayload.streakEnabled,
+          streakMilestones: recurrencePayload.streakMilestones,
         };
 
         try {
@@ -794,9 +1208,9 @@ const handleBulkAssign = async () => {
           return;
         }
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Save template error:", err);
-      showToast("Failed to save template", "error");
+      showToast(err?.message || "Failed to save template", "error");
     }
   };
 
@@ -877,9 +1291,31 @@ const handleBulkAssign = async () => {
       setBountyFCFS(!!b.isFCFS);
       setBountyRequiresPhoto(!!b.requiresPhoto);
       setBountyColor(b.themeColor || PASTEL_COLORS[9]);
+      setBountyRecurrenceEnabled(!!b.recurrenceEnabled);
+      setBountyRecurrenceCadence(b.recurrenceCadence || RecurrenceCadence.DAILY);
+      setBountyRecurrencePattern(b.recurrencePattern || RecurrencePattern.DAY_OF_WEEK);
+      setBountyRecurrenceDayOfWeek(String(b.recurrenceDayOfWeek ?? 1));
+      setBountyRecurrenceDayOfMonth(String(b.recurrenceDayOfMonth ?? 1));
+      setBountyRecurrenceWeekOfMonth(String(b.recurrenceWeekOfMonth ?? 1));
+      setBountyRecurrenceMonthOfYear(String(b.recurrenceMonthOfYear ?? 1));
+      setBountyStreakEnabled(!!b.streakEnabled);
+      setBountyStreakMilestones(
+        Array.isArray(b.streakMilestones)
+          ? b.streakMilestones.map((item) => ({
+              id: item.id,
+              threshold: item.threshold,
+              rewardType: item.rewardType,
+              rewardValue: item.rewardValue,
+            }))
+          : []
+      );
       
-      // Convert total hours to days and hours for display
-      if (b.deadlineHours) {
+      // Deadline is mutually exclusive with recurring cadence.
+      if (b.recurrenceEnabled) {
+        setBountyDeadlineEnabled(false);
+        setBountyDeadlineDays('');
+        setBountyDeadlineHours('');
+      } else if (b.deadlineHours) {
         const totalHours = b.deadlineHours;
         const days = Math.floor(totalHours / 24);
         const hours = totalHours % 24;
@@ -966,6 +1402,69 @@ const handleBulkAssign = async () => {
     } catch (err) {
       console.error("Failed to cancel task:", err);
       showToast("Failed to cancel task", "error");
+    }
+  };
+
+  const handlePauseSeries = (seriesId: string) => {
+    setPauseSeriesModal({
+      seriesId,
+      autoResumeSkipNext: true,
+    });
+  };
+
+  const handleConfirmPauseSeries = async () => {
+    if (!pauseSeriesModal) return;
+    try {
+      setSeriesActionLoadingId(pauseSeriesModal.seriesId);
+      await storageService.pauseBountySeries(pauseSeriesModal.seriesId, {
+        autoResumeSkipNext: pauseSeriesModal.autoResumeSkipNext,
+      });
+      await refreshData();
+      showToast("Recurring series paused.", "success");
+      setPauseSeriesModal(null);
+    } catch (err) {
+      console.error("Failed to pause recurring series:", err);
+      showToast("Failed to pause recurring series", "error");
+    } finally {
+      setSeriesActionLoadingId(null);
+    }
+  };
+
+  const handleResumeSeries = async (seriesId: string) => {
+    try {
+      setSeriesActionLoadingId(seriesId);
+      await storageService.resumeBountySeries(seriesId);
+      await refreshData();
+      showToast("Recurring series resumed.", "success");
+    } catch (err) {
+      console.error("Failed to resume recurring series:", err);
+      showToast("Failed to resume recurring series", "error");
+    } finally {
+      setSeriesActionLoadingId(null);
+    }
+  };
+
+  const handleStopSeries = async (seriesId: string) => {
+    const ok = await confirm({
+      title: "Stop Recurring Series?",
+      message: "This stops the series immediately and removes the current occurrence. No future occurrences will be scheduled.",
+      confirmLabel: "Stop Series",
+      cancelLabel: "Keep Series",
+      destructive: true,
+    });
+
+    if (!ok) return;
+
+    try {
+      setSeriesActionLoadingId(seriesId);
+      await storageService.stopBountySeries(seriesId);
+      await refreshData();
+      showToast("Recurring series stopped.", "success");
+    } catch (err) {
+      console.error("Failed to stop recurring series:", err);
+      showToast("Failed to stop recurring series", "error");
+    } finally {
+      setSeriesActionLoadingId(null);
     }
   };
 
@@ -1355,7 +1854,7 @@ const handleBulkAssign = async () => {
       const selectedItems = importPreview.filter((_, idx) => importSelected.has(idx));
       
       if (selectedItems.length === 0) {
-        showToast('Please select at least one item to import', 'warning');
+        showToast('Please select at least one item to import', 'error');
         setIsImporting(false);
         return;
       }
@@ -1619,6 +2118,39 @@ const handleBulkAssign = async () => {
     }
   };
 
+  const handleSaveFamilyTimezone = async () => {
+    if (!currentFamily?.id) return;
+    const tz = tempTimezone.trim();
+    if (!tz) {
+      showToast("Timezone is required", "error");
+      return;
+    }
+
+    try {
+      // Validate IANA timezone string before calling API.
+      Intl.DateTimeFormat(undefined, { timeZone: tz });
+    } catch {
+      showToast("Enter a valid IANA timezone (for example: America/New_York)", "error");
+      return;
+    }
+
+    try {
+      setIsSavingTimezone(true);
+      const result = await storageService.updateFamilyTimezone(currentFamily.id, tz);
+      setCurrentFamily({
+        ...currentFamily,
+        timezone: result.timezone,
+        timezoneSource: result.timezoneSource,
+      } as Family);
+      setTempTimezone(result.timezone);
+      showToast("Timezone updated.", "success");
+    } catch (err: any) {
+      showToast(err?.message || "Failed to update timezone", "error");
+    } finally {
+      setIsSavingTimezone(false);
+    }
+  };
+
   const handleDismissNotification = async (id: string) => {
     try {
       await storageService.markNotificationRead(id);
@@ -1729,6 +2261,10 @@ const handleBulkAssign = async () => {
     }
   });
 
+  const bountyAssignmentMap = new Map(
+    bountyAssignments.map((assignment) => [assignment.id, assignment] as const)
+  );
+
   const activeUnverifiedAssignmentIds = new Set(
     bountyAssignments
       .filter((assignment) => assignment.status !== BountyStatus.VERIFIED)
@@ -1764,6 +2300,7 @@ const handleBulkAssign = async () => {
         expectedRewardMeta?.rewardType === "TICKETS"
           ? `${expectedRewardMeta.rewardValue || "0"} tickets`
           : expectedRewardMeta?.rewardValue || null;
+      const matchingAssignment = bountyAssignmentMap.get(bucket.bountyAssignmentId);
 
       return {
         ...bucket,
@@ -1785,6 +2322,21 @@ const handleBulkAssign = async () => {
         rewardSummary,
         expectedReward,
         isActiveUnverified: activeUnverifiedAssignmentIds.has(bucket.bountyAssignmentId),
+        canCancelOccurrence: activeUnverifiedAssignmentIds.has(bucket.bountyAssignmentId),
+        recurrenceSeriesId: matchingAssignment?.recurrenceSeriesId || null,
+        seriesActive: !!matchingAssignment?.seriesActive,
+        seriesPaused: !!matchingAssignment?.seriesPaused,
+        seriesPausedAt: matchingAssignment?.seriesPausedAt || null,
+        seriesAutoResumeSkipAt: matchingAssignment?.seriesAutoResumeSkipAt || null,
+        currentStreak: matchingAssignment?.currentStreak || 0,
+        streakEnabled: !!matchingAssignment?.streakEnabled,
+        isRecurring: !!matchingAssignment?.isRecurring,
+        isCurrentOccurrence: !!matchingAssignment?.isCurrentOccurrence,
+        nextOccurrenceAt: matchingAssignment?.nextOccurrenceAt || null,
+        canManageSeries:
+          !!matchingAssignment?.recurrenceSeriesId &&
+          !!matchingAssignment?.seriesActive &&
+          !!matchingAssignment?.isCurrentOccurrence,
       };
     })
     .sort((a, b) => b.latestTimestamp - a.latestTimestamp);
@@ -1907,7 +2459,7 @@ const handleBulkAssign = async () => {
             { id: 'manage', label: 'Manage', icon: CheckCircle, badge: totalPending },
             { id: 'create', label: 'Create', icon: Plus },
             { id: 'store', label: 'Store', icon: ShoppingBag },
-            { id: 'users', label: 'Family', icon: UserIcon }
+            { id: 'users', label: 'Settings', icon: Settings }
           ].map(t => (
             <button
               key={t.id}
@@ -2501,6 +3053,71 @@ const handleBulkAssign = async () => {
         </div>
       )}
 
+      {pauseSeriesModal && (
+        <div
+          className="fixed inset-0 bg-black/60 z-[85] flex items-center justify-center p-4"
+          onClick={() => {
+            if (seriesActionLoadingId) return;
+            setPauseSeriesModal(null);
+          }}
+        >
+          <div
+            className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-md p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">
+              Pause Recurring Series
+            </h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+              The current task remains visible but the child cannot progress it while paused.
+            </p>
+
+            <label className="flex items-start gap-3 p-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40">
+              <input
+                type="checkbox"
+                checked={pauseSeriesModal.autoResumeSkipNext}
+                onChange={(e) =>
+                  setPauseSeriesModal((prev) =>
+                    prev ? { ...prev, autoResumeSkipNext: e.target.checked } : prev
+                  )
+                }
+                className="mt-0.5"
+                disabled={!!seriesActionLoadingId}
+              />
+              <span className="text-sm text-gray-700 dark:text-gray-200">
+                Skip next scheduled occurrence and auto-resume (recommended)
+              </span>
+            </label>
+
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-3">
+              {pauseSeriesModal.autoResumeSkipNext
+                ? "Series will automatically resume after exactly one skipped occurrence."
+                : "Series will remain paused until you manually resume it."}
+            </p>
+
+            <div className="flex justify-end gap-3 mt-6">
+              <button
+                type="button"
+                disabled={!!seriesActionLoadingId}
+                className="px-4 py-2 text-sm rounded-xl border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-60"
+                onClick={() => setPauseSeriesModal(null)}
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                disabled={!!seriesActionLoadingId}
+                className="px-4 py-2 text-sm rounded-xl text-white bg-amber-600 hover:bg-amber-700 disabled:opacity-60"
+                onClick={() => void handleConfirmPauseSeries()}
+              >
+                {seriesActionLoadingId ? "Pausing..." : "Pause Series"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Viewing Rewards Modal */}
       {viewingRewardsForUser && (
         <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-6 animate-fade-in" onClick={() => setViewingRewardsForUser(null)}>
@@ -2615,7 +3232,7 @@ const handleBulkAssign = async () => {
                 notifications.map(note => (
                   <div key={note.id} className="p-3 mb-1 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 rounded-xl border border-gray-100 dark:border-gray-600 transition-colors relative group">
                     <p className="text-sm text-gray-800 dark:text-gray-200 pr-6">{note.message}</p>
-                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">{new Date(note.timestamp).toLocaleTimeString()}</p>
+                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">{new Date(note.timestamp).toLocaleString()}</p>
                     <button onClick={(e) => { e.stopPropagation(); handleDismissNotification(note.id); }} className="absolute top-2 right-2 text-gray-300 hover:text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity"><X size={14}/></button>
                   </div>
                 ))
@@ -2654,7 +3271,7 @@ const handleBulkAssign = async () => {
             { id: 'manage', label: `${totalPending}`, fullLabel: 'Manage', icon: CheckCircle },
             { id: 'create', label: 'Create', icon: Plus },
             { id: 'store', label: 'Store', icon: ShoppingBag },
-            { id: 'users', label: 'Family', icon: UserIcon }
+            { id: 'users', label: 'Settings', icon: Settings }
         ].map(t => (
             <button 
                 key={t.id}
@@ -2684,14 +3301,14 @@ const handleBulkAssign = async () => {
               {tab === 'manage' && 'Manage Tasks & Rewards'}
               {tab === 'create' && 'Create Templates'}
               {tab === 'store' && 'Store Management'}
-              {tab === 'users' && 'Family Members'}
+              {tab === 'users' && 'Settings'}
             </h2>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
               {tab === 'assign' && 'Distribute rewards, tasks, and tickets to family members'}
               {tab === 'manage' && 'Review, approve, and manage task/reward lifecycle activity'}
               {tab === 'create' && 'Build reward and task templates'}
               {tab === 'store' && 'Manage store items and prize wheel'}
-              {tab === 'users' && 'Manage family members and settings'}
+              {tab === 'users' && 'Manage family settings and members'}
             </p>
           </div>
           {totalPending > 0 && tab !== 'manage' && (
@@ -2870,9 +3487,36 @@ const handleBulkAssign = async () => {
                             }
                         }
 
+                        let recurrenceText = '';
+                        if (b.recurrenceEnabled && b.recurrenceCadence) {
+                            if (b.recurrenceCadence === RecurrenceCadence.DAILY) {
+                                recurrenceText = 'Daily recurring';
+                            } else if (b.recurrenceCadence === RecurrenceCadence.WEEKLY) {
+                                const weekday = WEEKDAY_OPTIONS.find((opt) => opt.value === b.recurrenceDayOfWeek)?.label || 'Weekly';
+                                recurrenceText = `Weekly (${weekday})`;
+                            } else if (b.recurrenceCadence === RecurrenceCadence.MONTHLY) {
+                                if (b.recurrencePattern === RecurrencePattern.DAY_OF_MONTH) {
+                                    recurrenceText = `Monthly (day ${b.recurrenceDayOfMonth || 1})`;
+                                } else {
+                                    const weekday = WEEKDAY_OPTIONS.find((opt) => opt.value === b.recurrenceDayOfWeek)?.label || 'weekday';
+                                    const weekOfMonth = WEEK_OF_MONTH_OPTIONS.find((opt) => opt.value === b.recurrenceWeekOfMonth)?.label || 'Week';
+                                    recurrenceText = `Monthly (${weekOfMonth} ${weekday})`;
+                                }
+                            } else if (b.recurrenceCadence === RecurrenceCadence.YEARLY) {
+                                const month = MONTH_OPTIONS.find((opt) => opt.value === b.recurrenceMonthOfYear)?.label || 'Month';
+                                if (b.recurrencePattern === RecurrencePattern.DAY_OF_MONTH) {
+                                    recurrenceText = `Yearly (${month} ${b.recurrenceDayOfMonth || 1})`;
+                                } else {
+                                    const weekday = WEEKDAY_OPTIONS.find((opt) => opt.value === b.recurrenceDayOfWeek)?.label || 'weekday';
+                                    const weekOfMonth = WEEK_OF_MONTH_OPTIONS.find((opt) => opt.value === b.recurrenceWeekOfMonth)?.label || 'Week';
+                                    recurrenceText = `Yearly (${weekOfMonth} ${weekday} of ${month})`;
+                                }
+                            }
+                        }
+
                         const description = b.deadlineHours 
-                            ? `Reward: ${b.rewardValue}${b.rewardType === 'TICKETS' ? ' Tickets' : ''} • ${deadlineText}`
-                            : `Reward: ${b.rewardValue}${b.rewardType === 'TICKETS' ? ' Tickets' : ''}`;
+                            ? `Reward: ${b.rewardValue}${b.rewardType === 'TICKETS' ? ' Tickets' : ''} • ${deadlineText}${recurrenceText ? ` • ${recurrenceText}` : ''}`
+                            : `Reward: ${b.rewardValue}${b.rewardType === 'TICKETS' ? ' Tickets' : ''}${recurrenceText ? ` • ${recurrenceText}` : ''}`;
 
                         return (
                             <PrizeCard
@@ -2885,6 +3529,9 @@ const handleBulkAssign = async () => {
                                 isFCFS={b.isFCFS}
                                 hasDeadline={!!b.deadlineHours}
                                 requiresPhoto={b.requiresPhoto}
+                                isRecurring={!!b.recurrenceEnabled}
+                                currentStreak={b.streakEnabled ? 0 : undefined}
+                                streakEnabled={!!b.streakEnabled}
                                 highlight={selectedBountyTemplateIds.includes(b.id)}
                                 onClick={() =>
                                     setSelectedBountyTemplateIds(prev =>
@@ -3212,6 +3859,37 @@ const handleBulkAssign = async () => {
                                   <p className="text-xs text-gray-500 dark:text-gray-400">
                                     Child: <span className="font-semibold">{lifecycle.childName}</span>
                                   </p>
+                                  {lifecycle.isRecurring && (
+                                    <div className="mt-1 flex flex-wrap gap-1.5">
+                                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300">
+                                        Recurring
+                                      </span>
+                                      {lifecycle.streakEnabled && (
+                                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300">
+                                          Streak {lifecycle.currentStreak}
+                                        </span>
+                                      )}
+                                      {lifecycle.seriesPaused && (
+                                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300">
+                                          Paused
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
+                                  {lifecycle.seriesPausedAt && (
+                                    <p className="text-[11px] text-red-600 dark:text-red-400 mt-1">
+                                      Paused at {new Date(lifecycle.seriesPausedAt).toLocaleString()}
+                                    </p>
+                                  )}
+                                  {lifecycle.seriesPaused && (
+                                    <p className="text-[11px] text-red-600 dark:text-red-400 mt-1">
+                                      {lifecycle.seriesAutoResumeSkipAt
+                                        ? `Will auto-resume after skipping the occurrence at ${new Date(
+                                            lifecycle.seriesAutoResumeSkipAt
+                                          ).toLocaleString()}.`
+                                        : "Paused until manually resumed."}
+                                    </p>
+                                  )}
                                   {lifecycle.expectedReward && (
                                     <p className="text-xs text-gray-500 dark:text-gray-400">
                                       Reward target: <span className="font-semibold">{lifecycle.expectedReward}</span>
@@ -3267,16 +3945,56 @@ const handleBulkAssign = async () => {
                                   Reward Ref: {lifecycle.rewardAssignmentId.slice(0, 8)}
                                 </span>
                               )}
+                              {lifecycle.recurrenceSeriesId && (
+                                <span
+                                  title={lifecycle.recurrenceSeriesId}
+                                  className="px-2 py-1 rounded-full text-[11px] bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300"
+                                >
+                                  Series Ref: {lifecycle.recurrenceSeriesId.slice(0, 8)}
+                                </span>
+                              )}
                             </div>
 
-                            {lifecycle.isActiveUnverified && (
+                            {(lifecycle.canManageSeries || lifecycle.canCancelOccurrence) && (
                               <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
-                                <button
-                                  onClick={() => void handleCancelTask(lifecycle.bountyAssignmentId)}
-                                  className="w-full py-2 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 font-bold rounded-xl hover:bg-red-100 dark:hover:bg-red-900/50 flex items-center justify-center gap-1 text-sm border border-red-200 dark:border-red-700"
-                                >
-                                  <X size={16} /> Cancel Task
-                                </button>
+                                <div className="flex flex-wrap gap-2">
+                                  {lifecycle.canManageSeries && lifecycle.recurrenceSeriesId && (
+                                    lifecycle.seriesPaused ? (
+                                      <button
+                                        onClick={() => void handleResumeSeries(lifecycle.recurrenceSeriesId!)}
+                                        disabled={seriesActionLoadingId === lifecycle.recurrenceSeriesId}
+                                        className="flex-1 min-w-[10rem] py-2 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 font-bold rounded-xl hover:bg-emerald-100 dark:hover:bg-emerald-900/50 flex items-center justify-center gap-1 text-sm border border-emerald-200 dark:border-emerald-700 disabled:opacity-60"
+                                      >
+                                        {seriesActionLoadingId === lifecycle.recurrenceSeriesId ? "Resuming..." : "Resume Series"}
+                                      </button>
+                                    ) : (
+                                      <button
+                                        onClick={() => handlePauseSeries(lifecycle.recurrenceSeriesId!)}
+                                        disabled={seriesActionLoadingId === lifecycle.recurrenceSeriesId}
+                                        className="flex-1 min-w-[10rem] py-2 bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 font-bold rounded-xl hover:bg-amber-100 dark:hover:bg-amber-900/50 flex items-center justify-center gap-1 text-sm border border-amber-200 dark:border-amber-700 disabled:opacity-60"
+                                      >
+                                        {seriesActionLoadingId === lifecycle.recurrenceSeriesId ? "Pausing..." : "Pause Series"}
+                                      </button>
+                                    )
+                                  )}
+                                  {lifecycle.canManageSeries && lifecycle.recurrenceSeriesId && (
+                                    <button
+                                      onClick={() => void handleStopSeries(lifecycle.recurrenceSeriesId!)}
+                                      disabled={seriesActionLoadingId === lifecycle.recurrenceSeriesId}
+                                      className="flex-1 min-w-[10rem] py-2 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 font-bold rounded-xl hover:bg-red-100 dark:hover:bg-red-900/50 flex items-center justify-center gap-1 text-sm border border-red-200 dark:border-red-700 disabled:opacity-60"
+                                    >
+                                      {seriesActionLoadingId === lifecycle.recurrenceSeriesId ? "Stopping..." : "Stop Series"}
+                                    </button>
+                                  )}
+                                  {lifecycle.canCancelOccurrence && (
+                                    <button
+                                      onClick={() => void handleCancelTask(lifecycle.bountyAssignmentId)}
+                                      className="flex-1 min-w-[10rem] py-2 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 font-bold rounded-xl hover:bg-red-100 dark:hover:bg-red-900/50 flex items-center justify-center gap-1 text-sm border border-red-200 dark:border-red-700"
+                                    >
+                                      <X size={16} /> Cancel Task
+                                    </button>
+                                  )}
+                                </div>
                               </div>
                             )}
                           </div>
@@ -3361,9 +4079,12 @@ const handleBulkAssign = async () => {
                           <div className="flex-1">
                             <p className="text-sm font-semibold text-gray-800 dark:text-white">{event.title}</p>
                             <p className="text-xs text-gray-500 dark:text-gray-400">
-                              <span className="font-medium">{event.userName}</span> • {new Date(event.timestamp).toLocaleDateString()}
+                              <span className="font-medium">{event.userName}</span>
+                              <span className="block text-[11px] text-gray-500 dark:text-gray-400">
+                                {new Date(event.timestamp).toLocaleString()}
+                              </span>
                               <span className="block text-[10px] text-indigo-500">
-                                {(ACTION_LABELS[event.action] || event.action.replaceAll("_", " "))} by {event.assignerName}
+                                {getFeedActionLabel(event.action)} by {event.assignerName}
                               </span>
                             </p>
                           </div>
@@ -3851,7 +4572,13 @@ const handleBulkAssign = async () => {
                   {/* ---------------- FCFS Toggle ---------------- */}
                   <div
                     className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-700 rounded-xl border border-gray-200 dark:border-gray-600 cursor-pointer"
-                    onClick={() => setBountyFCFS(!bountyFCFS)}
+                    onClick={() => {
+                      if (!bountyFCFS && bountyRecurrenceEnabled) {
+                        showToast("Recurring tasks cannot be first-come-first-served.", "error");
+                        return;
+                      }
+                      setBountyFCFS(!bountyFCFS);
+                    }}
                   >
                     <div
                       className={`w-6 h-6 rounded-md flex items-center justify-center border transition-all ${
@@ -3954,6 +4681,296 @@ const handleBulkAssign = async () => {
                       </>
                     )}
                   </div>
+
+                  {/* ---------------- Recurring Schedule ---------------- */}
+                  <div className="space-y-3">
+                    <div
+                      className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-700 rounded-xl border border-gray-200 dark:border-gray-600 cursor-pointer"
+                      onClick={() => {
+                        if (bountyFCFS) {
+                          showToast("Disable First Come First Served before enabling recurring.", "error");
+                          return;
+                        }
+                        if (!bountyRecurrenceEnabled && bountyDeadlineEnabled) {
+                          showToast("Disable deadline before enabling recurring.", "error");
+                          return;
+                        }
+                        setBountyRecurrenceEnabled(!bountyRecurrenceEnabled);
+                        if (bountyRecurrenceEnabled) {
+                          setBountyStreakEnabled(false);
+                        }
+                      }}
+                    >
+                      <div
+                        className={`w-6 h-6 rounded-md flex items-center justify-center border transition-all ${
+                          bountyRecurrenceEnabled
+                            ? "bg-indigo-600 dark:bg-indigo-500 border-indigo-600 dark:border-indigo-500"
+                            : "bg-white dark:bg-gray-600 border-gray-300 dark:border-gray-500"
+                        }`}
+                      >
+                        {bountyRecurrenceEnabled && <Check size={16} className="text-white" />}
+                      </div>
+                      <div>
+                        <p className="font-bold text-gray-800 dark:text-white text-sm">Enable recurring series</p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                          Automatically regenerate this task on a schedule.
+                        </p>
+                      </div>
+                    </div>
+
+                    {bountyRecurrenceEnabled && (
+                      <div className="space-y-3 rounded-xl border border-indigo-200 dark:border-indigo-700 p-4 bg-indigo-50/40 dark:bg-indigo-900/10">
+                        <div>
+                          <label className="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-1">
+                            Cadence
+                          </label>
+                          <select
+                            value={bountyRecurrenceCadence}
+                            onChange={(e) => setBountyRecurrenceCadence(e.target.value as RecurrenceCadence)}
+                            className="w-full border border-gray-300 dark:border-gray-600 rounded-xl px-4 py-3 bg-white dark:bg-gray-700 dark:text-white"
+                          >
+                            <option value={RecurrenceCadence.DAILY}>Daily</option>
+                            <option value={RecurrenceCadence.WEEKLY}>Weekly</option>
+                            <option value={RecurrenceCadence.MONTHLY}>Monthly</option>
+                            <option value={RecurrenceCadence.YEARLY}>Yearly</option>
+                          </select>
+                        </div>
+
+                        {bountyRecurrenceCadence === RecurrenceCadence.WEEKLY && (
+                          <div>
+                            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-1">
+                              Day of week
+                            </label>
+                            <select
+                              value={bountyRecurrenceDayOfWeek}
+                              onChange={(e) => setBountyRecurrenceDayOfWeek(e.target.value)}
+                              className="w-full border border-gray-300 dark:border-gray-600 rounded-xl px-4 py-3 bg-white dark:bg-gray-700 dark:text-white"
+                            >
+                              {WEEKDAY_OPTIONS.map((opt) => (
+                                <option key={opt.value} value={opt.value}>{opt.label}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+
+                        {(bountyRecurrenceCadence === RecurrenceCadence.MONTHLY ||
+                          bountyRecurrenceCadence === RecurrenceCadence.YEARLY) && (
+                          <>
+                            <div>
+                              <label className="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-1">
+                                Pattern
+                              </label>
+                              <div className="flex bg-gray-100 dark:bg-gray-800 p-1 rounded-xl">
+                                <button
+                                  type="button"
+                                  onClick={() => setBountyRecurrencePattern(RecurrencePattern.DAY_OF_WEEK)}
+                                  className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${
+                                    bountyRecurrencePattern === RecurrencePattern.DAY_OF_WEEK
+                                      ? "bg-white dark:bg-gray-700 shadow-sm text-indigo-600 dark:text-indigo-400"
+                                      : "text-gray-500 dark:text-gray-400"
+                                  }`}
+                                >
+                                  Day of Week
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setBountyRecurrencePattern(RecurrencePattern.DAY_OF_MONTH)}
+                                  className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${
+                                    bountyRecurrencePattern === RecurrencePattern.DAY_OF_MONTH
+                                      ? "bg-white dark:bg-gray-700 shadow-sm text-indigo-600 dark:text-indigo-400"
+                                      : "text-gray-500 dark:text-gray-400"
+                                  }`}
+                                >
+                                  Day of Month
+                                </button>
+                              </div>
+                            </div>
+
+                            {bountyRecurrenceCadence === RecurrenceCadence.YEARLY && (
+                              <div>
+                                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-1">
+                                  Month
+                                </label>
+                                <select
+                                  value={bountyRecurrenceMonthOfYear}
+                                  onChange={(e) => setBountyRecurrenceMonthOfYear(e.target.value)}
+                                  className="w-full border border-gray-300 dark:border-gray-600 rounded-xl px-4 py-3 bg-white dark:bg-gray-700 dark:text-white"
+                                >
+                                  {MONTH_OPTIONS.map((opt) => (
+                                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                  ))}
+                                </select>
+                              </div>
+                            )}
+
+                            {bountyRecurrencePattern === RecurrencePattern.DAY_OF_MONTH ? (
+                              <div>
+                                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-1">
+                                  Day of month
+                                </label>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  max="31"
+                                  value={bountyRecurrenceDayOfMonth}
+                                  onChange={(e) => setBountyRecurrenceDayOfMonth(e.target.value)}
+                                  className="w-full border border-gray-300 dark:border-gray-600 rounded-xl px-4 py-3 bg-white dark:bg-gray-700 dark:text-white"
+                                />
+                              </div>
+                            ) : (
+                              <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-1">
+                                    Week of month
+                                  </label>
+                                  <select
+                                    value={bountyRecurrenceWeekOfMonth}
+                                    onChange={(e) => setBountyRecurrenceWeekOfMonth(e.target.value)}
+                                    className="w-full border border-gray-300 dark:border-gray-600 rounded-xl px-4 py-3 bg-white dark:bg-gray-700 dark:text-white"
+                                  >
+                                    {WEEK_OF_MONTH_OPTIONS.map((opt) => (
+                                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                    ))}
+                                  </select>
+                                </div>
+                                <div>
+                                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-1">
+                                    Day of week
+                                  </label>
+                                  <select
+                                    value={bountyRecurrenceDayOfWeek}
+                                    onChange={(e) => setBountyRecurrenceDayOfWeek(e.target.value)}
+                                    className="w-full border border-gray-300 dark:border-gray-600 rounded-xl px-4 py-3 bg-white dark:bg-gray-700 dark:text-white"
+                                  >
+                                    {WEEKDAY_OPTIONS.map((opt) => (
+                                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                    ))}
+                                  </select>
+                                </div>
+                              </div>
+                            )}
+                          </>
+                        )}
+
+                        <div
+                          className="flex items-center gap-3 p-3 rounded-xl border border-indigo-200 dark:border-indigo-700 bg-white dark:bg-gray-800 cursor-pointer"
+                          onClick={() => setBountyStreakEnabled(!bountyStreakEnabled)}
+                        >
+                          <div
+                            className={`w-6 h-6 rounded-md flex items-center justify-center border transition-all ${
+                              bountyStreakEnabled
+                                ? "bg-indigo-600 dark:bg-indigo-500 border-indigo-600 dark:border-indigo-500"
+                                : "bg-white dark:bg-gray-600 border-gray-300 dark:border-gray-500"
+                            }`}
+                          >
+                            {bountyStreakEnabled && <Check size={16} className="text-white" />}
+                          </div>
+                          <div>
+                            <p className="font-bold text-gray-800 dark:text-white text-sm">Enable streak counter</p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                              Count consecutive completed recurring occurrences.
+                            </p>
+                          </div>
+                        </div>
+
+                        {bountyStreakEnabled && (
+                          <div className="space-y-3">
+                            <div className="flex items-center justify-between">
+                              <p className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                                Streak milestones (optional rewards)
+                              </p>
+                              <button
+                                type="button"
+                                onClick={addStreakMilestone}
+                                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-700"
+                              >
+                                Add milestone
+                              </button>
+                            </div>
+
+                            {bountyStreakMilestones.length === 0 && (
+                              <p className="text-xs text-gray-500 dark:text-gray-400">
+                                No milestone rewards yet. Streak can run without milestone payouts.
+                              </p>
+                            )}
+
+                            {bountyStreakMilestones.map((milestone, index) => (
+                              <div
+                                key={`${milestone.id || "new"}-${index}`}
+                                className="grid grid-cols-1 md:grid-cols-12 gap-2 items-start md:items-center rounded-xl border border-gray-200 dark:border-gray-600 p-3 bg-white dark:bg-gray-800"
+                              >
+                                <div className="md:col-span-3">
+                                  <label className="text-[11px] font-semibold uppercase text-gray-500 dark:text-gray-400">
+                                    At streak
+                                  </label>
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    value={milestone.threshold}
+                                    onChange={(e) =>
+                                      updateStreakMilestone(index, {
+                                        threshold: Number(e.target.value) || 1,
+                                      })
+                                    }
+                                    className="mt-1 w-full border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-2 text-sm bg-white dark:bg-gray-700 dark:text-white"
+                                  />
+                                </div>
+                                <div className="md:col-span-3">
+                                  <label className="text-[11px] font-semibold uppercase text-gray-500 dark:text-gray-400">
+                                    Reward type
+                                  </label>
+                                  <select
+                                    value={milestone.rewardType}
+                                    onChange={(e) =>
+                                      updateStreakMilestone(index, {
+                                        rewardType: e.target.value as "CUSTOM" | "TICKETS",
+                                        rewardValue:
+                                          e.target.value === "TICKETS"
+                                            ? `${Number(milestone.rewardValue) > 0 ? milestone.rewardValue : "10"}`
+                                            : milestone.rewardValue,
+                                      })
+                                    }
+                                    className="mt-1 w-full border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-2 text-sm bg-white dark:bg-gray-700 dark:text-white"
+                                  >
+                                    <option value="TICKETS">Tickets</option>
+                                    <option value="CUSTOM">Custom</option>
+                                  </select>
+                                </div>
+                                <div className="md:col-span-5">
+                                  <label className="text-[11px] font-semibold uppercase text-gray-500 dark:text-gray-400">
+                                    Reward value
+                                  </label>
+                                  <input
+                                    type={milestone.rewardType === "TICKETS" ? "number" : "text"}
+                                    min={milestone.rewardType === "TICKETS" ? "1" : undefined}
+                                    value={milestone.rewardValue}
+                                    onChange={(e) =>
+                                      updateStreakMilestone(index, { rewardValue: e.target.value })
+                                    }
+                                    placeholder={
+                                      milestone.rewardType === "TICKETS"
+                                        ? "e.g. 50"
+                                        : "e.g. $25 gift card"
+                                    }
+                                    className="mt-1 w-full border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-2 text-sm bg-white dark:bg-gray-700 dark:text-white"
+                                  />
+                                </div>
+                                <div className="md:col-span-1 flex justify-end md:pt-5">
+                                  <button
+                                    type="button"
+                                    onClick={() => removeStreakMilestone(index)}
+                                    className="p-2 rounded-lg bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/40"
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -4016,60 +5033,6 @@ const handleBulkAssign = async () => {
                     <Plus size={20} className="inline" /> New Item
                   </div>
                 </button>
-
-                {/* Ticket Conversion Rate Settings */}
-                <div className="bg-gradient-to-br from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20 border border-emerald-200 dark:border-emerald-700 rounded-2xl p-6">
-                    <div className="flex items-start justify-between mb-4">
-                        <div>
-                            <h3 className="text-lg font-bold text-emerald-900 dark:text-emerald-100 flex items-center gap-2">
-                                <CircleDollarSign size={20}/>
-                                Ticket Conversion Rate
-                            </h3>
-                            <p className="text-sm text-emerald-700 dark:text-emerald-300 mt-1">
-                                Set how many tickets equal $1 for reference
-                            </p>
-                        </div>
-                    </div>
-                    
-                    <div className="flex flex-col gap-4">
-                        <div className="flex items-center gap-4">
-                            <div className="flex items-center gap-2 bg-white dark:bg-gray-700 p-4 rounded-xl border border-emerald-200 dark:border-emerald-700 w-fit">
-                                <input 
-                                    type="number" 
-                                    min="1"
-                                    value={tempConversionRate}
-                                    onChange={(e) => setTempConversionRate(e.target.value)}
-                                    placeholder="10"
-                                    className="w-20 text-2xl font-bold text-emerald-600 dark:text-emerald-400 bg-transparent outline-none text-center"
-                                />
-                                <span className="text-lg font-semibold text-gray-700 dark:text-gray-300">tickets = $1</span>
-                            </div>
-                            <div className="text-sm text-emerald-700 dark:text-emerald-300 font-medium space-y-1">
-                                <div>1 ticket = ${(1 / (parseInt(tempConversionRate) || 10)).toFixed(2)}</div>
-                                <div>10 tickets = ${(10 / (parseInt(tempConversionRate) || 10)).toFixed(2)}</div>
-                                <div>100 tickets = ${(100 / (parseInt(tempConversionRate) || 10)).toFixed(2)}</div>
-                            </div>
-                        </div>
-                        {tempConversionRate !== String(currentFamily?.ticketConversionRate || 10) && (
-                            <button
-                                onClick={() => {
-                                    const val = parseInt(tempConversionRate);
-                                    if (val > 0 && currentFamily?.id) {
-                                        storageService.updateTicketConversionRate(currentFamily.id, val)
-                                            .then(() => {
-                                                setCurrentFamily({...currentFamily, ticketConversionRate: val} as Family);
-                                                showToast('Conversion rate updated', 'success');
-                                            })
-                                            .catch(err => showToast(err.message, 'error'));
-                                    }
-                                }}
-                                className="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-500 dark:hover:bg-emerald-600 text-white font-bold rounded-xl transition-all max-w-xs w-fit"
-                            >
-                                Save
-                            </button>
-                        )}
-                    </div>
-                </div>
 
                 <div>
                     <h3 className="text-lg font-bold text-gray-400 dark:text-gray-300 mb-4 flex items-center gap-2">
@@ -4169,10 +5132,10 @@ const handleBulkAssign = async () => {
 
         {/* Users Tab */}
         {tab === 'users' && (
-            <div className="space-y-6">
+            <div className="space-y-6 flex flex-col">
                 {!userFormView ? (
                     <>
-                        <div className="bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-sm border border-gray-100 dark:border-gray-700">
+                        <div className="bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-sm border border-gray-100 dark:border-gray-700 order-4">
                             <div className="flex items-start justify-between gap-4">
                                 <div>
                                     <h3 className="font-bold text-lg text-gray-800 dark:text-white flex items-center gap-2">
@@ -4227,49 +5190,280 @@ const handleBulkAssign = async () => {
                             )}
                         </div>
 
-                        <div className="bg-white dark:bg-gray-800 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-gray-700">
-                            <div className="flex justify-between items-center mb-4">
-                                <h3 className="font-bold text-lg text-gray-800 dark:text-white">Family Members</h3>
-                                <button onClick={() => handleOpenUserForm()} className="bg-indigo-600 text-white px-3 py-2 rounded-lg text-sm font-bold flex items-center gap-1"><UserPlus size={16}/> Add</button>
-                            </div>
-                            <div className="space-y-3">
-                                {users.map(u => (
-                                    <div key={u.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors cursor-pointer" onClick={() => handleOpenUserForm(u)}>
-                                        <div className="flex items-center gap-3">
-                                            {u.avatarUrl ? (
-                                                <img 
-                                                    src={u.avatarUrl} 
-                                                    alt={u.name}
-                                                    className="w-10 h-10 rounded-full object-cover border-2 border-white dark:border-gray-600"
-                                                />
-                                            ) : (
-                                                <div className={`w-10 h-10 rounded-full ${u.avatarColor} flex items-center justify-center text-white`}>
-                                                    {u.role === UserRole.ADMIN ? <Shield size={18}/> : <UserIcon size={18}/>}
+                        <div className="bg-white dark:bg-gray-800 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-gray-700 order-1 flex flex-col gap-4">
+                            <div className="order-1">
+                                <div className="flex justify-between items-center mb-4">
+                                    <h3 className="font-bold text-lg text-gray-800 dark:text-white">Family Members</h3>
+                                    <button onClick={() => handleOpenUserForm()} className="bg-indigo-600 text-white px-3 py-2 rounded-lg text-sm font-bold flex items-center gap-1"><UserPlus size={16}/> Add</button>
+                                </div>
+                                <div className="space-y-3">
+                                    {users.map(u => (
+                                        <div key={u.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors cursor-pointer" onClick={() => handleOpenUserForm(u)}>
+                                            <div className="flex items-center gap-3">
+                                                {u.avatarUrl ? (
+                                                    <img 
+                                                        src={u.avatarUrl} 
+                                                        alt={u.name}
+                                                        className="w-10 h-10 rounded-full object-cover border-2 border-white dark:border-gray-600"
+                                                    />
+                                                ) : (
+                                                    <div className={`w-10 h-10 rounded-full ${u.avatarColor} flex items-center justify-center text-white`}>
+                                                        {u.role === UserRole.ADMIN ? <Shield size={18}/> : <UserIcon size={18}/>}
+                                                    </div>
+                                                )}
+                                                <div>
+                                                    <p className="font-bold text-gray-800 dark:text-white">{u.name}</p>
+                                                    <p className="text-xs text-gray-500 dark:text-gray-400">@{u.username}</p>
                                                 </div>
-                                            )}
-                                            <div>
-                                                <p className="font-bold text-gray-800 dark:text-white">{u.name}</p>
-                                                <p className="text-xs text-gray-500 dark:text-gray-400">@{u.username}</p>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                {u.role !== UserRole.ADMIN && (
+                                                    <>
+                                                        <div className="flex items-center gap-1 px-2 py-1 bg-amber-50 dark:bg-amber-900/30 rounded-lg">
+                                                            <Ticket size={16} className="text-amber-500 dark:text-amber-400" />
+                                                            <span className="text-sm font-semibold text-amber-600 dark:text-amber-400">{u.ticketBalance || 0}</span>
+                                                        </div>
+                                                        <button onClick={(e) => {e.stopPropagation(); setViewingRewardsForUser(u.id)}} className="text-indigo-500 dark:text-indigo-400 p-2 hover:bg-indigo-100 dark:hover:bg-indigo-900/30 rounded-lg"><Gift size={18}/></button>
+                                                    </>
+                                                )}
+                                                <button className="text-gray-400 dark:text-gray-500 p-2 rounded-lg"><Settings size={18}/></button>
                                             </div>
                                         </div>
-                                        <div className="flex items-center gap-2">
-                                            {u.role !== UserRole.ADMIN && (
-                                                <>
-                                                    <div className="flex items-center gap-1 px-2 py-1 bg-amber-50 dark:bg-amber-900/30 rounded-lg">
-                                                        <Ticket size={16} className="text-amber-500 dark:text-amber-400" />
-                                                        <span className="text-sm font-semibold text-amber-600 dark:text-amber-400">{u.ticketBalance || 0}</span>
-                                                    </div>
-                                                    <button onClick={(e) => {e.stopPropagation(); setViewingRewardsForUser(u.id)}} className="text-indigo-500 dark:text-indigo-400 p-2 hover:bg-indigo-100 dark:hover:bg-indigo-900/30 rounded-lg"><Gift size={18}/></button>
-                                                </>
-                                            )}
-                                            <button className="text-gray-400 dark:text-gray-500 p-2 rounded-lg"><Settings size={18}/></button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div className="bg-gradient-to-br from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20 border border-emerald-200 dark:border-emerald-700 rounded-2xl p-6 order-2">
+                                <div className="flex items-start justify-between mb-4">
+                                    <div>
+                                        <h3 className="text-lg font-bold text-emerald-900 dark:text-emerald-100 flex items-center gap-2">
+                                            <CircleDollarSign size={20}/>
+                                            Ticket Conversion Rate
+                                        </h3>
+                                        <p className="text-sm text-emerald-700 dark:text-emerald-300 mt-1">
+                                            Set how many tickets equal $1 for reference
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div className="flex flex-col gap-4">
+                                    <div className="flex items-center gap-4">
+                                        <div className="flex items-center gap-2 bg-white dark:bg-gray-700 p-4 rounded-xl border border-emerald-200 dark:border-emerald-700 w-fit">
+                                            <input
+                                                type="number"
+                                                min="1"
+                                                value={tempConversionRate}
+                                                onChange={(e) => setTempConversionRate(e.target.value)}
+                                                placeholder="10"
+                                                className="w-20 text-2xl font-bold text-emerald-600 dark:text-emerald-400 bg-transparent outline-none text-center"
+                                            />
+                                            <span className="text-lg font-semibold text-gray-700 dark:text-gray-300">tickets = $1</span>
+                                        </div>
+                                        <div className="text-sm text-emerald-700 dark:text-emerald-300 font-medium space-y-1">
+                                            <div>1 ticket = ${(1 / (parseInt(tempConversionRate) || 10)).toFixed(2)}</div>
+                                            <div>10 tickets = ${(10 / (parseInt(tempConversionRate) || 10)).toFixed(2)}</div>
+                                            <div>100 tickets = ${(100 / (parseInt(tempConversionRate) || 10)).toFixed(2)}</div>
                                         </div>
                                     </div>
-                                ))}
+                                    {tempConversionRate !== String(currentFamily?.ticketConversionRate || 10) && (
+                                        <button
+                                            onClick={() => {
+                                                const val = parseInt(tempConversionRate);
+                                                if (val > 0 && currentFamily?.id) {
+                                                    storageService.updateTicketConversionRate(currentFamily.id, val)
+                                                        .then(() => {
+                                                            setCurrentFamily({...currentFamily, ticketConversionRate: val} as Family);
+                                                            showToast('Conversion rate updated', 'success');
+                                                        })
+                                                        .catch(err => showToast(err.message, 'error'));
+                                                }
+                                            }}
+                                            className="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-500 dark:hover:bg-emerald-600 text-white font-bold rounded-xl transition-all max-w-xs w-fit"
+                                        >
+                                            Save
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="bg-gradient-to-br from-sky-50 to-cyan-50 dark:from-sky-900/20 dark:to-cyan-900/20 border border-sky-200 dark:border-sky-700 rounded-2xl p-6 order-3">
+                                <div className="flex items-start justify-between mb-4">
+                                    <div>
+                                        <h3 className="text-lg font-bold text-sky-900 dark:text-sky-100 flex items-center gap-2">
+                                            <Clock size={20}/>
+                                            Family Timezone
+                                        </h3>
+                                        <p className="text-sm text-sky-700 dark:text-sky-300 mt-1">
+                                            Used to schedule recurring tasks and rollovers.
+                                        </p>
+                                        <p className="text-xs mt-2 text-sky-700 dark:text-sky-300">
+                                            Source:{" "}
+                                            <span className="font-semibold">
+                                                {currentFamily?.timezoneSource === "FAMILY" ? "Explicit family setting" : "Container default fallback"}
+                                            </span>
+                                        </p>
+                                    </div>
+                                </div>
+                                <div className="flex flex-col md:flex-row gap-3 md:items-center">
+                                    <select
+                                        value={tempTimezone}
+                                        onChange={(e) => setTempTimezone(e.target.value)}
+                                        className="flex-1 border border-sky-200 dark:border-sky-700 rounded-xl px-4 py-3 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                                    >
+                                        {timezoneOptions.map((tz) => (
+                                            <option key={tz} value={tz}>
+                                                {tz}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    <button
+                                        onClick={() => void handleSaveFamilyTimezone()}
+                                        disabled={isSavingTimezone || tempTimezone === (currentFamily?.timezone || "")}
+                                        className="px-6 py-3 bg-sky-600 hover:bg-sky-700 dark:bg-sky-500 dark:hover:bg-sky-600 text-white font-bold rounded-xl transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                                    >
+                                        {isSavingTimezone ? "Saving..." : "Save Timezone"}
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="bg-gradient-to-br from-indigo-50 to-violet-50 dark:from-indigo-900/20 dark:to-violet-900/20 border border-indigo-200 dark:border-indigo-700 rounded-2xl p-6 order-4">
+                                <div className="flex items-start justify-between mb-4">
+                                    <div>
+                                        <h3 className="text-lg font-bold text-indigo-900 dark:text-indigo-100 flex items-center gap-2">
+                                            <Shield size={20}/>
+                                            Quick Login Security (Your Account)
+                                        </h3>
+                                        <p className="text-sm text-indigo-700 dark:text-indigo-300 mt-1">
+                                            Manage passkeys and PIN quick login for the currently signed-in account.
+                                        </p>
+                                    </div>
+                                </div>
+
+                                {isSecurityLoading ? (
+                                    <p className="text-sm text-gray-500 dark:text-gray-400">Loading security settings...</p>
+                                ) : (
+                                    <div className="space-y-4">
+                                        <div className="p-3 rounded-xl border border-indigo-200 dark:border-indigo-700 bg-white/80 dark:bg-gray-800/70 space-y-2">
+                                            <div className="flex items-center justify-between gap-2">
+                                                <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">Passkeys</p>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => void handleAddPasskey()}
+                                                    disabled={!passkeySupported || isSecuritySaving}
+                                                    className="px-3 py-1.5 text-xs rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-60"
+                                                >
+                                                    Add Passkey
+                                                </button>
+                                            </div>
+                                            {!passkeySupported && (
+                                                <p className="text-xs text-amber-600 dark:text-amber-300">
+                                                    Passkeys unavailable on this device/browser.
+                                                </p>
+                                            )}
+                                            {passkeyList.length === 0 ? (
+                                                <p className="text-xs text-gray-500 dark:text-gray-400">No passkeys configured.</p>
+                                            ) : (
+                                                <div className="space-y-2">
+                                                    {passkeyList.map((passkey) => (
+                                                        <div key={passkey.id} className="flex items-center justify-between gap-2 text-xs">
+                                                            <div className="text-gray-700 dark:text-gray-300">
+                                                                Added {new Date(passkey.createdAt).toLocaleDateString()}
+                                                                {passkey.lastUsedAt ? ` • Last used ${new Date(passkey.lastUsedAt).toLocaleString()}` : ""}
+                                                            </div>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => void handleRemovePasskey(passkey.id)}
+                                                                disabled={isSecuritySaving}
+                                                                className="px-2 py-1 rounded-md border border-red-200 dark:border-red-700 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-60"
+                                                            >
+                                                                Remove
+                                                            </button>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        <div className="p-3 rounded-xl border border-indigo-200 dark:border-indigo-700 bg-white/80 dark:bg-gray-800/70 space-y-2">
+                                            <div className="flex items-center justify-between gap-2">
+                                                <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">PIN Quick Login (this device)</p>
+                                                {pinHealth?.localConfigured && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => void handleDisablePinQuickLogin()}
+                                                        disabled={isSecuritySaving}
+                                                        className="px-3 py-1.5 text-xs rounded-lg border border-red-200 dark:border-red-700 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-60"
+                                                    >
+                                                        Disable PIN
+                                                    </button>
+                                                )}
+                                            </div>
+                                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                                                Status: {!pinHealth?.localConfigured ? "Disabled" : pinHealth.needsRelink ? "Needs relink" : "Enabled"}.
+                                            </p>
+                                            {pinHealth?.needsRelink ? (
+                                                <>
+                                                    <input
+                                                        type="password"
+                                                        inputMode="numeric"
+                                                        maxLength={4}
+                                                        value={securityRelinkPin}
+                                                        onChange={(e) => setSecurityRelinkPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                                                        placeholder="Current PIN"
+                                                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg"
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => void handleRelinkPinQuickLogin()}
+                                                        disabled={isSecuritySaving}
+                                                        className="w-full py-2 rounded-lg bg-amber-600 text-white text-sm font-semibold hover:bg-amber-700 disabled:opacity-60"
+                                                    >
+                                                        Relink PIN
+                                                    </button>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                                        <input
+                                                            type="password"
+                                                            inputMode="numeric"
+                                                            maxLength={4}
+                                                            value={securityPin}
+                                                            onChange={(e) => setSecurityPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                                                            placeholder={devicePinEnabled ? "New PIN" : "Set PIN"}
+                                                            className="px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg"
+                                                        />
+                                                        <input
+                                                            type="password"
+                                                            inputMode="numeric"
+                                                            maxLength={4}
+                                                            value={securityPinConfirm}
+                                                            onChange={(e) => setSecurityPinConfirm(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                                                            placeholder="Confirm PIN"
+                                                            className="px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg"
+                                                        />
+                                                    </div>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => void handleSavePinQuickLogin()}
+                                                        disabled={isSecuritySaving}
+                                                        className="w-full py-2 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 disabled:opacity-60"
+                                                    >
+                                                        {devicePinEnabled ? "Update PIN" : "Enable PIN"}
+                                                    </button>
+                                                </>
+                                            )}
+                                        </div>
+
+                                        {securityError && (
+                                            <p className="text-xs text-red-600 dark:text-red-400">{securityError}</p>
+                                        )}
+                                    </div>
+                                )}
                             </div>
                         </div>
 
-                        <div className="bg-white dark:bg-gray-800 rounded-2xl p-4 shadow-sm border border-red-200 dark:border-red-900/40">
+                        <div className="bg-white dark:bg-gray-800 rounded-2xl p-4 shadow-sm border border-red-200 dark:border-red-900/40 order-5">
                             {!showSelfDeleteConfirm ? (
                                 <button
                                     onClick={handleStartSelfDelete}

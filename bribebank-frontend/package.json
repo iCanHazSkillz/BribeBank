@@ -1,7 +1,7 @@
 {
   "name": "bribebank-app",
   "private": true,
-  "version": "0.2.1",
+  "version": "0.3.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@google/genai": "^1.30.0",
+    "@simplewebauthn/browser": "^10.0.0",
     "dompurify": "^3.0.6",
     "emoji-picker-react": "^4.16.1",
     "lucide-react": "^0.554.0",

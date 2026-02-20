@@ -20,6 +20,7 @@ model Family {
   id        String    @id @default(cuid())
   name      String
   createdAt DateTime  @default(now())
+  timezone  String?
 
   joinCode       String?   @unique
   joinCodeExpiry DateTime?
@@ -33,6 +34,7 @@ model Family {
   rewards   Reward[]
   assignedPrizes    AssignedPrize[]
   bountyAssignments BountyAssignment[]
+  bountyRecurrenceSeries BountyRecurrenceSeries[]
   historyEvents     HistoryEvent[]
   storeItems        StoreItem[]
   wheelSegments     WheelSegment[]
@@ -55,6 +57,7 @@ model User {
   avatarUrl   String?    @db.Text // Optional profile picture URL (base64 data URL) - needs Text for large images
   ticketBalance Int      @default(0)
   sessionVersion Int     @default(0)
+  quickLoginPromptSeenAt DateTime?
 
   createdAt   DateTime   @default(now())
 
@@ -62,10 +65,61 @@ model User {
   claims        Claim[]
   assignedPrizes    AssignedPrize[]
   bountyAssignments BountyAssignment[]
+  bountyRecurrenceSeries BountyRecurrenceSeries[]
   historyEvents     HistoryEvent[]
   pushSubscriptions PushSubscription[] 
+  passkeyCredentials PasskeyCredential[]
+  authChallenges AuthChallenge[]
+  authDeviceTokens AuthDeviceToken[]
 
   @@index([familyId, createdAt])
+}
+
+model PasskeyCredential {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  credentialId String @unique
+  publicKey  String
+  counter    Int      @default(0)
+  transports String?
+  aaguid     String?
+  createdAt  DateTime @default(now())
+  lastUsedAt DateTime?
+
+  @@index([userId])
+}
+
+enum AuthChallengeType {
+  PASSKEY_REGISTER
+  PASSKEY_AUTH
+}
+
+model AuthChallenge {
+  id         String   @id @default(cuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type       AuthChallengeType
+  challenge  String
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime @default(now())
+
+  @@index([type, expiresAt, usedAt])
+}
+
+model AuthDeviceToken {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash   String   @unique
+  deviceKeyId String
+  createdAt   DateTime @default(now())
+  lastUsedAt  DateTime?
+  revokedAt   DateTime?
+
+  @@index([userId, revokedAt])
+  @@index([deviceKeyId, revokedAt])
 }
 
 //--------------------------------------------------
@@ -122,6 +176,18 @@ enum DenialReason {
   COMPLETED_AFTER_DEADLINE
 }
 
+enum RecurrenceCadence {
+  DAILY
+  WEEKLY
+  MONTHLY
+  YEARLY
+}
+
+enum RecurrencePattern {
+  DAY_OF_WEEK
+  DAY_OF_MONTH
+}
+
 // -----------------------------------------------------
 // BOUNTY (chores / tasks children can do)
 // -----------------------------------------------------
@@ -143,12 +209,66 @@ model Bounty {
   isFCFS     Boolean   @default(false)
   deadlineHours Int?   // Optional deadline in hours (minimum 1)
   requiresPhoto Boolean @default(false) // Whether photo proof is required before completion
+  recurrenceEnabled Boolean @default(false)
+  recurrenceCadence RecurrenceCadence?
+  recurrencePattern RecurrencePattern?
+  recurrenceDayOfWeek Int?
+  recurrenceDayOfMonth Int?
+  recurrenceWeekOfMonth Int?
+  recurrenceMonthOfYear Int?
+  streakEnabled Boolean @default(false)
 
   createdAt  DateTime  @default(now())
 
   assignments BountyAssignment[]
+  streakMilestones BountyStreakMilestone[]
+  recurrenceSeries BountyRecurrenceSeries[]
 
   @@index([familyId, createdAt])  
+}
+
+model BountyStreakMilestone {
+  id         String   @id @default(cuid())
+  bountyId   String
+  bounty     Bounty   @relation(fields: [bountyId], references: [id], onDelete: Cascade)
+  threshold  Int
+  rewardType String
+  rewardValue String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  awards BountyStreakAward[]
+
+  @@unique([bountyId, threshold])
+  @@index([bountyId])
+}
+
+model BountyRecurrenceSeries {
+  id         String   @id @default(cuid())
+  familyId   String
+  family     Family   @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  bountyId   String
+  bounty     Bounty   @relation(fields: [bountyId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignedBy String
+  active     Boolean  @default(true)
+  pausedAt   DateTime?
+  autoResumeSkipAt DateTime?
+  currentStreak Int   @default(0)
+  streakGeneration Int @default(0)
+  nextOccurrenceAt DateTime
+  currentAssignmentId String?
+  currentAssignment BountyAssignment? @relation("SeriesCurrentAssignment", fields: [currentAssignmentId], references: [id], onDelete: SetNull)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  assignments BountyAssignment[] @relation("SeriesAssignments")
+  streakAwards BountyStreakAward[]
+
+  @@unique([bountyId, userId])
+  @@index([familyId, active, pausedAt, nextOccurrenceAt])
+  @@index([active, pausedAt, autoResumeSkipAt])
 }
 
 // -----------------------------------------------------
@@ -222,6 +342,7 @@ model AssignedPrize {
   description String?
   type        PrizeType
   themeColor  String?
+  streakAwards BountyStreakAward[]
 
   @@index([familyId, userId, status])
   @@index([userId, status])
@@ -251,14 +372,45 @@ model BountyAssignment {
   denialReason DenialReason?
   denialNotes String?      // Optional parent feedback/notes on why task was denied
   deniedAt    DateTime?
+  recurrenceSeriesId String?
+  recurrenceSeries BountyRecurrenceSeries? @relation("SeriesAssignments", fields: [recurrenceSeriesId], references: [id], onDelete: SetNull)
+  seriesCurrentFor BountyRecurrenceSeries[] @relation("SeriesCurrentAssignment")
+  occurrenceStartAt DateTime?
+  streakCountAtClose Int?
+  streakGenerationAtClose Int?
   deadlineStartedAt DateTime?  // When the deadline timer started (when task was accepted)
   deadlineExpiresAt DateTime?  // Calculated deadline expiry time
   deadlineWarningNotified Boolean @default(false) // Track if 1-hour warning notification sent
   photoUrl      String?     @db.Text // Base64 image data or URL of uploaded photo proof
+  streakAwards BountyStreakAward[]
 
   @@index([familyId, userId])
   @@index([familyId, status])
+  @@index([recurrenceSeriesId])
   @@index([status, deadlineExpiresAt]) // For deadline monitoring queries
+  @@unique([recurrenceSeriesId, occurrenceStartAt])
+}
+
+model BountyStreakAward {
+  id         String   @id @default(cuid())
+  seriesId   String
+  series     BountyRecurrenceSeries @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  milestoneId String
+  milestone  BountyStreakMilestone @relation(fields: [milestoneId], references: [id], onDelete: Cascade)
+  bountyAssignmentId String
+  bountyAssignment BountyAssignment @relation(fields: [bountyAssignmentId], references: [id], onDelete: Cascade)
+  streakGeneration Int
+  threshold Int
+  rewardType String
+  rewardValue String
+  rewardAssignmentId String?
+  rewardAssignment AssignedPrize? @relation(fields: [rewardAssignmentId], references: [id], onDelete: SetNull)
+  ticketsAwarded Int?
+  createdAt DateTime @default(now())
+
+  @@unique([seriesId, milestoneId, streakGeneration])
+  @@index([bountyAssignmentId])
+  @@index([rewardAssignmentId])
 }
 
 // -----------------------------------------------------

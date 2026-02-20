@@ -15,6 +15,7 @@ import storeItemRoutes from "./routes/storeItems.js";
 import wheelRoutes from "./routes/wheel.js";
 import templateRoutes from "./routes/templates.js";
 import { startDeadlineMonitoring } from "./services/deadlineMonitor.js";
+import { startRecurrenceMonitoring } from "./services/recurrenceMonitor.js";
 
 const app = express();
 
@@ -27,17 +28,44 @@ process.on("unhandledRejection", (reason) => {
 });
 
 app.use(helmet());
-app.use(cors({
-  origin: [
-    'https://bribebank.homeflixlab.com',
-    'http://localhost:3000',  // Legacy local dev origin
-    'http://localhost:5173',  // Vite local dev origin
-    'http://127.0.0.1:5173',  // Loopback variant
-    'http://127.0.0.1:3000',  // Loopback legacy variant
-    'null'  // TWA may send null origin
-  ],
-  credentials: true
-}));
+const DEFAULT_ALLOWED_ORIGINS = [
+  "https://bribebank.homeflixlab.com",
+  "http://localhost:3000",
+  "http://localhost:5173",
+  "http://127.0.0.1:3000",
+  "http://127.0.0.1:5173",
+  "null",
+];
+
+const envAllowedOrigins = config.corsAllowedOrigins
+  .split(",")
+  .map((value) => value.trim())
+  .filter((value) => value.length > 0);
+
+const allowedOrigins = new Set([...DEFAULT_ALLOWED_ORIGINS, ...envAllowedOrigins]);
+
+const LAN_ORIGIN_REGEX =
+  /^https?:\/\/((192\.168\.\d{1,3}\.\d{1,3})|(10\.\d{1,3}\.\d{1,3}\.\d{1,3})|(172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}))(?::\d+)?$/;
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Allow non-browser or same-origin requests with no Origin header.
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+
+      if (allowedOrigins.has(origin) || LAN_ORIGIN_REGEX.test(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error(`CORS origin not allowed: ${origin}`));
+    },
+    credentials: true,
+  })
+);
 app.use(express.json({ limit: '25mb' })); // Increased limit for base64 images (avatars + task photos)
 app.use("/auth", authRoutes);
 app.use(rewardRoutes);
@@ -61,4 +89,5 @@ app.listen(config.port, () => {
     
     // Start deadline monitoring service
     startDeadlineMonitoring();
+    startRecurrenceMonitoring();
 });

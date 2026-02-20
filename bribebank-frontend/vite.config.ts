@@ -46,10 +46,18 @@ export default defineConfig(({ mode }) => {
       },
     };
     
+    const allowedHosts = (env.VITE_ALLOWED_HOSTS || "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0);
+
     return {
       server: {
         port: 3000,
         host: '0.0.0.0',
+        allowedHosts: allowedHosts.length > 0
+          ? allowedHosts
+          : ['localhost', '127.0.0.1', 'bribebankdev.homeflixlab.com'],
       },
       plugins: [react(), tailwindcss(), swTimestampPlugin, versionManifestPlugin],
       define: {

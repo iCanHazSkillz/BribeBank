@@ -25,10 +25,15 @@ Status reflects current stable implementation in this repository.
   - Resubmit-friendly denial flow
   - Optional deadlines per task
   - Optional photo proof requirement
+  - Recurring schedules (daily/weekly/monthly/yearly)
+  - Recurring-series pause/resume controls from admin activity feed
+  - Recurring task streak counters and milestone rewards
+  - Series-aware rollover behavior (incomplete occurrence replaced without base reward payout)
 - Notifications and history
   - Per-user unread notifications with read/read-all
   - Family and per-user history queries
   - Activity-feed lifecycle cards for tasks and rewards (including store-purchase reward flow)
+  - Recurring lifecycle actions for pause/resume and recurring missed occurrences
 - Push notifications
   - VAPID public key endpoint
   - Subscribe/unsubscribe endpoints
@@ -38,6 +43,7 @@ Status reflects current stable implementation in this repository.
   - Store item CRUD and purchase flow
   - Wheel segment CRUD-ish update/reset/spin flow
   - Ticket conversion rate updates
+  - Family timezone setting with container-timezone fallback (`timezoneSource`)
 - Templates
   - Export/import for rewards and bounties
 - Real-time
@@ -52,7 +58,6 @@ Status reflects current stable implementation in this repository.
 - Config-driven CORS (today it is hardcoded in backend server bootstrap)
 
 ## Roadmap ideas (not fully implemented)
-- Scheduled/recurring bounties
 - Exportable parent reports/history artifacts
 - Deeper analytics and operational observability
 

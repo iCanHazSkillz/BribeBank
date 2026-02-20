@@ -7,6 +7,7 @@ import {
   resetWheelSegments,
   spinWheel,
   updateTicketConversionRate,
+  updateFamilyTimezone,
 } from "../controllers/wheelController.js";
 
 const router = Router();
@@ -17,5 +18,6 @@ router.put("/families/:familyId/wheel-segments", authMiddleware, updateWheelSegm
 router.post("/families/:familyId/wheel-segments/reset", authMiddleware, resetWheelSegments);
 router.post("/families/:familyId/wheel-segments/spin", authMiddleware, spinWheel);
 router.put("/families/:familyId/ticket-conversion-rate", authMiddleware, updateTicketConversionRate);
+router.put("/families/:familyId/timezone", authMiddleware, updateFamilyTimezone);
 
 export default router;

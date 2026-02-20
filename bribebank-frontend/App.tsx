@@ -58,11 +58,18 @@ const App: React.FC = () => {
   const [walletBadgeCount, setWalletBadgeCount] = useState(0);
   const [adminBadgeCount, setAdminBadgeCount] = useState(0);
   const [showRecoverySetupModal, setShowRecoverySetupModal] = useState(false);
+  const [showQuickLoginSetupModal, setShowQuickLoginSetupModal] = useState(false);
+  const [quickLoginPin, setQuickLoginPin] = useState("");
+  const [quickLoginPinConfirm, setQuickLoginPinConfirm] = useState("");
+  const [quickLoginSetupError, setQuickLoginSetupError] = useState("");
+  const [isQuickLoginSetupLoading, setIsQuickLoginSetupLoading] = useState(false);
+  const [quickLoginSetupPinMode, setQuickLoginSetupPinMode] = useState(false);
   const [isGeneratingRecoveryKey, setIsGeneratingRecoveryKey] = useState(false);
   const [generatedRecoveryKey, setGeneratedRecoveryKey] = useState("");
   const [recoveryAcknowledged, setRecoveryAcknowledged] = useState(false);
   const [adminViewRefreshKey, setAdminViewRefreshKey] = useState(0);
   const staleLogoutInProgressRef = useRef(false);
+  const passkeySupported = storageService.isPasskeySupported();
 
   // allow AdminView to open a specific tab via deep-link
   const [initialAdminTab, setInitialAdminTab] = useState<string | undefined>(
@@ -510,6 +517,22 @@ const App: React.FC = () => {
     applyDeepLinkForUser(user);
 
     await storageService.registerPushNotifications();
+
+    const loginMethod = storageService.consumeLastLoginMethod();
+    if (loginMethod === "password") {
+      try {
+        const quickStatus = await storageService.getQuickLoginStatus();
+        if (quickStatus.needsInitialSetupPrompt) {
+          setQuickLoginSetupError("");
+          setQuickLoginPin("");
+          setQuickLoginPinConfirm("");
+          setQuickLoginSetupPinMode(false);
+          setShowQuickLoginSetupModal(true);
+        }
+      } catch (err) {
+        console.error("Failed to load quick login status", err);
+      }
+    }
   };
 
   const handleLogout = () => {
@@ -553,6 +576,61 @@ const App: React.FC = () => {
     setAdminViewRefreshKey((prev) => prev + 1);
     await handleUserUpdate();
     window.setTimeout(() => setInitialAdminTab(undefined), 0);
+  };
+
+  const handleQuickLoginSkip = async () => {
+    try {
+      setIsQuickLoginSetupLoading(true);
+      await storageService.markQuickLoginPromptSeen();
+      setShowQuickLoginSetupModal(false);
+    } catch (err) {
+      console.error("Failed to mark quick login prompt", err);
+      setQuickLoginSetupError("Unable to save your choice. Please try again.");
+    } finally {
+      setIsQuickLoginSetupLoading(false);
+    }
+  };
+
+  const handleQuickLoginPasskeySetup = async () => {
+    try {
+      setIsQuickLoginSetupLoading(true);
+      setQuickLoginSetupError("");
+      await storageService.registerPasskey();
+      await storageService.markQuickLoginPromptSeen();
+      setShowQuickLoginSetupModal(false);
+    } catch (err: any) {
+      console.error("Passkey setup failed", err);
+      setQuickLoginSetupError(err?.message || "Passkey setup failed. Try PIN or skip.");
+    } finally {
+      setIsQuickLoginSetupLoading(false);
+    }
+  };
+
+  const handleQuickLoginPinSetup = async () => {
+    if (!/^\d{4}$/.test(quickLoginPin)) {
+      setQuickLoginSetupError("PIN must be exactly 4 digits.");
+      return;
+    }
+    if (quickLoginPin !== quickLoginPinConfirm) {
+      setQuickLoginSetupError("PIN confirmation does not match.");
+      return;
+    }
+
+    try {
+      setIsQuickLoginSetupLoading(true);
+      setQuickLoginSetupError("");
+      await storageService.enablePinQuickLogin(quickLoginPin);
+      await storageService.markQuickLoginPromptSeen();
+      setShowQuickLoginSetupModal(false);
+      setQuickLoginPin("");
+      setQuickLoginPinConfirm("");
+      setQuickLoginSetupPinMode(false);
+    } catch (err: any) {
+      console.error("PIN setup failed", err);
+      setQuickLoginSetupError(err?.message || "PIN setup failed. Try again.");
+    } finally {
+      setIsQuickLoginSetupLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -645,7 +723,7 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen max-w-md lg:max-w-none mx-auto bg-gray-50 dark:bg-gray-900 shadow-2xl lg:shadow-none overflow-hidden relative border-x lg:border-x-0 border-gray-200 dark:border-gray-700">
+    <div className="min-h-screen max-w-md lg:max-w-none mx-auto bg-gray-50 dark:bg-gray-900 shadow-2xl lg:shadow-none overflow-x-hidden relative border-x lg:border-x-0 border-gray-200 dark:border-gray-700">
       {/* PWA Install Prompt */}
       <PwaInstallPrompt />
 
@@ -807,9 +885,105 @@ const App: React.FC = () => {
           </div>
         </div>
       )}
+      {showQuickLoginSetupModal && !showRecoverySetupModal && (
+        <div className="fixed inset-0 z-[118] bg-black/70 flex items-start lg:items-center justify-center p-3 sm:p-4 h-[100dvh] overflow-y-auto">
+          <div className="w-full max-w-xl my-4 bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden max-h-[calc(100dvh-2rem)] flex flex-col">
+            <div className="bg-gradient-to-r from-indigo-600 to-blue-600 px-6 py-5 text-white">
+              <h2 className="text-2xl font-bold">Set Up Quick Login</h2>
+              <p className="mt-1 text-indigo-50 text-sm">
+                Add passkey or PIN for faster login on your next visit.
+              </p>
+            </div>
+            <div className="p-6 space-y-4 overflow-y-auto">
+              <button
+                onClick={handleQuickLoginPasskeySetup}
+                disabled={!passkeySupported || isQuickLoginSetupLoading}
+                className="w-full py-3 rounded-xl bg-indigo-600 text-white font-semibold hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {isQuickLoginSetupLoading ? "Working..." : "Set up Passkey"}
+              </button>
+              {!passkeySupported && (
+                <p className="text-xs text-amber-600 dark:text-amber-300">
+                  Passkeys are unavailable on this browser/device. PIN remains available.
+                </p>
+              )}
+
+              {!quickLoginSetupPinMode ? (
+                <button
+                  onClick={() => {
+                    setQuickLoginSetupError("");
+                    setQuickLoginSetupPinMode(true);
+                  }}
+                  disabled={isQuickLoginSetupLoading}
+                  className="w-full py-3 rounded-xl border border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-200 font-semibold hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-60"
+                >
+                  Set up PIN
+                </button>
+              ) : (
+                <div className="space-y-3 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
+                  <p className="text-sm text-gray-700 dark:text-gray-300 font-semibold">Set PIN (4 digits)</p>
+                  <input
+                    type="password"
+                    inputMode="numeric"
+                    maxLength={4}
+                    value={quickLoginPin}
+                    onChange={(e) => setQuickLoginPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                    placeholder="Enter PIN"
+                    className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  />
+                  <input
+                    type="password"
+                    inputMode="numeric"
+                    maxLength={4}
+                    value={quickLoginPinConfirm}
+                    onChange={(e) => setQuickLoginPinConfirm(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                    placeholder="Confirm PIN"
+                    className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleQuickLoginPinSetup}
+                      disabled={isQuickLoginSetupLoading}
+                      className="flex-1 py-2 rounded-lg bg-emerald-600 text-white font-semibold hover:bg-emerald-700 disabled:opacity-60"
+                    >
+                      Save PIN
+                    </button>
+                    <button
+                      onClick={() => {
+                        setQuickLoginSetupPinMode(false);
+                        setQuickLoginPin("");
+                        setQuickLoginPinConfirm("");
+                        setQuickLoginSetupError("");
+                      }}
+                      disabled={isQuickLoginSetupLoading}
+                      className="flex-1 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-60"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {quickLoginSetupError && (
+                <p className="text-sm text-red-600 dark:text-red-400">{quickLoginSetupError}</p>
+              )}
+
+              <div className="pt-2 flex justify-end">
+                <button
+                  onClick={handleQuickLoginSkip}
+                  disabled={isQuickLoginSetupLoading}
+                  className="px-5 py-2.5 rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 font-semibold hover:opacity-95 disabled:opacity-60"
+                >
+                  Skip for now
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       
       {/* Content Area */}
-      <main className="h-full overflow-y-auto no-scrollbar lg:pt-16">
+      <main className="h-full overflow-y-auto no-scrollbar lg:pt-16 pb-24 lg:pb-0">
         {view === "admin" && currentUser.role === UserRole.ADMIN && (
           <AdminView 
             key={`admin-${currentUser.id}-${adminViewRefreshKey}`}
@@ -841,73 +1015,78 @@ const App: React.FC = () => {
       </main>
 
       {/* Bottom Navigation Bar */}
-      <nav className="fixed bottom-0 max-w-md lg:max-w-none w-full bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 flex justify-around lg:justify-center lg:gap-8 items-center py-3 pb-5 z-20 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] lg:hidden">
-        {currentUser.role === UserRole.ADMIN && (
-          <>
-            <button
-              onClick={() => setView("wallet")}
-              className={`flex flex-col items-center space-y-1 transition-colors relative ${
-                view === "wallet" ? "text-indigo-600 dark:text-indigo-400" : "text-gray-400 dark:text-gray-500"
-              }`}
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="24"
-                height="24"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <rect width="20" height="14" x="2" y="5" rx="2" />
-                <line x1="2" x2="22" y1="10" y2="10" />
-              </svg>
-              <span className="text-xs font-medium">My Wallet</span>
-              {walletBadgeCount > 0 && (
-                <span className="absolute top-0 right-1/2 translate-x-3 -translate-y-1 min-w-[18px] h-[18px] flex items-center justify-center text-[10px] font-bold rounded-full px-1 bg-red-500 text-white">
-                  {walletBadgeCount}
-                </span>
-              )}
-            </button>
-            <button
-              onClick={() => setView("admin")}
-              className={`flex flex-col items-center space-y-1 transition-colors relative ${
-                view === "admin" ? "text-indigo-600 dark:text-indigo-400" : "text-gray-400 dark:text-gray-500"
-              }`}
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="24"
-                height="24"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" />
-                <path d="m9 12 2 2 4-4" />
-              </svg>
-              <span className="text-xs font-medium">Admin</span>
-              {adminBadgeCount > 0 && (
-                <span className="absolute top-0 right-1/2 translate-x-3 -translate-y-1 min-w-[18px] h-[18px] flex items-center justify-center text-[10px] font-bold rounded-full px-1 bg-red-500 text-white">
-                  {adminBadgeCount}
-                </span>
-              )}
-            </button>
-          </>
-        )}
-
-        <button
-          onClick={handleLogout}
-          className="flex flex-col items-center space-y-1 text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 transition-colors"
+      <nav className="fixed inset-x-0 bottom-0 z-20 lg:hidden">
+        <div
+          className="mx-auto max-w-md bg-white/95 dark:bg-gray-800/95 border-t border-gray-200 dark:border-gray-700 flex justify-around items-center py-3 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] backdrop-blur"
+          style={{ paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom))" }}
         >
-          <LogOut size={24} />
-          <span className="text-xs font-medium">Log Out</span>
-        </button>
+          {currentUser.role === UserRole.ADMIN && (
+            <>
+              <button
+                onClick={() => setView("wallet")}
+                className={`flex flex-col items-center space-y-1 transition-colors relative ${
+                  view === "wallet" ? "text-indigo-600 dark:text-indigo-400" : "text-gray-400 dark:text-gray-500"
+                }`}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="24"
+                  height="24"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <rect width="20" height="14" x="2" y="5" rx="2" />
+                  <line x1="2" x2="22" y1="10" y2="10" />
+                </svg>
+                <span className="text-xs font-medium">My Wallet</span>
+                {walletBadgeCount > 0 && (
+                  <span className="absolute top-0 right-1/2 translate-x-3 -translate-y-1 min-w-[18px] h-[18px] flex items-center justify-center text-[10px] font-bold rounded-full px-1 bg-red-500 text-white">
+                    {walletBadgeCount}
+                  </span>
+                )}
+              </button>
+              <button
+                onClick={() => setView("admin")}
+                className={`flex flex-col items-center space-y-1 transition-colors relative ${
+                  view === "admin" ? "text-indigo-600 dark:text-indigo-400" : "text-gray-400 dark:text-gray-500"
+                }`}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="24"
+                  height="24"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" />
+                  <path d="m9 12 2 2 4-4" />
+                </svg>
+                <span className="text-xs font-medium">Admin</span>
+                {adminBadgeCount > 0 && (
+                  <span className="absolute top-0 right-1/2 translate-x-3 -translate-y-1 min-w-[18px] h-[18px] flex items-center justify-center text-[10px] font-bold rounded-full px-1 bg-red-500 text-white">
+                    {adminBadgeCount}
+                  </span>
+                )}
+              </button>
+            </>
+          )}
+
+          <button
+            onClick={handleLogout}
+            className="flex flex-col items-center space-y-1 text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 transition-colors"
+          >
+            <LogOut size={24} />
+            <span className="text-xs font-medium">Log Out</span>
+          </button>
+        </div>
       </nav>
     </div>
   );

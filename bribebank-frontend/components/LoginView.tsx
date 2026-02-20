@@ -1,15 +1,17 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { User } from "../types";
 import { storageService } from "../services/storageService";
 import { apiService } from "../services/apiService";
 import { Users, Lock, ArrowRight, Eye, EyeOff, KeyRound, Copy, Check } from "lucide-react";
-import BribeBankLogo from "../src/assets/BribeBankLogo.webp";
 
 interface LoginViewProps {
   onLogin: (user: User) => void;
 }
 
 export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
+  type LoginMode = "password" | "pin";
+  type QuickLoginAction = "passkey" | "pin-toggle";
+
   const [isSignUp, setIsSignUp] = useState(false);
   const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [error, setError] = useState("");
@@ -22,10 +24,89 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
   const [forgotConfirmPassword, setForgotConfirmPassword] = useState("");
   const [resetSuccessKey, setResetSuccessKey] = useState("");
   const [copied, setCopied] = useState(false);
+  const [loginMode, setLoginMode] = useState<LoginMode>("password");
+  const [showAlternateMethods, setShowAlternateMethods] = useState(false);
+  const [preferredLoginMethod] = useState<"password" | "passkey" | "pin" | null>(
+    () => storageService.getPreferredLoginMethod()
+  );
+  const [pin, setPin] = useState("");
+  const [pinInfo, setPinInfo] = useState<{
+    available: boolean;
+    locked: boolean;
+    failedAttempts: number;
+  }>({ available: false, locked: false, failedAttempts: 0 });
+  const [passkeyAvailableForUser, setPasskeyAvailableForUser] = useState(false);
+  const [isPasskeyLoading, setIsPasskeyLoading] = useState(false);
+  const [isPinLoading, setIsPinLoading] = useState(false);
+  const passkeyAutoAttemptedRef = useRef(false);
+  const [hasExistingSession] = useState<boolean>(
+    () => !!storageService.getAuthToken() || !!storageService.getCurrentUser()
+  );
 
   // Shared auth fields
-  const [username, setUsername] = useState("");
+  const [username, setUsername] = useState(() => storageService.getCachedLoginUsername() || "");
   const [password, setPassword] = useState("");
+  const passkeySupported = storageService.isPasskeySupported();
+  const pinAvailable = !isSignUp && !isForgotPassword && pinInfo.available;
+  const passkeyAvailable = !isSignUp && !isForgotPassword && passkeyAvailableForUser;
+
+  const quickLoginActions: QuickLoginAction[] = [];
+  if (passkeyAvailable) quickLoginActions.push("passkey");
+  if (pinAvailable) quickLoginActions.push("pin-toggle");
+
+  const preferredQuickAction: QuickLoginAction | null =
+    preferredLoginMethod === "passkey" && passkeyAvailable
+      ? "passkey"
+      : preferredLoginMethod === "pin" && pinAvailable
+      ? "pin-toggle"
+      : quickLoginActions[0] ?? null;
+
+  const visibleQuickActions: QuickLoginAction[] =
+    quickLoginActions.length <= 1
+      ? quickLoginActions
+      : showAlternateMethods
+      ? quickLoginActions.filter((action) => action !== preferredQuickAction)
+      : preferredQuickAction
+      ? [preferredQuickAction]
+      : [quickLoginActions[0]];
+
+  useEffect(() => {
+    if (isSignUp || isForgotPassword || !username.trim()) {
+      setPinInfo({ available: false, locked: false, failedAttempts: 0 });
+      setPasskeyAvailableForUser(false);
+      return;
+    }
+
+    const capabilities = storageService.getCachedQuickLoginCapabilities(username);
+    setPasskeyAvailableForUser(!!capabilities?.hasPasskey && passkeySupported);
+
+    let active = true;
+    void storageService
+      .getPinQuickLoginInfo(username)
+      .then((info) => {
+        if (active) {
+          setPinInfo(info);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setPinInfo({ available: false, locked: false, failedAttempts: 0 });
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [username, isSignUp, isForgotPassword, passkeySupported]);
+
+  useEffect(() => {
+    if (isSignUp || isForgotPassword) {
+      return;
+    }
+
+    setLoginMode("password");
+    setShowAlternateMethods(false);
+  }, [preferredLoginMethod, isSignUp, isForgotPassword, username]);
 
   // Sign-up only
   const [familyName, setFamilyName] = useState("");
@@ -51,6 +132,74 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
       setError(err?.message || "Invalid username or password.");
     }
   };
+
+  const handlePinLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+
+    if (!username || !pin) {
+      setError("Username and PIN are required.");
+      return;
+    }
+
+    try {
+      setIsPinLoading(true);
+      const user = await storageService.loginWithPin(username, pin);
+      setPin("");
+      onLogin(user);
+    } catch (err: any) {
+      const msg = err?.message || "PIN login failed.";
+      if (msg === "PIN_NOT_CONFIGURED") {
+        setError("PIN quick login is not enabled for this username on this device.");
+      } else if (msg === "PIN_RELINK_REQUIRED") {
+        setError("PIN needs to be re-linked. Sign in with password or passkey, then relink PIN in Settings.");
+      } else if (msg === "PIN_LOCKED_REQUIRES_FULL_LOGIN") {
+        setError("PIN is locked. Sign in with password or passkey to unlock.");
+      } else if (msg === "INVALID_PIN") {
+        setError("Invalid PIN.");
+      } else {
+        setError(msg);
+      }
+      const info = await storageService.getPinQuickLoginInfo(username).catch(() => null);
+      if (info) {
+        setPinInfo(info);
+      }
+    } finally {
+      setIsPinLoading(false);
+    }
+  };
+
+  const handlePasskeyLogin = async (isAutoAttempt = false) => {
+    setError("");
+    try {
+      setIsPasskeyLoading(true);
+      const user = await storageService.loginWithPasskey();
+      onLogin(user);
+    } catch (err: any) {
+      if (isAutoAttempt) {
+        return;
+      }
+      const msg = err?.message || "Passkey login failed.";
+      if (msg === "PASSKEY_UNAVAILABLE") {
+        setError("Passkeys are not supported on this browser/device.");
+      } else {
+        setError(msg);
+      }
+    } finally {
+      setIsPasskeyLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isSignUp || isForgotPassword) return;
+    if (preferredLoginMethod !== "passkey") return;
+    if (!passkeyAvailable) return;
+    if (hasExistingSession) return;
+    if (passkeyAutoAttemptedRef.current) return;
+
+    passkeyAutoAttemptedRef.current = true;
+    void handlePasskeyLogin(true);
+  }, [isSignUp, isForgotPassword, preferredLoginMethod, passkeyAvailable, hasExistingSession]);
 
   const handleForgotPasswordReset = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -195,12 +344,12 @@ const handleSignUp = async (e: React.FormEvent) => {
       
       <div className="bg-gray-900 w-full max-w-md rounded-3xl shadow-2xl overflow-hidden relative z-10">
         {/* Header */}
-        <div className="bg-gray-800 p-8 text-center border-b border-gray-700">
-          <div className="flex justify-center mb-4">
+        <div className="bg-gray-800 p-1 text-center border-b border-gray-700">
+          <div className="flex justify-center">
             <img
-              src={BribeBankLogo}
+              src="/icons/bribebank-notification.png"
               alt="BribeBank Logo"
-              className="w-32 h-32 object-contain drop-shadow-md"
+              className="w-32 h-32"
             />
           </div>
           <h1 className="text-3xl font-extrabold text-white tracking-tight">
@@ -220,7 +369,15 @@ const handleSignUp = async (e: React.FormEvent) => {
           )}
 
           <form
-            onSubmit={isForgotPassword ? handleForgotPasswordReset : isSignUp ? handleSignUp : handleLogin}
+            onSubmit={
+              isForgotPassword
+                ? handleForgotPasswordReset
+                : isSignUp
+                ? handleSignUp
+                : loginMode === "pin"
+                ? handlePinLogin
+                : handleLogin
+            }
             className="space-y-4"
           >
             {isSignUp && (
@@ -265,7 +422,10 @@ const handleSignUp = async (e: React.FormEvent) => {
                   autoCapitalize="none"
                   autoCorrect="off"
                   spellCheck={false}
-                  onChange={(e) => setUsername(e.target.value)}
+                  onChange={(e) => {
+                    setUsername(e.target.value);
+                    setShowAlternateMethods(false);
+                  }}
                 />
                 <Users
                   size={18}
@@ -274,7 +434,7 @@ const handleSignUp = async (e: React.FormEvent) => {
               </div>
             </div>
 
-            {!isForgotPassword && (
+            {!isForgotPassword && loginMode !== "pin" && (
             <div>
               <label className="block text-xs font-bold text-gray-300 uppercase tracking-wider mb-1">
                 Password
@@ -301,6 +461,35 @@ const handleSignUp = async (e: React.FormEvent) => {
                 </button>
               </div>
             </div>
+            )}
+
+            {!isForgotPassword && loginMode === "pin" && (
+              <div>
+                <label className="block text-xs font-bold text-gray-300 uppercase tracking-wider mb-1">
+                  PIN
+                </label>
+                <div className="relative">
+                  <input
+                    type="password"
+                    inputMode="numeric"
+                    pattern="\d{4}"
+                    maxLength={4}
+                    placeholder="••••"
+                    className="w-full p-3 pl-10 bg-gray-700 rounded-xl border border-gray-600 text-white placeholder-gray-400 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
+                    value={pin}
+                    onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                  />
+                  <Lock
+                    size={18}
+                    className="absolute left-3 top-3.5 text-gray-500"
+                  />
+                </div>
+                {pinInfo.locked && (
+                  <p className="mt-2 text-xs text-amber-300">
+                    PIN locked after 5 failed attempts. Use password or passkey login to unlock.
+                  </p>
+                )}
+              </div>
             )}
 
             {isForgotPassword && (
@@ -381,11 +570,62 @@ const handleSignUp = async (e: React.FormEvent) => {
 
             <button
               type="submit"
+              disabled={loginMode === "pin" && (isPinLoading || pinInfo.locked)}
               className="w-full py-4 mt-2 bg-indigo-600 text-white rounded-xl font-bold text-lg shadow-lg hover:bg-indigo-700 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
             >
-              {isForgotPassword ? "Reset Password" : isSignUp ? "Create Account" : "Login"}{" "}
+              {isForgotPassword
+                ? "Reset Password"
+                : isSignUp
+                ? "Create Account"
+                : loginMode === "pin"
+                ? isPinLoading
+                  ? "Unlocking..."
+                  : "Unlock with PIN"
+                : "Login"}{" "}
               <ArrowRight size={20} />
             </button>
+
+            {!isSignUp && !isForgotPassword && (
+              <>
+                {visibleQuickActions.map((action) =>
+                  action === "passkey" ? (
+                    <button
+                      key={action}
+                      type="button"
+                      onClick={() => void handlePasskeyLogin()}
+                      disabled={isPasskeyLoading}
+                      className="w-full py-3 bg-slate-700 text-white rounded-xl font-semibold hover:bg-slate-600 disabled:opacity-60 transition-colors"
+                    >
+                      {isPasskeyLoading ? "Waiting for passkey..." : "Sign in with Passkey"}
+                    </button>
+                  ) : (
+                    <button
+                      key={action}
+                      type="button"
+                      onClick={() => {
+                        setLoginMode((prev) => (prev === "pin" ? "password" : "pin"));
+                        setError("");
+                      }}
+                      className="w-full py-3 border border-gray-600 text-gray-200 rounded-xl font-semibold hover:bg-gray-700 transition-colors"
+                    >
+                      {loginMode === "pin" ? "Use Password Instead" : "Use PIN"}
+                    </button>
+                  )
+                )}
+                {quickLoginActions.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAlternateMethods((prev) => !prev);
+                      setError("");
+                    }}
+                    className="w-full text-xs text-indigo-300 hover:text-indigo-200 underline"
+                  >
+                    {showAlternateMethods ? "Show preferred sign-in method" : "Use another sign-in method"}
+                  </button>
+                )}
+              </>
+            )}
           </form>
 
           {isForgotPassword && (
@@ -430,9 +670,12 @@ const handleSignUp = async (e: React.FormEvent) => {
                 if (isForgotPassword) {
                   setIsForgotPassword(false);
                   setResetSuccessKey("");
+                  setLoginMode("password");
                 } else {
                   setIsSignUp(!isSignUp);
+                  setLoginMode("password");
                 }
+                setShowAlternateMethods(false);
                 setError("");
               }}
               className="mt-1 text-indigo-400 font-bold text-sm hover:underline flex items-center justify-center gap-1 mx-auto"
@@ -443,6 +686,8 @@ const handleSignUp = async (e: React.FormEvent) => {
               <button
                 onClick={() => {
                   setIsForgotPassword(true);
+                  setLoginMode("password");
+                  setShowAlternateMethods(false);
                   setError("");
                   setResetSuccessKey("");
                 }}

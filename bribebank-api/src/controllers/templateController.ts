@@ -66,6 +66,21 @@ const bountyToTemplateItem = (bounty: any): TemplateItem => {
     rewardType: bounty.rewardType || undefined, // Export CUSTOM or TICKETS
     rewardValue: bounty.rewardValue || undefined, // Export custom text or ticket count
     isFCFS: bounty.isFCFS || false, // Export fast grab status
+    recurrenceEnabled: bounty.recurrenceEnabled || false,
+    recurrenceCadence: bounty.recurrenceCadence || undefined,
+    recurrencePattern: bounty.recurrencePattern || undefined,
+    recurrenceDayOfWeek: bounty.recurrenceDayOfWeek ?? undefined,
+    recurrenceDayOfMonth: bounty.recurrenceDayOfMonth ?? undefined,
+    recurrenceWeekOfMonth: bounty.recurrenceWeekOfMonth ?? undefined,
+    recurrenceMonthOfYear: bounty.recurrenceMonthOfYear ?? undefined,
+    streakEnabled: bounty.streakEnabled || false,
+    streakMilestones: Array.isArray(bounty.streakMilestones)
+      ? bounty.streakMilestones.map((m: any) => ({
+          threshold: m.threshold,
+          rewardType: m.rewardType,
+          rewardValue: m.rewardValue,
+        }))
+      : undefined,
   };
 };
 
@@ -110,6 +125,11 @@ export const exportTemplate = async (req: Request, res: Response) => {
       // bounties
       const bounties = await prisma.bounty.findMany({
         where: { familyId },
+        include: {
+          streakMilestones: {
+            orderBy: { threshold: 'asc' },
+          },
+        },
       });
 
       const items: TemplateItem[] = bounties.map(bountyToTemplateItem);
@@ -235,6 +255,21 @@ export const importTemplate = async (req: Request, res: Response) => {
             rewardValue: item.rewardValue || item.cost.toString(), // Use rewardValue if available, fallback to cost
             isFCFS: item.isFCFS ?? false, // Use imported isFCFS status, default to false
             rewardType: item.rewardType || 'CUSTOM', // Use imported rewardType, default to CUSTOM
+            recurrenceEnabled: item.recurrenceEnabled ?? false,
+            recurrenceCadence: item.recurrenceCadence || null,
+            recurrencePattern: item.recurrencePattern || null,
+            recurrenceDayOfWeek:
+              item.recurrenceDayOfWeek !== undefined ? item.recurrenceDayOfWeek : null,
+            recurrenceDayOfMonth:
+              item.recurrenceDayOfMonth !== undefined ? item.recurrenceDayOfMonth : null,
+            recurrenceWeekOfMonth:
+              item.recurrenceWeekOfMonth !== undefined ? item.recurrenceWeekOfMonth : null,
+            recurrenceMonthOfYear:
+              item.recurrenceMonthOfYear !== undefined ? item.recurrenceMonthOfYear : null,
+            streakEnabled: item.streakEnabled ?? false,
+            streakMilestones: Array.isArray(item.streakMilestones)
+              ? item.streakMilestones
+              : [],
           };
 
           // Validate title is not empty after sanitization
@@ -269,8 +304,44 @@ export const importTemplate = async (req: Request, res: Response) => {
                 rewardValue: sanitizedItem.rewardValue,
                 isFCFS: sanitizedItem.isFCFS,
                 rewardType: sanitizedItem.rewardType,
+                recurrenceEnabled: sanitizedItem.recurrenceEnabled,
+                recurrenceCadence: sanitizedItem.recurrenceEnabled
+                  ? sanitizedItem.recurrenceCadence
+                  : null,
+                recurrencePattern: sanitizedItem.recurrenceEnabled
+                  ? sanitizedItem.recurrencePattern
+                  : null,
+                recurrenceDayOfWeek: sanitizedItem.recurrenceEnabled
+                  ? sanitizedItem.recurrenceDayOfWeek
+                  : null,
+                recurrenceDayOfMonth: sanitizedItem.recurrenceEnabled
+                  ? sanitizedItem.recurrenceDayOfMonth
+                  : null,
+                recurrenceWeekOfMonth: sanitizedItem.recurrenceEnabled
+                  ? sanitizedItem.recurrenceWeekOfMonth
+                  : null,
+                recurrenceMonthOfYear: sanitizedItem.recurrenceEnabled
+                  ? sanitizedItem.recurrenceMonthOfYear
+                  : null,
+                streakEnabled: sanitizedItem.recurrenceEnabled
+                  ? sanitizedItem.streakEnabled
+                  : false,
               },
             });
+            if (
+              created.recurrenceEnabled &&
+              created.streakEnabled &&
+              sanitizedItem.streakMilestones.length
+            ) {
+              await prisma.bountyStreakMilestone.createMany({
+                data: sanitizedItem.streakMilestones.map((m: any) => ({
+                  bountyId: created.id,
+                  threshold: m.threshold,
+                  rewardType: m.rewardType,
+                  rewardValue: m.rewardValue,
+                })),
+              });
+            }
             importedItems.push(created);
           }
         } catch (itemError: any) {

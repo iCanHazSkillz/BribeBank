@@ -34,6 +34,18 @@ export enum DenialReason {
   COMPLETED_AFTER_DEADLINE = 'COMPLETED_AFTER_DEADLINE',
 }
 
+export enum RecurrenceCadence {
+  DAILY = 'DAILY',
+  WEEKLY = 'WEEKLY',
+  MONTHLY = 'MONTHLY',
+  YEARLY = 'YEARLY',
+}
+
+export enum RecurrencePattern {
+  DAY_OF_WEEK = 'DAY_OF_WEEK',
+  DAY_OF_MONTH = 'DAY_OF_MONTH',
+}
+
 // New interface for Family/Tenant isolation
 export interface Family {
   id: string;
@@ -41,6 +53,8 @@ export interface Family {
   createdAt: number;
   wheelSpinCost?: number; // Spin cost in tickets
   ticketConversionRate?: number; // Tickets per dollar (e.g., 10 = 10 tickets per $1)
+  timezone?: string;
+  timezoneSource?: 'FAMILY' | 'CONTAINER_DEFAULT';
 }
 
 export interface User {
@@ -97,6 +111,22 @@ export interface BountyTemplate {
   themeColor?: string | null;
   deadlineHours?: number | null; // Optional deadline in hours
   requiresPhoto?: boolean; // Whether photo proof is required
+  recurrenceEnabled?: boolean;
+  recurrenceCadence?: RecurrenceCadence | null;
+  recurrencePattern?: RecurrencePattern | null;
+  recurrenceDayOfWeek?: number | null;
+  recurrenceDayOfMonth?: number | null;
+  recurrenceWeekOfMonth?: number | null;
+  recurrenceMonthOfYear?: number | null;
+  streakEnabled?: boolean;
+  streakMilestones?: BountyStreakMilestone[];
+}
+
+export interface BountyStreakMilestone {
+  id?: string;
+  threshold: number;
+  rewardType: 'CUSTOM' | 'TICKETS';
+  rewardValue: string;
 }
 
 export interface AssignedBounty {
@@ -116,6 +146,16 @@ export interface AssignedBounty {
   deadlineExpiresAt?: number | null;
   deadlineWarningNotified?: boolean;
   photoUrl?: string | null; // Base64 image data or URL of uploaded photo proof
+  recurrenceSeriesId?: string | null;
+  seriesActive?: boolean;
+  seriesPaused?: boolean;
+  seriesPausedAt?: number | null;
+  seriesAutoResumeSkipAt?: number | null;
+  currentStreak?: number;
+  streakEnabled?: boolean;
+  isRecurring?: boolean;
+  nextOccurrenceAt?: number | null;
+  isCurrentOccurrence?: boolean;
 }
 
 // STORE INTERFACES

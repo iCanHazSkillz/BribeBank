@@ -27,6 +27,19 @@ export const TemplateItemSchema = z.object({
   rewardType: z.enum(['CUSTOM', 'TICKETS']).optional(), // For bounties: CUSTOM or TICKETS
   rewardValue: z.string().optional(), // For bounties: the custom text or ticket count
   isFCFS: z.boolean().optional(), // For bounties: fast grab/first come first served
+  recurrenceEnabled: z.boolean().optional(),
+  recurrenceCadence: z.enum(['DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY']).optional(),
+  recurrencePattern: z.enum(['DAY_OF_WEEK', 'DAY_OF_MONTH']).optional(),
+  recurrenceDayOfWeek: z.number().int().min(0).max(6).optional(),
+  recurrenceDayOfMonth: z.number().int().min(1).max(31).optional(),
+  recurrenceWeekOfMonth: z.number().int().min(1).max(5).optional(),
+  recurrenceMonthOfYear: z.number().int().min(1).max(12).optional(),
+  streakEnabled: z.boolean().optional(),
+  streakMilestones: z.array(z.object({
+    threshold: z.number().int().min(1),
+    rewardType: z.enum(['CUSTOM', 'TICKETS']),
+    rewardValue: z.string().min(1),
+  })).optional(),
 }).passthrough(); // Allow extra fields
 
 // Validation schema for rewards export/import
