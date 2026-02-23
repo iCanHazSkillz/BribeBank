@@ -1,26 +1,35 @@
 {
   "latest": {
-    "title": "New Recurring Tasks, Streaks Can Earn You Extra Rewards, And More!",
-    "date": "2026-02-20",
+    "title": "Reward Claim Reliability and Lifecycle Stability",
+    "date": "2026-02-23",
     "features": [
-      "New Recurring task series can now be enabled per task template.",
-      "New Quick login via Passkey or PIN is now supported for faster family access."
+      "Reward cards now lock actions while requests are processing to prevent accidental repeat taps."
     ],
     "improvements": [
-      "Renamed the Family Tab to Settings for more intuitive navigation and clarity.",
-      "Added family timezone configuration in Settings tab with smart defaults for better scheduling and consistency across timezones.",
-      "Redesigned app icons and splash screens for a fresh new look.",
-      "Better caching of credentials for easier login experiences, especially on mobile.",
-      "Added date and time to notifications for better context on recent activity.",
-      "Moved Ticket Conversion Rate to Settings tab",
-      "Added account security options to Settings tab for passkey and PIN login management."
+      "Reward lifecycle transitions are now guarded for stronger consistency under retries and unstable connections.",
+      "Wallet reward action feedback now clearly shows when an action is in progress."
     ],
     "fixes": [
-      "Fixed activity feed wording on sender and receiver when sending tickets to a child.",
-      "Fixed app icon not updating on Android after the latest release."
+      "Fixed duplicate reward claim activity events and parent notifications caused by near-simultaneous claim requests.",
+      "Fixed reward approve, reject, and cancel race conditions that could generate duplicate lifecycle side effects."
     ]
   },
   "releases": {
+    "0.3.2": {
+      "title": "Reward Claim Reliability and Lifecycle Stability",
+      "date": "2026-02-23",
+      "features": [
+        "Reward cards now lock actions while requests are processing to prevent accidental repeat taps."
+      ],
+      "improvements": [
+        "Reward lifecycle transitions are now guarded for stronger consistency under retries and unstable connections.",
+        "Wallet reward action feedback now clearly shows when an action is in progress."
+      ],
+      "fixes": [
+        "Fixed duplicate reward claim activity events and parent notifications caused by near-simultaneous claim requests.",
+        "Fixed reward approve, reject, and cancel race conditions that could generate duplicate lifecycle side effects."
+      ]
+    },
     "0.3.1": {
       "title": "New Recurring Tasks, Streaks Can Earn You Extra Rewards, And More!",
       "date": "2026-02-20",
@@ -43,8 +52,7 @@
         "Fixed activity feed wording on sender and receiver when sending tickets to a child.",
         "Fixed app icon not updating on Android after the latest release."
       ]
-  },
-  "releases": {
+    },
     "0.3.0": {
       "title": "New Recurring Tasks, Streaks Can Earn You Extra Rewards, And More!",
       "date": "2026-02-20",

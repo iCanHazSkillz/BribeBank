@@ -240,6 +240,7 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab,
   const [showAccountSettings, setShowAccountSettings] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [showScrollTop, setShowScrollTop] = useState(false);
+  const [rewardActionInFlightIds, setRewardActionInFlightIds] = useState<Set<string>>(new Set());
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const { theme, toggleTheme } = useTheme();
 
@@ -517,8 +518,24 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab,
     return value;
   };
 
+  const setRewardActionInFlight = (assignmentId: string, inFlight: boolean) => {
+    setRewardActionInFlightIds((prev) => {
+      const next = new Set(prev);
+      if (inFlight) {
+        next.add(assignmentId);
+      } else {
+        next.delete(assignmentId);
+      }
+      return next;
+    });
+  };
+
   // Actions
   const handleClaim = async (assignmentId: string) => {
+    if (rewardActionInFlightIds.has(assignmentId)) {
+      return;
+    }
+    setRewardActionInFlight(assignmentId, true);
     try {
       await storageService.claimPrize(assignmentId);
       setToast({
@@ -532,6 +549,8 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab,
         message: "Failed to claim prize. Please try again.",
         type: "error",
       });
+    } finally {
+      setRewardActionInFlight(assignmentId, false);
     }
   };
 
@@ -923,6 +942,10 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab,
   };
 
   const handleCancelClaim = async (assignmentId: string) => {
+    if (rewardActionInFlightIds.has(assignmentId)) {
+      return;
+    }
+
     const ok = await confirm({
       title: "Cancel Card Use?",
       message:
@@ -934,6 +957,7 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab,
 
     if (!ok) return;
 
+    setRewardActionInFlight(assignmentId, true);
     try {
       await storageService.cancelPrizeClaim(assignmentId);
       setToast({
@@ -950,6 +974,8 @@ export const WalletView: React.FC<WalletViewProps> = ({ currentUser, initialTab,
         message: "Failed to cancel card use. Please try again.",
         type: "error",
       });
+    } finally {
+      setRewardActionInFlight(assignmentId, false);
     }
   };
 
@@ -1696,37 +1722,48 @@ const groupedPrizes: GroupedPrize[] = Object.values(
               </div>
             ) : (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                {filteredGroupedPrizes.map(group => (
-                  <div key={`${group.templateId}-${group.status}`} className="relative">
+                {filteredGroupedPrizes.map((group) => {
+                  const assignmentId = group.ids[0];
+                  const isRewardActionInFlight =
+                    rewardActionInFlightIds.has(assignmentId);
+
+                  return (
+                    <div key={`${group.templateId}-${group.status}`} className="relative">
                       <PrizeCard
-                      {...group.template}
-                      status={group.status}
-                      count={group.count}
-                      assignedBy={group.assignedBy}
-                      actionLabel={
-                        group.status === PrizeStatus.AVAILABLE
-                          ? "Use Card"
-                          : group.status === PrizeStatus.PENDING_APPROVAL
-                          ? "Cancel Use"
-                          : "Waiting..."
-                      }
-                      onClick={
-                        group.status === PrizeStatus.AVAILABLE
-                          ? () => handleClaim(group.ids[0])
-                          : group.status === PrizeStatus.PENDING_APPROVAL
-                          ? () => void handleCancelClaim(group.ids[0])
-                          : undefined
-                      }
-                      disabled={
-                        group.status !== PrizeStatus.AVAILABLE &&
-                        group.status !== PrizeStatus.PENDING_APPROVAL
-                      }
+                        {...group.template}
+                        status={group.status}
+                        count={group.count}
+                        assignedBy={group.assignedBy}
+                        actionLabel={
+                          isRewardActionInFlight
+                            ? "Working..."
+                            : group.status === PrizeStatus.AVAILABLE
+                            ? "Use Card"
+                            : group.status === PrizeStatus.PENDING_APPROVAL
+                            ? "Cancel Use"
+                            : "Waiting..."
+                        }
+                        onClick={
+                          isRewardActionInFlight
+                            ? undefined
+                            : group.status === PrizeStatus.AVAILABLE
+                            ? () => handleClaim(assignmentId)
+                            : group.status === PrizeStatus.PENDING_APPROVAL
+                            ? () => void handleCancelClaim(assignmentId)
+                            : undefined
+                        }
+                        disabled={
+                          isRewardActionInFlight ||
+                          (group.status !== PrizeStatus.AVAILABLE &&
+                            group.status !== PrizeStatus.PENDING_APPROVAL)
+                        }
                       />
                       {group.status === PrizeStatus.AVAILABLE && (
-                          <div className="text-xs text-gray-400 dark:text-gray-500 text-center mt-1 mb-2">Assigned by {group.assignedBy}</div>
+                        <div className="text-xs text-gray-400 dark:text-gray-500 text-center mt-1 mb-2">Assigned by {group.assignedBy}</div>
                       )}
-                  </div>
-                ))}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </>

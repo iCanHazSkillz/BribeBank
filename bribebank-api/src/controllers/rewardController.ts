@@ -372,13 +372,29 @@ export const claimAssignedPrize = async (req: Request, res: Response) => {
       return res.status(400).json({ error: "INVALID_STATUS" });
     }
 
-    const updated = await prisma.assignedPrize.update({
-      where: { id },
+    const claimTransition = await prisma.assignedPrize.updateMany({
+      where: {
+        id,
+        status: PrizeStatus.AVAILABLE,
+      },
       data: {
         status: PrizeStatus.PENDING_APPROVAL,
         claimedAt: new Date(),
       },
     });
+
+    // Guard against concurrent duplicate claim requests.
+    if (claimTransition.count === 0) {
+      return res.status(400).json({ error: "INVALID_STATUS" });
+    }
+
+    const updated = await prisma.assignedPrize.findUnique({
+      where: { id },
+    });
+
+    if (!updated) {
+      return res.status(404).json({ error: "NOT_FOUND" });
+    }
 
     const childName =
       user.displayName || user.username || "Child";
@@ -492,6 +508,36 @@ export const cancelClaimedPrize = async (req: Request, res: Response) => {
       let refundAmount = 0;
 
       if (isStorePurchase) {
+        // Store purchases are one-time purchase requests.
+        // On child cancel we refund and remove the pending assignment so it cannot be reused for free.
+        const removed = await tx.assignedPrize.deleteMany({
+          where: {
+            id,
+            status: PrizeStatus.PENDING_APPROVAL,
+          },
+        });
+
+        if (removed.count === 0) {
+          throw { status: 400, error: "INVALID_STATUS" };
+        }
+      } else {
+        const cancellation = await tx.assignedPrize.updateMany({
+          where: {
+            id,
+            status: PrizeStatus.PENDING_APPROVAL,
+          },
+          data: {
+            status: PrizeStatus.AVAILABLE,
+            claimedAt: null,
+          },
+        });
+
+        if (cancellation.count === 0) {
+          throw { status: 400, error: "INVALID_STATUS" };
+        }
+      }
+
+      if (isStorePurchase) {
         const storeItem = await tx.storeItem.findFirst({
           where: {
             familyId: assignment.familyId,
@@ -531,22 +577,6 @@ export const cancelClaimedPrize = async (req: Request, res: Response) => {
           },
           tx
         );
-      }
-
-      if (isStorePurchase) {
-        // Store purchases are one-time purchase requests.
-        // On child cancel we refund and remove the pending assignment so it cannot be reused for free.
-        await tx.assignedPrize.delete({
-          where: { id },
-        });
-      } else {
-        await tx.assignedPrize.update({
-          where: { id },
-          data: {
-            status: PrizeStatus.AVAILABLE,
-            claimedAt: null,
-          },
-        });
       }
 
       await addHistoryEvent(
@@ -620,13 +650,28 @@ export const approveAssignedPrize = async (req: Request, res: Response) => {
       return res.status(400).json({ error: "INVALID_STATUS" });
     }
 
-    const updated = await prisma.assignedPrize.update({
-      where: { id },
+    const approval = await prisma.assignedPrize.updateMany({
+      where: {
+        id,
+        status: PrizeStatus.PENDING_APPROVAL,
+      },
       data: {
         status: PrizeStatus.REDEEMED,
         redeemedAt: new Date(),
       },
     });
+
+    if (approval.count === 0) {
+      return res.status(400).json({ error: "INVALID_STATUS" });
+    }
+
+    const updated = await prisma.assignedPrize.findUnique({
+      where: { id },
+    });
+
+    if (!updated) {
+      return res.status(404).json({ error: "NOT_FOUND" });
+    }
 
     const childName = updated.assignedBy || "Child";
     const title = assignment.title || "Reward";
@@ -749,13 +794,28 @@ export const rejectAssignedPrize = async (req: Request, res: Response) => {
       }
     }
 
-    const updated = await prisma.assignedPrize.update({
-      where: { id },
+    const rejection = await prisma.assignedPrize.updateMany({
+      where: {
+        id,
+        status: PrizeStatus.PENDING_APPROVAL,
+      },
       data: {
         status: PrizeStatus.AVAILABLE,
         claimedAt: null,
       },
     });
+
+    if (rejection.count === 0) {
+      return res.status(400).json({ error: "INVALID_STATUS" });
+    }
+
+    const updated = await prisma.assignedPrize.findUnique({
+      where: { id },
+    });
+
+    if (!updated) {
+      return res.status(404).json({ error: "NOT_FOUND" });
+    }
     
     // Refund tickets if it's a store purchase
     if (isStorePurchase && refundAmount > 0) {
